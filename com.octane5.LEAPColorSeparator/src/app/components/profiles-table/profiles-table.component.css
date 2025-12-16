@@ -1,0 +1,51 @@
+.profiles-list {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	overflow-y: auto;
+	padding-right: 4px;
+}
+
+.profiles-row {
+	padding: 4px 4px;
+	border-radius: 4px;
+	background: rgba(255, 255, 255, 0.04);
+}
+
+.profiles-row:hover {
+	background: rgba(255, 255, 255, 0.08);
+}
+
+.profiles-row .row-name {
+	font-size: 11px;
+	color: #fdfdfd;
+	font-family: 'Adobe Clean', sans-serif;
+}
+
+.row-actions {
+	gap: 4px;
+}
+
+.row-action-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 18px;
+	height: 18px;
+	background: transparent;
+	border: none;
+	color: #d0d0d0;
+	border-radius: 4px;
+	cursor: pointer;
+}
+
+.row-action-button:hover {
+	background: rgba(255, 255, 255, 0.12);
+	color: #ffffff;
+}
+
+.row-action-button .material-icons {
+	font-size: 16px;
+	line-height: 1;
+	color: inherit;
+}

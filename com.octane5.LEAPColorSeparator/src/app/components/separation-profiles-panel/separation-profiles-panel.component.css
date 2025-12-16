@@ -1,0 +1,37 @@
+.separation-profiles-panel {
+	display: flex;
+	flex-direction: column;
+	padding: 8px;
+	background: rgba(28, 28, 30, 0.9);
+	border-radius: 6px;
+	gap: 8px;
+	min-height: 360px;
+}
+
+.profiles-table-header {
+	padding: 6px 0;
+	border-top: 1px solid rgba(255, 255, 255, 0.08);
+	border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.profiles-table-title {
+	font-size: 12px;
+	font-weight: 600;
+	color: #f5f5f5;
+	letter-spacing: 0.05em;
+	font-family: 'Adobe Clean', sans-serif;
+}
+
+.profiles-table-add {
+	font-size: 11px;
+	color: rgba(255, 255, 255, 0.9);
+	background: transparent;
+	border: none;
+	cursor: pointer;
+	text-decoration: underline;
+	font-family: 'Adobe Clean', sans-serif;
+}
+
+.profiles-table-add:hover {
+	opacity: 0.8;
+}

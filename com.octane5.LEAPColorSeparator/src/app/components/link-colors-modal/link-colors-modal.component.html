@@ -1,0 +1,32 @@
+<div *ngIf="isOpen" class="modal-overlay" (mousedown)="onOverlayClick($event)" (click)="onOverlayClick($event)">
+	<div class="link-colors-modal-container" (mousedown)="onOverlayClick($event)" (click)="onOverlayClick($event)">
+		<div class="modal-header">
+			<h3 class="modal-title">Link colors to graphic</h3>
+		</div>
+
+		<div class="modal-body">
+			<div class="graphic-label">
+				Graphic: {{ graphicName }}
+			</div>
+
+			<div class="colors-list">
+				<div *ngIf="isLoadingColors" class="no-colors-message">Loading colors...</div>
+				<div *ngIf="!isLoadingColors && availableColors.length === 0" class="no-colors-message">No colors available</div>
+				<ng-container *ngIf="!isLoadingColors && availableColors.length > 0">
+					<div *ngFor="let colorCode of availableColors" class="color-checkbox-item">
+						<app-checkbox
+							[checked]="selectedColorCodes.includes(colorCode)"
+							[label]="colorCode"
+							(change)="onColorToggle(colorCode)"
+						></app-checkbox>
+					</div>
+				</ng-container>
+			</div>
+		</div>
+
+		<div class="modal-footer">
+			<app-button variant="secondary" (click)="onCancel()">Cancel</app-button>
+			<app-button variant="primary" (click)="onOk()">OK</app-button>
+		</div>
+	</div>
+</div>

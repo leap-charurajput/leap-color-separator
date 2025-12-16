@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="Layer_2" data-name="Layer 2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 83.53 17.65">
+  <defs>
+    <style>
+      .cls-1 {
+        fill: #f89521;
+        stroke: #fff;
+        stroke-miterlimit: 10;
+        stroke-width: .5px;
+      }
+    </style>
+  </defs>
+  <g id="ICONS_PERSPECTIVE" data-name="ICONS PERSPECTIVE">
+    <path class="cls-1" d="M1.79,17.4h65.37c1.29,0,2.77-.52,3.32-1.16l3.61-4.25c.55-.64-.05-1.16-1.34-1.16,0,0-43.88-1.1-44.96-1.1s-1.29-.31-.76-.93c.53-.62,1.32-.87,2.29-.87s47.19-1.52,47.19-1.52c1.29,0,2.77-.52,3.32-1.16l3.25-3.82c.55-.64-.05-1.16-1.34-1.16H16.37c-1.29,0-2.77.52-3.32,1.16L.45,16.23c-.55.64.05,1.16,1.34,1.16Z"/>
+  </g>
+</svg>

@@ -1,0 +1,310 @@
+/* Layer Stack Visualization Component Styles - Dark Theme Only */
+
+.layer-stack-container {
+	position: relative;
+	width: 100%;
+	padding: 12px;
+	background: rgba(255, 255, 255, 0.03);
+	border: 1px solid rgba(255, 255, 255, 0.05);
+	border-radius: 8px;
+	margin-top: 10px;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	align-items: stretch;
+	min-width: 0;
+	box-sizing: border-box;
+	z-index: 1;
+}
+
+.stack-title {
+	position: absolute;
+	top: 8px;
+	left: 12px;
+	font-family: 'Adobe Clean', sans-serif;
+	font-size: 11px;
+	font-weight: 600;
+	color: #888;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+}
+
+.garment-selector {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 3px;
+	padding: 2px 2px 2px 2px;
+	margin-left: 40px;
+}
+
+.garment-button {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 4px 2px;
+	border-radius: 4px;
+	border: 1px solid rgba(255, 255, 255, 0.05);
+	background: transparent;
+	cursor: pointer;
+	font-family: 'Adobe Clean', sans-serif;
+	font-size: 10px;
+	color: #ccc;
+	transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+
+.garment-button:hover {
+	background: rgba(255, 255, 255, 0.08);
+	transform: translateY(-1px);
+}
+
+.garment-button.active {
+	border-color: rgba(135, 206, 250, 0.9);
+	background: rgba(135, 206, 250, 0.1);
+}
+
+.garment-button-icon {
+	width: 18px;
+	height: 18px;
+	object-fit: contain;
+}
+
+.garment-button-label {
+	white-space: nowrap;
+}
+
+.layer-stack-visualization {
+	position: relative;
+	width: 140px;
+	min-width: 120px;
+	max-width: 140px;
+	flex-shrink: 0;
+}
+
+/* Base Garment (T-shirt) */
+.garment-base {
+	position: absolute;
+	bottom: 0;
+	left: 50%;
+	transform: translateX(-50%);
+	width: 120px;
+	height: auto;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 0;
+}
+
+.garment-svg {
+	width: 100%;
+	height: auto;
+	filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.3));
+}
+
+/* Stacked Layers */
+.layers-stack {
+	position: absolute;
+	width: 100%;
+	height: 100%;
+	pointer-events: none;
+}
+
+.color-layer-wrapper {
+	position: absolute;
+	left: 50%;
+	transform: translateX(-50%);
+	width: 110px;
+	height: auto;
+	transition: all 0.3s ease;
+}
+
+.color-layer-wrapper:hover {
+	transform: translateX(-50%) translateY(-2px);
+	filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.4));
+}
+
+.color-layer-wrapper.base-rectangle {
+	pointer-events: none;
+}
+
+.color-layer-wrapper.base-rectangle:hover {
+	transform: translateX(-50%);
+	filter: none;
+}
+
+.color-layer-svg {
+	width: 100%;
+	height: auto;
+	display: block;
+	filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.3));
+}
+
+.base-rectangle-svg {
+	width: 100%;
+	height: auto;
+	display: block;
+}
+
+/* 4 continuous vertical corner lines running through all layers */
+.vertical-corner-line {
+	position: absolute;
+	border-left: 2px dashed rgba(135, 206, 250, 1);
+	width: 0;
+	z-index: 1;
+	pointer-events: none;
+}
+
+/* Calculate positions based on SVG viewBox (0 0 59.99 14.72) and 110px width */
+/* Scale factor: 110 / 59.99 ≈ 1.834px per unit */
+/* SVG corners: left-front (0.55), left-back (12.82), right-front (47.17), right-back (59.44) */
+/* Left front corner (x=0.55): 0.55 * 1.834 ≈ 1.01px */
+.corner-line-left-front {
+	left: calc(50% - 55px + 1.01px);
+}
+
+/* Left back corner (x=12.82): 12.82 * 1.834 ≈ 23.51px */
+.corner-line-left-back {
+	left: calc(50% - 55px + 23.51px);
+}
+
+/* Right front corner (x=47.17): 47.17 * 1.834 ≈ 86.51px */
+.corner-line-right-front {
+	left: calc(50% - 55px + 86.51px);
+}
+
+/* Right back corner (x=59.44): 59.44 * 1.834 ≈ 109.02px */
+.corner-line-right-back {
+	left: calc(50% - 55px + 109.02px);
+}
+
+/* Labels Section */
+.layer-labels {
+	position: relative;
+	flex: 1;
+	min-width: 120px;
+	overflow: visible;
+}
+
+.label-item {
+	position: absolute;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-family: 'Adobe Clean', sans-serif;
+	font-size: 11px;
+	transition: all 0.2s ease;
+	padding: 3px 6px;
+	border-radius: 4px;
+	width: auto;
+	min-width: 0;
+	transform: translateY(-8px);
+	color: #ccc;
+}
+
+.label-item:hover {
+	background: rgba(255, 255, 255, 0.08);
+}
+
+.label-item.garment-label {
+	font-weight: 600;
+	color: #999;
+}
+
+.label-color-indicator {
+	width: 12px;
+	height: 12px;
+	border-radius: 2px;
+	border: 1px solid rgba(255, 255, 255, 0.2);
+	flex-shrink: 0;
+}
+
+.label-text {
+	flex: 1;
+	min-width: 0;
+	white-space: nowrap;
+	overflow: visible;
+	text-overflow: ellipsis;
+}
+
+.label-icons {
+	display: flex;
+	gap: 6px;
+	align-items: center;
+}
+
+.label-icons .small-icon {
+	font-size: 11px;
+	opacity: 0.8;
+}
+
+/* Responsive adjustments for narrow panels (400px width) */
+@media (max-width: 450px) {
+	.layer-stack-container {
+		flex-direction: row;
+		align-items: flex-end;
+		padding: 10px;
+		gap: 8px;
+	}
+
+	.layer-stack-visualization {
+		width: 120px;
+		min-width: 100px;
+		max-width: 120px;
+		flex-shrink: 0;
+	}
+
+	.garment-base {
+		width: 100px;
+	}
+
+	.color-layer-wrapper {
+		width: 95px;
+	}
+
+	.layer-labels {
+		flex: 1;
+		min-width: 0;
+		height: auto;
+	}
+
+	.label-item {
+		gap: 4px;
+		padding: 2px 4px;
+		font-size: 10px;
+		min-width: 0;
+	}
+
+	.label-text {
+		font-size: 10px;
+		min-width: 0;
+		overflow: visible;
+		white-space: nowrap;
+	}
+
+	.label-icons {
+		gap: 4px;
+	}
+
+	.stack-title {
+		left: 10px;
+		top: 6px;
+		font-size: 10px;
+	}
+
+	/* Adjust corner lines for smaller width (95px) */
+	/* Scale factor: 95 / 59.99 ≈ 1.584px per unit */
+	.corner-line-left-front {
+		left: calc(50% - 47.5px + 0.87px);
+	}
+
+	.corner-line-left-back {
+		left: calc(50% - 47.5px + 20.31px);
+	}
+
+	.corner-line-right-front {
+		left: calc(50% - 47.5px + 74.72px);
+	}
+
+	.corner-line-right-back {
+		left: calc(50% - 47.5px + 94.15px);
+	}
+}

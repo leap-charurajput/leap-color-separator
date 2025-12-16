@@ -1,0 +1,457 @@
+/* Separation Colors Component Styles */
+/* Matches React Plates page styling with medium-dark theme */
+
+/* Border utility class - medium-dark theme */
+.border-1 {
+	border: 1px solid #ffffff;
+}
+
+.separation-colors-table-container {
+	height: 200px;
+	max-height: 200px;
+	min-height: 150px;
+	overflow-y: auto;
+	overflow-x: hidden;
+	margin-bottom: 10px;
+	position: relative;
+	border-radius: 8px;
+	width: 100%;
+	box-sizing: border-box;
+}
+
+/* Make sure table header doesn't scroll */
+.separation-colors-table-container .thRow {
+	position: sticky;
+	top: 0;
+	background-color: #5f5f5f;
+	z-index: 1;
+}
+
+.separation-colors-table-container::-webkit-scrollbar {
+	width: 8px;
+}
+
+.separation-colors-table-container::-webkit-scrollbar-track {
+	background: rgba(0, 0, 0, 0.1);
+	border-radius: 4px;
+}
+
+.separation-colors-table-container::-webkit-scrollbar-thumb {
+	background: rgba(255, 255, 255, 0.2);
+	border-radius: 4px;
+}
+
+.separation-colors-table-container::-webkit-scrollbar-thumb:hover {
+	background: rgba(255, 255, 255, 0.3);
+}
+
+/* Drag and Drop Styles */
+.exportFieldTable .row {
+	transition: opacity 0.2s ease, transform 0.1s ease;
+	pointer-events: auto;
+}
+
+.exportFieldTable .row:hover {
+	background-color: rgba(255, 255, 255, 0.02);
+}
+
+.exportFieldTable .row[draggable="true"] {
+	user-select: none;
+}
+
+.exportFieldTable .row[draggable="true"]:active {
+	cursor: grabbing !important;
+}
+
+.exportFieldTable .row.dragging {
+	opacity: 0.5;
+	transform: scale(0.98);
+}
+
+.exportFieldTable .row.drag-over {
+	border-top: 2px solid #1473e6;
+}
+
+/* Removed Row Styles */
+.exportFieldTable .row.removed-row {
+	pointer-events: none !important;
+	cursor: not-allowed !important;
+}
+
+/* All text content - force consistent opacity */
+.exportFieldTable .row.removed-row,
+.exportFieldTable .row.removed-row *,
+.exportFieldTable .row.removed-row span,
+.exportFieldTable .row.removed-row .col,
+.exportFieldTable .row.removed-row .col span {
+	opacity: 0.6 !important;
+	color: inherit !important;
+}
+
+/* Icons */
+.exportFieldTable .row.removed-row .icon-DRAG,
+.exportFieldTable .row.removed-row .icon-flash,
+.exportFieldTable .row.removed-row .icon-cool,
+.exportFieldTable .row.removed-row .icon-wb,
+.exportFieldTable .row.removed-row .icon-colorIcon,
+.exportFieldTable .row.removed-row .squareColorIcon,
+.exportFieldTable .row.removed-row .fieldIcon {
+	opacity: 0.5 !important;
+	filter: grayscale(80%);
+}
+
+/* Flash, Cool, and WB icons - font size 16px (matching React) */
+.exportFieldTable .icon-flash,
+.exportFieldTable .icon-cool,
+.exportFieldTable .icon-wb,
+.exportFieldTable .icon-ellipsis {
+	font-size: 16px !important;
+}
+
+/* Toggleable icons - clickable styling */
+.exportFieldTable .icon-toggle-clickable {
+	cursor: pointer;
+	transition: opacity 0.2s ease, transform 0.1s ease;
+	display: inline-block;
+	padding: 2px;
+	border-radius: 3px;
+	pointer-events: auto !important; /* Override master.css disabled class to allow clicks */
+}
+
+.exportFieldTable .icon-toggle-clickable:hover {
+	opacity: 0.8;
+	transform: scale(1.1);
+	background-color: rgba(255, 255, 255, 0.1);
+}
+
+.exportFieldTable .icon-toggle-clickable:active {
+	transform: scale(0.95);
+}
+
+/* Ensure disabled icons are still clickable */
+.exportFieldTable .icon-toggle-clickable.disabled {
+	pointer-events: auto !important; /* Override master.css to allow clicks even when disabled */
+}
+
+.exportFieldTable .row.removed-row .icon-toggle-clickable {
+	cursor: not-allowed;
+	pointer-events: none !important;
+}
+
+/* Two Squares Icon for Compound Plates */
+.twoSquaresIcon {
+	display: inline-flex;
+	gap: 2px;
+	align-items: center;
+}
+
+.twoSquaresIcon .squareColorIcon {
+	width: 12px;
+	height: 12px;
+	display: inline-block;
+	border-radius: 2px;
+}
+
+/* Square Color Icon - matching React size (12px) */
+.squareColorIcon {
+	width: 12px;
+	height: 12px;
+	display: inline-block;
+	border-radius: 2px;
+	border: 0.5px solid #ffffff;
+}
+
+.fieldIcon {
+	cursor: pointer;
+}
+
+/* Table Header Row - matching React styling */
+.thRow {
+	padding: 4px 3px 4px 8px;
+	border: 1px solid rgba(0, 0, 0, 0);
+}
+
+.thRow .col {
+	width: 9%;
+	margin-right: 8px;
+	min-width: 0;
+	flex-shrink: 1;
+}
+
+.thRow .col span {
+	font-size: 11px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.thRow .col:last-child {
+	margin-right: 0px;
+	width: 5%;
+	flex-shrink: 0;
+	min-width: 20px;
+}
+
+.thRow .col.bigger {
+	width: 37%;
+	min-width: 100px;
+	flex-shrink: 0;
+}
+
+/* Export Field Table - matching React styling */
+.exportFieldTable {
+	min-height: 175px;
+}
+
+.exportFieldTable .row {
+	padding: 4px 3px 4px 8px;
+	border-bottom: 1px solid #ffffff;
+}
+
+.exportFieldTable .row .col {
+	width: 9%;
+	margin-right: 8px;
+	min-width: 0;
+	flex-shrink: 1;
+}
+
+.exportFieldTable .row .col span {
+	font-size: 11px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.exportFieldTable .row .col.bigger {
+	width: 37%;
+	min-width: 100px;
+	flex-shrink: 0;
+}
+
+.exportFieldTable .row .col:last-child {
+	margin-right: 0px;
+	width: 5%;
+	flex-shrink: 0;
+	min-width: 20px;
+}
+
+.emptyCol {
+	width: 5%;
+}
+
+/* Separation Colors Action Buttons */
+.separation-colors-actions {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.separation-action-btn {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 20px;
+	height: 20px;
+	padding: 0;
+	background: transparent;
+	border: none;
+	cursor: pointer;
+	color: #ffffff;
+	opacity: 1;
+	transition: opacity 0.2s ease;
+}
+
+.separation-action-btn:hover {
+	opacity: 1;
+}
+
+.separation-action-btn svg {
+	width: 100%;
+	height: 100%;
+	display: block;
+	color: #ffffff;
+}
+
+/* Theme-aware icon styling */
+.separation-action-btn .add-underbase-icon,
+.separation-action-btn .refresh-icon,
+.separation-action-btn .export-icon {
+	color: #ffffff;
+}
+
+/* Add Underbase icon - theme-aware colors */
+.separation-action-btn .add-underbase-icon .add-underbase-frame {
+	fill: #fff;
+}
+
+.separation-action-btn .add-underbase-icon .add-underbase-plus {
+	fill: #231f20;
+}
+
+/* Invert colors for light themes */
+body.light .separation-action-btn .add-underbase-icon .add-underbase-frame,
+body.medium-light .separation-action-btn .add-underbase-icon .add-underbase-frame {
+	fill: #231f20;
+}
+
+body.light .separation-action-btn .add-underbase-icon .add-underbase-plus,
+body.medium-light .separation-action-btn .add-underbase-icon .add-underbase-plus {
+	fill: #fff;
+}
+
+/* Warning indicator for refresh icon - keep yellow */
+.separation-action-btn svg circle {
+	pointer-events: none;
+}
+
+.separation-action-btn svg path[fill="#ffcb00"] {
+	fill: #ffcb00 !important; /* Keep warning triangle yellow */
+}
+
+/* Mesh cell editing styles */
+.mesh-cell-editable {
+	cursor: pointer;
+	position: relative;
+	/* padding: 2px 4px; */
+}
+
+.mesh-cell-editable.selected {
+	background-color: rgba(123, 180, 255, 0.2);
+	padding: 2px 4px;
+}
+
+.mesh-cell-editable.editing {
+	background-color: rgba(123, 180, 255, 0.1);
+}
+
+.mesh-cell-editable input,
+.mesh-input {
+	width: 100%;
+	background: transparent;
+	border: 1px solid #7bb4ff;
+	color: #ffffff;
+	padding: 2px 4px;
+	font-size: 11px;
+	font-family: 'Adobe Clean', sans-serif;
+	outline: none;
+}
+
+.mesh-input::-moz-focus-inner {
+	border: 0;
+	outline: none;
+}
+
+/* Colors column link styling */
+.colors-link {
+	color: #ffffff;
+	text-decoration: underline;
+	cursor: pointer;
+	transition: opacity 0.2s ease;
+	font-family: 'Adobe Clean', sans-serif;
+}
+
+.colors-link:hover {
+	opacity: 0.8;
+}
+
+/* Row styles - moved from inline styles */
+.exportFieldTable .row {
+	pointer-events: auto;
+}
+
+.exportFieldTable .row.removed-row {
+	pointer-events: none;
+}
+
+/* Drag icon styles */
+.exportFieldTable .icon-DRAG {
+	cursor: grab;
+	user-select: none;
+}
+
+.exportFieldTable .row.removed-row .icon-DRAG {
+	cursor: not-allowed;
+}
+
+/* Sequence number styles */
+.exportFieldTable .sequence-number {
+	cursor: grab;
+	user-select: none;
+}
+
+.exportFieldTable .row.removed-row .sequence-number {
+	cursor: not-allowed;
+}
+
+/* Field icon styles */
+.exportFieldTable .fieldIcon {
+	cursor: pointer;
+}
+
+/* Mesh cell editable styles */
+.exportFieldTable .mesh-cell-editable {
+	cursor: pointer;
+	user-select: none;
+}
+
+/* SubMenu column styles */
+.exportFieldTable .col.submenu-col {
+	pointer-events: auto;
+	opacity: 1;
+}
+
+.exportFieldTable .row.removed-row .col.submenu-col.removed {
+	pointer-events: none;
+	opacity: 0.3;
+}
+
+/* Graphic name display (when in separated document) */
+.graphic-name-display {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 12px;
+	background: rgba(255, 255, 255, 0.05);
+	border-radius: 6px;
+	font-family: 'Adobe Clean', sans-serif;
+}
+
+.graphic-name-display .label {
+	font-size: 13px;
+	color: rgba(255, 255, 255, 0.6);
+	font-weight: 400;
+}
+
+.graphic-name-display .value {
+	/* font-size: 14px; */
+	color: rgba(255, 255, 255, 0.95);
+	font-weight: 500;
+}
+
+/* Label and value classes for graphic display */
+.label {
+	font-size: 13px;
+	color: rgba(255, 255, 255, 0.6);
+	font-weight: 400;
+}
+
+.value {
+	/* font-size: 14px; */
+	color: rgba(255, 255, 255, 0.95);
+	font-weight: 500;
+}
+
+/* Non-separated document message styles */
+.separation-colors-not-separated {
+	padding: 40px 20px;
+	text-align: center;
+}
+
+.separation-colors-not-separated-message {
+	margin-top: 20px;
+	color: #888;
+}
+
+.ml-5 {
+	margin-left: 5px;
+}
