@@ -1,0 +1,44 @@
+{
+ "name": "leap-color-separator-angular",
+ "version": "1.0.0",
+ "description": "LEAP Color Separator - Angular Version",
+ "scripts": {
+  "build": "ng build",
+  "build:leap": "webpack --config webpack.leap.config.js --env mode=development",
+  "setup-cep": "node setup-cep-plugin.js",
+  "build-and-setup": "npm run build:leap && npm run build && npm run setup-cep",
+  "zxp": "node zxp.js",
+  "postinstall": "echo 'postinstall complete'"
+ },
+ "private": true,
+ "dependencies": {
+  "@angular/animations": "^17.0.0",
+  "@angular/common": "^17.0.0",
+  "@angular/compiler": "^17.0.0",
+  "@angular/core": "^17.0.0",
+  "@angular/forms": "^17.0.0",
+  "@angular/platform-browser": "^17.0.0",
+  "@angular/platform-browser-dynamic": "^17.0.0",
+  "@angular/router": "^17.0.0",
+  "rxjs": "~7.8.0",
+  "tslib": "^2.3.0",
+  "xlsx": "^0.18.5",
+  "zone.js": "~0.14.2"
+ },
+ "devDependencies": {
+  "@angular-devkit/build-angular": "^17.0.0",
+  "@angular/cli": "^17.0.0",
+  "@angular/compiler-cli": "^17.0.0",
+  "@babel/core": "^7.24.0",
+  "@babel/preset-env": "^7.24.0",
+  "@types/node": "^20.0.0",
+  "babel-loader": "^9.1.3",
+  "chalk": "^4.1.2",
+  "mkdirp": "^3.0.1",
+  "typescript": "~5.2.2",
+  "webpack": "^5.90.3",
+  "webpack-cli": "^5.1.4",
+  "webpack-node-externals": "^3.0.0",
+  "zxp-sign-cmd": "^1.0.0"
+ }
+}

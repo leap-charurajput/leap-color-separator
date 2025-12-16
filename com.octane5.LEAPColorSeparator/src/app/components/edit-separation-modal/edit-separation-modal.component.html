@@ -1,0 +1,76 @@
+<div *ngIf="isOpen" class="modal-overlay" (mousedown)="handleOverlayInteraction($event)">
+<div class="modal-container" (mousedown)="$event.stopPropagation()" (click)="$event.stopPropagation()">
+<div class="modal-header">
+<h3 class="modal-title">Edit Separation Plate</h3>
+</div>
+
+<div class="modal-body">
+<div class="form-group">
+<label class="form-label">Name:</label>
+<input
+ type="text"
+ class="form-input"
+ [value]="name"
+ (input)="onNameInput($event)"
+ placeholder="White UB"
+/>
+</div>
+
+<div class="form-row">
+<div class="form-group form-group-half">
+ <label class="form-label">Mesh</label>
+ <input
+ type="text"
+ class="form-input"
+ [value]="mesh"
+ (input)="onMeshInput($event)"
+ placeholder=""
+ />
+</div>
+<div class="form-group form-group-half">
+ <label class="form-label">Micron</label>
+ <input
+ type="text"
+ class="form-input"
+ [value]="micron"
+ (input)="onMicronInput($event)"
+ placeholder=""
+ />
+</div>
+</div>
+
+<div class="icon-toggles">
+<button
+ [class.icon-toggle]="true"
+ [class.active]="flashEnabled"
+ (click)="flashEnabled = !flashEnabled"
+ title="Flash">
+ <span [class.icon-flash]="true" [class.disabled]="!flashEnabled"></span>
+</button>
+<button
+ [class.icon-toggle]="true"
+ [class.active]="coolEnabled"
+ (click)="coolEnabled = !coolEnabled"
+ title="Cool">
+ <span [class.icon-cool]="true" [class.disabled]="!coolEnabled"></span>
+</button>
+<button
+ [class.icon-toggle]="true"
+ [class.active]="wbEnabled"
+ (click)="wbEnabled = !wbEnabled"
+ title="Water Based">
+ <span [class.icon-wb]="true" [class.disabled]="!wbEnabled"></span>
+</button>
+</div>
+</div>
+
+<div class="modal-footer">
+<app-button variant="secondary" (onClick)="handleCancel()">
+Cancel
+</app-button>
+<app-button variant="primary" (onClick)="handleOk()" [disabled]="!isFormValid">
+OK
+</app-button>
+</div>
+</div>
+</div>
