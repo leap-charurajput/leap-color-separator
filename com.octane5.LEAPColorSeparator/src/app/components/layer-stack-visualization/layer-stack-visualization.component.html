@@ -1,0 +1,113 @@
+<div class="layer-stack-container">
+	<div class="stack-title">Layer Preview</div>
+
+	<div class="d-flex gap-5">
+		<div class="layer-stack-visualization" [style.height.px]="containerHeight">
+			<!-- Base Garment - Using base.svg with dynamic color -->
+			<div class="garment-base">
+				<img
+					[src]="getGarmentImageSrc(selectedGarmentId)"
+					alt="Base Garment"
+					class="garment-svg"
+				/>
+			</div>
+
+			<!-- Stacked Layers - Using trapezoidal shape like color.svg -->
+			<div class="layers-stack">
+				<!-- 4 continuous vertical corner lines running from first layer top corners, extending up and down -->
+				<ng-container *ngIf="activeColors.length > 0">
+					<div
+						class="vertical-corner-line corner-line-left-front"
+						[style.top.px]="linePositions.top + 8"
+						[style.height.px]="linePositions.height"
+					></div>
+					<div
+						class="vertical-corner-line corner-line-left-back"
+						[style.top.px]="linePositions.top - 16"
+						[style.height.px]="linePositions.height"
+					></div>
+					<div
+						class="vertical-corner-line corner-line-right-front"
+						[style.top.px]="linePositions.top + 8"
+						[style.height.px]="linePositions.height"
+					></div>
+					<div
+						class="vertical-corner-line corner-line-right-back"
+						[style.top.px]="linePositions.top - 14"
+						[style.height.px]="linePositions.height"
+					></div>
+				</ng-container>
+
+				<!-- Base transparent rectangle fixed over T-shirt - always visible -->
+				<div class="color-layer-wrapper base-rectangle" style="bottom: 20px; z-index: 1;">
+					<svg class="base-rectangle-svg" viewBox="0 0 59.99 14.72" xmlns="http://www.w3.org/2000/svg">
+						<polygon
+							points="47.17 14.47 .55 14.47 12.82 .25 59.44 .25 47.17 14.47"
+							fill="transparent"
+							stroke="#ffffff"
+							stroke-width="0.5"
+							stroke-miterlimit="10"
+							opacity="0.8"
+						/>
+					</svg>
+				</div>
+
+				<div
+					*ngFor="let row of activeColors; let i = index"
+					class="color-layer-wrapper"
+					[style.bottom.px]="layerBaseOffset + i * layerSpacing"
+					[style.z-index]="i + 1"
+				>
+					<!-- Trapezoidal layer shape (perspective rectangle) -->
+					<svg class="color-layer-svg" viewBox="0 0 59.99 14.72" xmlns="http://www.w3.org/2000/svg">
+						<polygon
+							points="47.17 14.47 .55 14.47 12.82 .25 59.44 .25 47.17 14.47"
+							[attr.fill]="getLayerColor(row, i)"
+							opacity="0.75"
+							stroke="#fff"
+							stroke-width="0.5"
+							stroke-miterlimit="10"
+						/>
+					</svg>
+				</div>
+			</div>
+		</div>
+
+		<!-- Labels on the right -->
+		<div class="layer-labels" [style.height.px]="containerHeight">
+			<div
+				*ngFor="let row of activeColors; let i = index"
+				class="label-item"
+				[style.bottom.px]="layerBaseOffset + i * layerSpacing"
+			>
+				<div class="label-color-indicator" [style.background-color]="getLayerColor(row, i)"></div>
+				<span class="label-text">{{row.colorName}}</span>
+				<div class="label-icons">
+					<span *ngIf="row.flashEnabled" class="icon-flash small-icon"></span>
+					<span *ngIf="row.coolEnabled" class="icon-cool small-icon"></span>
+					<span *ngIf="row.wbEnabled" class="icon-wb small-icon"></span>
+				</div>
+			</div>
+
+			<div class="label-item garment-label" style="bottom: 10px;">
+				<span class="label-text">{{garmentName}}</span>
+			</div>
+		</div>
+
+		<div class="garment-selector">
+			<button
+				*ngFor="let option of garmentOptions"
+				type="button"
+				[class]="'garment-button' + (option.id === selectedGarmentId ? ' active' : '')"
+				(click)="onGarmentSelect(option.id)"
+			>
+				<img
+					[src]="getGarmentImageSrc(option.id)"
+					[alt]="option.label"
+					class="garment-button-icon"
+				/>
+				<span class="garment-button-label">{{option.label}}</span>
+			</button>
+		</div>
+	</div>
+</div>

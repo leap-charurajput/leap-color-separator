@@ -1,0 +1,39 @@
+var CONSTANTS = {
+	LAYER_NAMES: {
+		SIZED_ART: "SIZED_ART",
+		SIZED_GRAPHICS: "SIZED_GRAPHICS",
+		SEPARATED_ART: "SEPARATED_ART",
+		LIVE_ART: "LIVE_ART",
+		WHITE_UB: "White UB",
+		CHOKE: "Choke"
+	},
+	SWATCH_NAMES: {
+		WHITE_UB: "White UB",
+		GARMENT_EXAMPLE: "GARMENT-EXAMPLE",
+		NONE: "[None]"
+	},
+	GRAPHIC: {
+		PREFIX: "GRAPHIC:"
+	},
+	ACTIONS: {
+		FILE_NAME: "SLS Actions.aia",
+		SET_NAME: "SLS Actions",
+		EXPAND_NAME: "Expand"
+	},
+	STYLES: {
+		DEFAULT_STROKE_WIDTH: 1,
+		CHOKE_STROKE_WIDTH: 0.6
+	},
+	COLOR_TYPES: {
+		SPOT: "SpotColor",
+		CMYK: "CMYKColor",
+		RGB: "RGBColor",
+		GRAY: "GrayColor"
+	},
+	COLOR_PREFIXES: {
+		CMYK: "CMYK_",
+		RGB: "RGB_",
+		GRAY: "Gray_",
+		UNKNOWN: "Unknown"
+	}
+};

@@ -1,0 +1,12 @@
+<div class="separation-profiles-panel border-1">
+	<div class="profiles-table-header d-flex align-center">
+		<span class="profiles-table-title">Profiles</span>
+		<button class="profiles-table-add ml-auto" (click)="onAddClick()">Add…</button>
+	</div>
+	<app-profiles-table
+		[profiles]="profiles"
+		(editProfile)="editProfile.emit($event)"
+		(duplicateProfile)="duplicateProfile.emit($event)"
+		(deleteProfile)="deleteProfile.emit($event)"
+	></app-profiles-table>
+</div>

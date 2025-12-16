@@ -1,0 +1,24 @@
+<div class="profiles-list">
+	<div *ngFor="let profile of profiles" class="profiles-row d-flex align-center" [attr.data-key]="getUniqueKey(profile)">
+		<div class="row-name">
+			{{ profile.name }}
+			<span *ngIf="isDistressed(profile)"> - Distressed</span>
+		</div>
+		<div class="row-actions ml-auto d-flex align-center">
+			<button
+				class="row-action-button"
+				(click)="onRowAction('edit', profile)"
+				title="Edit profile"
+			>
+				<span class="material-icons" aria-hidden="true">edit</span>
+			</button>
+			<button
+				class="row-action-button"
+				(click)="onRowAction('delete', profile)"
+				title="Delete profile"
+			>
+				<span class="material-icons" aria-hidden="true">delete</span>
+			</button>
+		</div>
+	</div>
+</div>
