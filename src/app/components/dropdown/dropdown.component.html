@@ -1,0 +1,14 @@
+<div class="d-flex gap-5 align-center mb-5">
+ <span *ngIf="label">{{label}}:</span>
+ <div class="dropDownWrap" [class.opened]="isOpen" #dropdownRef>
+ <span class="selectedValue" (click)="handleToggle($event)">
+  <span class="value">{{displayValue}}</span>
+  <span class="icon-POPUP-ARROW"></span>
+ </span>
+ <ul class="dd" *ngIf="isOpen">
+  <li *ngFor="let item of items" (click)="handleItemClick(item, $event)" (mousedown)="$event.preventDefault()">
+  {{item}}
+  </li>
+ </ul>
+ </div>
+</div>

@@ -1,0 +1,251 @@
+/* Compound Plate Modal Styles - Dark Theme Only */
+
+.modal-overlay {
+	position: fixed;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	background-color: rgba(0, 0, 0, 0.7);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 1000;
+}
+
+.compound-modal-container {
+	background-color: #3a3a3a;
+	border-radius: 4px;
+	width: 360px;
+	max-width: calc(100vw - 20px);
+	min-width: 320px;
+	box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+	color: #ffffff;
+}
+
+.modal-header {
+	padding: 8px;
+	border-bottom: 1px solid #555555;
+}
+
+.modal-title {
+	margin: 0;
+	font-size: 12px;
+	font-weight: 500;
+	text-align: center;
+	font-family: 'Adobe Clean', sans-serif;
+	color: #ffffff;
+}
+
+.modal-body {
+	padding: 16px;
+}
+
+.form-group {
+	margin-bottom: 12px;
+}
+
+.form-row {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+}
+
+.components-list {
+	max-height: 120px;
+	overflow-y: auto;
+	border: 1px solid #555555;
+	border-radius: 3px;
+	padding: 8px;
+	background-color: #2a2a2a;
+}
+
+.component-checkbox {
+	display: flex;
+	align-items: center;
+	margin-bottom: 6px;
+}
+
+.component-checkbox:last-child {
+	margin-bottom: 0;
+}
+
+.component-checkbox input[type="checkbox"] {
+	margin-right: 8px;
+	cursor: pointer;
+}
+
+.component-checkbox label {
+	font-size: 11px;
+	font-family: 'Adobe Clean', sans-serif;
+	cursor: pointer;
+	user-select: none;
+	color: #ffffff;
+}
+
+.form-row-compound {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+	margin-bottom: 12px;
+}
+
+.form-group-mesh,
+.form-group-micron {
+	flex: 1;
+}
+
+.icon-toggles-inline {
+	display: flex;
+	gap: 6px;
+}
+
+.checkbox-group {
+	display: flex;
+	align-items: center;
+	min-width: 140px;
+}
+
+.checkbox-group input[type="checkbox"] {
+	margin-right: 6px;
+	cursor: pointer;
+}
+
+.checkbox-group label {
+	font-size: 11px;
+	font-family: 'Adobe Clean', sans-serif;
+	cursor: pointer;
+	user-select: none;
+	color: #ffffff;
+}
+
+.form-select {
+	flex: 1;
+	padding: 4px 8px;
+	background-color: #2a2a2a;
+	border: 1px solid #555555;
+	border-radius: 3px;
+	color: #ffffff;
+	font-size: 11px;
+	font-family: 'Adobe Clean', sans-serif;
+	height: 24px;
+	cursor: pointer;
+}
+
+.form-select:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.form-select:focus {
+	outline: none;
+	border-color: #0d99ff;
+}
+
+.form-select option {
+	background-color: #2a2a2a;
+	color: #ffffff;
+}
+
+.components-list::-webkit-scrollbar {
+	width: 8px;
+}
+
+.components-list::-webkit-scrollbar-track {
+	background: #2a2a2a;
+	border-radius: 3px;
+}
+
+.components-list::-webkit-scrollbar-thumb {
+	background: #555555;
+	border-radius: 3px;
+}
+
+.components-list::-webkit-scrollbar-thumb:hover {
+	background: #3a3a3a;
+}
+
+.icon-toggle {
+	width: 32px;
+	height: 32px;
+	background-color: #2a2a2a;
+	border: 1px solid #555555;
+	border-radius: 3px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+	transition: all 0.2s ease;
+}
+
+.icon-toggle:hover {
+	background-color: #3a3a3a;
+	border-color: #0d99ff;
+}
+
+.icon-toggle.active {
+	background-color: #0d99ff;
+	border-color: #0d99ff;
+}
+
+.icon-toggle .icon-flash,
+.icon-toggle .icon-cool,
+.icon-toggle .icon-wb {
+	font-size: 16px;
+}
+
+.icon-toggle .icon-flash.disabled,
+.icon-toggle .icon-cool.disabled,
+.icon-toggle .icon-wb.disabled {
+	opacity: 0.4;
+}
+
+.icon-toggle.active .icon-flash,
+.icon-toggle.active .icon-cool,
+.icon-toggle.active .icon-wb {
+	opacity: 1;
+}
+
+.modal-footer {
+	padding: 12px 16px;
+	border-top: 1px solid #555555;
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+}
+
+.modal-footer app-button {
+	min-width: 70px;
+	padding: 4px 12px;
+	font-size: 11px;
+}
+
+.form-input {
+	width: 100%;
+	padding: 4px 8px;
+	background-color: #2a2a2a;
+	border: 1px solid #555555;
+	border-radius: 3px;
+	color: #ffffff;
+	font-size: 11px;
+	font-family: 'Adobe Clean', sans-serif;
+	box-sizing: border-box;
+	height: 24px;
+}
+
+.form-input:focus {
+	outline: none;
+	border-color: #0d99ff;
+}
+
+.form-input::placeholder {
+	color: #888888;
+}
+
+.form-label {
+	display: block;
+	margin-bottom: 4px;
+	font-size: 11px;
+	color: #ffffff;
+	font-family: 'Adobe Clean', sans-serif;
+}

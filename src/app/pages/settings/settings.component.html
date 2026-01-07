@@ -1,0 +1,57 @@
+<div class="settings-page">
+	<div class="page-header">
+		<div class="page-title">Settings</div>
+	</div>
+
+	<div *ngIf="isLoading" class="settings-panels">
+		<div class="loading-message">Loading profiles...</div>
+	</div>
+
+	<div *ngIf="!isLoading" class="settings-panels">
+		<div class="settings-dropdown-wrapper">
+			<span class="material-icons" aria-hidden="true">settings</span>
+		<app-dropdown
+			[value]="selectedSection"
+			[items]="['Separation Profiles', 'General Settings']"
+			(onChange)="selectedSection = $event"
+			placeholder="Select section..."
+		></app-dropdown>
+		</div>
+
+		<app-separation-profiles-panel
+			*ngIf="selectedSection === 'Separation Profiles'"
+			title="Separation Profiles"
+			description="Template presets for separation runs"
+			[profiles]="profiles"
+			(addProfile)="handleAddProfile()"
+			(editProfile)="handleEditProfile($event)"
+			(duplicateProfile)="handleDuplicateProfile($event)"
+			(deleteProfile)="handleDeleteProfile($event)"
+		></app-separation-profiles-panel>
+
+		<div *ngIf="selectedSection === 'General Settings'" class="general-settings-content">
+			<div class="settings-field">
+				<label class="settings-field-label">Default mesh</label>
+				<input
+					type="text"
+					class="settings-field-input"
+					[(ngModel)]="defaultMesh"
+				/>
+			</div>
+			<div class="settings-field">
+				<app-checkbox
+					[checked]="addUnderbase"
+					[label]="'Add underbase'"
+					(change)="addUnderbase = $event.target.checked"
+				></app-checkbox>
+			</div>
+		</div>
+	</div>
+
+	<app-edit-separation-profile-modal
+		[isOpen]="editModalOpen"
+		[profile]="selectedProfile"
+		(close)="handleModalClose()"
+		(save)="handleModalSave($event)"
+	></app-edit-separation-profile-modal>
+</div>

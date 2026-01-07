@@ -1,0 +1,175 @@
+<div class="organize-graphics-container">
+ <div class="panelTitle mb-5 d-flex align-center justify-between">
+  <span>Organize Graphics</span>
+  <button
+   (click)="loadGraphicsList()"
+   class="separation-action-btn"
+   title="Refresh graphics from document"
+  >
+   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9.72 12.35" width="20" height="20">
+    <path
+     fill="currentColor"
+     d="M9.72,7.49c0,1.3-.5,2.52-1.42,3.44-.92.92-2.14,1.42-3.44,1.42s-2.52-.5-3.44-1.42c-.9-.92-1.42-2.14-1.42-3.44s.52-2.5,1.42-3.44c.92-.9,2.12-1.42,3.4-1.42l-.61-2.63,5.04,3.47-4.84,3.69.43-2.81c-1.73.02-3.13,1.4-3.13,3.13s1.42,3.15,3.15,3.15,3.13-1.42,3.13-3.15h1.73Z"
+    />
+   </svg>
+  </button>
+ </div>
+
+ <div *ngIf="!hasVersionDocument && !isCheckingDocument" class="organize-graphics-content">
+  <div class="panelTitle mx-5" style="text-align: center; padding: 40px 20px">
+   <span *ngIf="isRunningInBrowser">Please run this in Illustrator</span>
+   <span *ngIf="!isRunningInBrowser">Please open the version documentss ok?</span>
+  </div>
+ </div>
+
+ <div *ngIf="isCheckingDocument || isLoadingGraphics" class="organize-graphics-content">
+  <div class="panelTitle mx-5" style="text-align: center; padding: 40px 20px">
+   Loading graphics...
+  </div>
+ </div>
+
+ <div
+  *ngIf="hasVersionDocument && !isCheckingDocument && !isLoadingGraphics"
+  class="organize-graphics-content"
+ >
+  <div class="organize-graphics-table-wrapper">
+   <div class="thRow d-flex">
+    <div class="col graphic-name-header-col" style="width: 20%">
+     <span></span>
+    </div>
+    <div class="col" style="width: 25%">
+     <span>Position</span>
+    </div>
+    <div class="col" style="width: 25%">
+     <span>Same plates</span>
+    </div>
+    <div class="col text-center" style="width: 15%">
+     <span>Colors</span>
+    </div>
+    <div class="col text-center" style="width: 15%">
+     <span>Distress</span>
+    </div>
+   </div>
+   <div class="exportFieldTable">
+    <div
+     *ngFor="let graphic of graphics"
+     class="row organize-graphics-row"
+     [class.listed-graphic]="graphic.id !== 'all'"
+     [class.disabled-row]="graphic.id === 'all' && isSingleGraphic"
+    >
+     <div class="col graphic-name-col" style="width: 20%">
+      <span [class]="'graphic-name-label' + (graphic.id === 'all' ? ' all-graphics-label' : '')">
+       {{ graphic.name }}
+      </span>
+     </div>
+     <div class="col d-flex align-center" style="width: 25%">
+      <app-dropdown
+       [value]="graphic.position"
+       [items]="positionOptions"
+       (onChange)="handlePositionChange(graphic.id, $event)"
+       placeholder="Choose..."
+       [disabled]="(graphic.id === 'all' && isSingleGraphic) || isSinglePosition"
+      ></app-dropdown>
+     </div>
+     <div class="col d-flex align-center" style="width: 25%">
+      <app-dropdown
+       [value]="graphic.samePlates"
+       [items]="samePlatesOptions"
+       (onChange)="handleSamePlatesChange(graphic.id, $event)"
+       placeholder="Same as..."
+       [disabled]="isSingleGraphic"
+      ></app-dropdown>
+     </div>
+     <div class="col d-flex align-center justify-center" style="width: 15%">
+      <span
+       *ngIf="getColorsDisplayData(graphic).isAll"
+       [class]="'color-link' + (graphic.id === 'all' && isSingleGraphic ? ' disabled' : '')"
+       (click)="
+        !(graphic.id === 'all' && isSingleGraphic) && handleColorsClick(graphic.id, graphic.name)
+       "
+       [style.cursor]="graphic.id === 'all' && isSingleGraphic ? 'not-allowed' : 'pointer'"
+       [style.opacity]="graphic.id === 'all' && isSingleGraphic ? 0.5 : 1"
+      >
+       All
+      </span>
+      <span
+       *ngIf="!getColorsDisplayData(graphic).isAll && getColorsDisplayData(graphic).count === 0"
+       [class]="'color-link' + (graphic.id === 'all' && isSingleGraphic ? ' disabled' : '')"
+       (click)="
+        !(graphic.id === 'all' && isSingleGraphic) && handleColorsClick(graphic.id, graphic.name)
+       "
+       [style.cursor]="graphic.id === 'all' && isSingleGraphic ? 'not-allowed' : 'pointer'"
+       [style.opacity]="graphic.id === 'all' && isSingleGraphic ? 0.5 : 1"
+      >
+       0
+      </span>
+      <span
+       *ngIf="
+        !getColorsDisplayData(graphic).isAll &&
+        getColorsDisplayData(graphic).count !== null &&
+        getColorsDisplayData(graphic).count! > 0
+       "
+      >
+       <span
+        [class]="'color-link' + (graphic.id === 'all' && isSingleGraphic ? ' disabled' : '')"
+        (click)="
+         !(graphic.id === 'all' && isSingleGraphic) && handleColorsClick(graphic.id, graphic.name)
+        "
+        [style.cursor]="graphic.id === 'all' && isSingleGraphic ? 'not-allowed' : 'pointer'"
+        [style.opacity]="graphic.id === 'all' && isSingleGraphic ? 0.5 : 1"
+       >
+        {{ getColorsDisplayData(graphic).count }}
+       </span>
+       <span class="colors-text"> ({{ getColorsDisplayData(graphic).colorsText }})</span>
+      </span>
+     </div>
+     <div class="col d-flex align-center justify-center" style="width: 15%">
+      <app-checkbox
+       *ngIf="graphic.id === 'all'"
+       [checked]="getAllGraphicsDistressState().checked"
+       [indeterminate]="getAllGraphicsDistressState().indeterminate"
+       (change)="!(graphic.id === 'all' && isSingleGraphic) && handleDistressChange(graphic.id)"
+       [disabled]="graphic.id === 'all' && isSingleGraphic"
+      ></app-checkbox>
+      <app-checkbox
+       *ngIf="graphic.id !== 'all'"
+       [checked]="graphic.distress"
+       (change)="handleDistressChange(graphic.id)"
+      ></app-checkbox>
+     </div>
+    </div>
+   </div>
+  </div>
+
+  <div class="organize-graphics-done-button-wrapper">
+   <app-button
+    (click)="handleDoneClick()"
+    variant="primary"
+    size="medium"
+    [disabled]="isSaving"
+    [fullWidth]="false"
+   >
+    {{ isSaving ? 'Saving...' : 'Done' }}
+   </app-button>
+  </div>
+ </div>
+
+ <app-link-colors-modal
+  [isOpen]="modalState.isOpen"
+  [graphicName]="modalState.graphicName"
+  [availableColors]="modalState.availableColors"
+  [selectedColors]="modalState.selectedColors"
+  [isLoadingColors]="modalState.isLoadingColors"
+  (close)="
+   modalState = {
+    isOpen: false,
+    graphicId: null,
+    graphicName: '',
+    availableColors: [],
+    selectedColors: [],
+    isLoadingColors: false
+   }
+  "
+  (save)="handleColorsSave(modalState.graphicId!, $event)"
+ ></app-link-colors-modal>
+</div>
