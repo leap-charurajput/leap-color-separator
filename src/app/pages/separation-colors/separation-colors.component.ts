@@ -237,6 +237,12 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
     const data = result.data;
 
     if (data.isSeparatedDoc) {
+     // ✅ AUTO refresh SEP TABLE (once)
+
+     setTimeout(() => {
+      this.handleRefreshList();
+     }, 500); // Small delay to ensure Illustrator is ready
+
      this.isSeparatedDoc = true;
      this.cdr.detectChanges(); // Force change detection to update template
      if (data.profileMetaData) {
@@ -250,6 +256,8 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
       this.selectedGraphic = data.graphicName || '';
       this.graphicNameFromPath = data.graphicName || '';
      }
+
+     console.log('[DATA]:', data);
 
      // Load color rows from XMP if available (priority 1)
      if (
@@ -272,6 +280,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
        this.hasUIChanges = false;
        this.isLoadingSwatches = false;
        this.cdr.detectChanges(); // Force change detection after loading color rows
+
        console.log(
         '[SEPARATION] Loaded color rows from XMP data on document check:',
         colorRowsFromXMP.length,
@@ -287,11 +296,6 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
         !this.isLoadingSwatches &&
          (this.isSeparatedDoc || (!this.isLoadingGraphics && this.graphicOptions.length > 0))
        );
-
-       console.log("[IT'S ALL GOOD] Updating SEP TABLE in document after loading from XMP");
-       setTimeout(() => {
-        this.updateSepTableInDocument();
-       }, 500); // 0.5s delay for Illustrator to be ready
       } else {
        console.log('[SEPARATION] Failed to convert XMP data, will use SeparatedLayerNames + Excel');
        this.colorRows = [];
@@ -900,6 +904,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   } else if (item === 'Edit') {
    this.handleEditSeparation(rowId);
   } else if (item === 'Add second hit...') {
+   console.log("YES, it's clicked");
    this.handleAddSecondHit(rowId);
   }
  }

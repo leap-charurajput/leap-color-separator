@@ -373,6 +373,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
     console.log('GBD');
 
     return this.controller.getProfileNamesFromExcel(styleCodes).then((profileResult) => {
+     console.log('[PROFILE]:', { profileResult });
      if (!profileResult.success || !profileResult.profileMap) {
       this.separations = [];
       this.isLoadingSeparations = false;
