@@ -234,8 +234,8 @@
       [style.opacity]="row.removed ? 0.3 : 1"
      >
       <app-sub-menu
-       *ngIf="!row.removed"
        [items]="['Edit', 'Add second hit...', 'Remove color']"
+       [hidden]="row.removed"
        (onItemClick)="handleColorRowMenuClick($event, row.id)"
       ></app-sub-menu>
      </div>

@@ -61,12 +61,12 @@ class ScriptLoader {
 var scriptLoader = new ScriptLoader();
 
 function getServerBasePath() {
- if (process.env.LEAP_SERVER_PATH) {
-  return process.env.LEAP_SERVER_PATH;
- }
+ //  if (process.env.LEAP_SERVER_PATH) {
+ //   return process.env.LEAP_SERVER_PATH;
+ //  }
 
  try {
-  const os = require('os');
+  const os = window.cep_node.require('os');
   const homeDir = os.homedir();
   const settingsPath = path.join(
    homeDir,
