@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
-const fs = window.cep_node.fs;
-const path = window.cep_node.path;
+const fs = window.cep_node.require('fs');
+const path = window.cep_node.require('path');
 
 console.log('LEAPColorSeparator: leap-src-index.js');
 
@@ -94,6 +94,7 @@ function findExcelFileInBatchFolder(documentPath) {
   }
 
   let currentDir = path.dirname(documentPath);
+  console.log('PATH', path, 'currentDIR', currentDir);
   let teamoutsFolder = null;
   while (currentDir) {
    const folderName = path.basename(currentDir);
@@ -251,6 +252,12 @@ async function getColorCodesFromExcel(teamCode, documentPath) {
 }
 
 async function getStyleCodesFromExcel(teamCode, documentPath) {
+ console.log(
+  'getStyleCodesFromExcel called with teamCode 100:',
+  teamCode,
+  'documentPath:',
+  documentPath
+ );
  try {
   if (!teamCode) {
    throw new Error('Team code is required');
@@ -259,6 +266,7 @@ async function getStyleCodesFromExcel(teamCode, documentPath) {
   let excelFilePath;
   if (documentPath) {
    excelFilePath = findExcelFileInBatchFolder(documentPath);
+   console.log('Found excelFilePath:', excelFilePath, 'for documentPath:', documentPath);
    if (!excelFilePath) {
     throw new Error('Excel file not found in BATCH folder');
    }
@@ -840,6 +848,12 @@ class Leap {
  }
 
  async getStyleCodesFromExcel(teamCode, documentPath) {
+  console.log(
+   'getStyleCodesFromExcel called with teamCode 200:',
+   teamCode,
+   'documentPath:',
+   documentPath
+  );
   try {
    if (!documentPath) {
     try {

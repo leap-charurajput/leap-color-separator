@@ -1,0 +1,60 @@
+{
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+
+  "configurations": [
+    {
+      "type": "extendscript-debug",
+      "request": "launch",
+      "name": "test",
+      "hostAppSpecifier": "illustrator",
+      "script": "${workspaceFolder}/test.js",
+      "engineName": "main"
+    },
+    {
+      "type": "extendscript-debug",
+      "request": "launch",
+      "name": "random",
+      "hostAppSpecifier": "illustrator",
+      "script": "${workspaceFolder}/extendedscript/random.js"
+    },
+    {
+      "type": "extendscript-debug",
+      "request": "launch",
+      "name": "exp",
+      "hostAppSpecifier": "illustrator",
+      "script": "${workspaceFolder}/exp.js",
+      "engineName": "main"
+    },
+    {
+      "type": "extendscript-debug",
+      "request": "launch",
+      "name": "playerFilter",
+      "hostAppSpecifier": "illustrator",
+      "script": "${workspaceFolder}/extendedscript/playerFilter.js"
+    },
+    {
+      "type": "extendscript-debug",
+      "request": "launch",
+      "name": "prebuiltName",
+      "hostAppSpecifier": "illustrator",
+      "script": "${workspaceFolder}/extendedscript/prebuiltNames.js"
+    },
+    {
+      "type": "extendscript-debug",
+      "request": "launch",
+      "name": "temp",
+      "hostAppSpecifier": "illustrator",
+      "script": "${workspaceFolder}/extendedscript/temp.js"
+    },
+    {
+      "type": "extendscript-debug",
+      "request": "launch",
+      "name": "temp-1",
+      "hostAppSpecifier": "illustrator",
+      "script": "${workspaceFolder}/extendedscript/temp-1.js"
+    }
+  ]
+}
