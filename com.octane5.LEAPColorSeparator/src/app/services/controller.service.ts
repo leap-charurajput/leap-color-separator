@@ -99,6 +99,37 @@ toggleLayerVisibility(layerName: string): Promise<any> {
 	});
 }
 
+	toggleInkVisibility(inkName: string): Promise<any> {
+		this.log('toggleInkVisibility called for ink: ' + inkName);
+
+		return this.ensureSession().then(() => {
+			const params = { inkName: inkName };
+			return (window as any).leap.scriptLoader().evalScript('handleToggleInkVisibility', params)
+				.then((res: string) => {
+					const result = JSON.parse(res);
+					return result;
+				})
+				.catch((err: any) => {
+					throw err;
+				});
+		});
+	}
+
+	resetInkVisibility(): Promise<any> {
+		this.log('resetInkVisibility called');
+
+		return this.ensureSession().then(() => {
+			return (window as any).leap.scriptLoader().evalScript('handleResetInkVisibility', {})
+				.then((res: string) => {
+					const result = JSON.parse(res);
+					return result;
+				})
+				.catch((err: any) => {
+					throw err;
+				});
+		});
+	}
+
 updateSepTable(separationData: any[]): Promise<any> {
 	this.log('updateSepTable called with ' + separationData.length + ' rows');
 
@@ -487,6 +518,27 @@ getProfileInformation(profileCode: string): Promise<any> {
 				.catch((err: any) => {
 
 					throw err;
+				});
+		});
+	}
+
+	removeSeparationData(): Promise<any> {
+		this.log('removeSeparationData called');
+
+		return this.ensureSession().then(() => {
+			return (window as any).leap.scriptLoader().evalScript('handleRemoveSeparationData', {})
+				.then((res: string) => {
+					try {
+						return JSON.parse(res);
+					} catch (parseErr) {
+						console.error('removeSeparationData: failed to parse response', res, parseErr);
+						return { success: false, error: 'Invalid response from host', raw: res };
+					}
+				})
+				.catch((err: any) => {
+					console.error('removeSeparationData: host call failed', err);
+					const message = err?.message || err?.toString?.() || 'Unknown error';
+					return { success: false, error: message, rawError: err };
 				});
 		});
 	}

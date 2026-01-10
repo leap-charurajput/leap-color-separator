@@ -1,32 +1,33 @@
 import { Component, Input, OnInit, OnChanges, SimpleChanges, AfterViewInit, OnDestroy, ChangeDetectorRef } from '@angular/core';
 import { ControllerService } from '../../services/controller.service';
+import { CdkDragDrop, moveItemInArray } from '@angular/cdk/drag-drop';
 
 interface ColorRow {
- id: number;
- colorName: string;
- mesh: string;
- micron: string;
- type: 'separation' | 'compound';
- layerColor?: string;
- colorIcon?: any;
- flashEnabled: boolean;
- coolEnabled: boolean;
- wbEnabled: boolean;
- removed: boolean;
- components?: string[];
- specialInk?: boolean;
- specialInkValue?: string;
- generateChoke?: boolean;
- chokeColor?: string;
+	id: number;
+	colorName: string;
+	mesh: string;
+	micron: string;
+	type: 'separation' | 'compound';
+	layerColor?: string;
+	colorIcon?: any;
+	flashEnabled: boolean;
+	coolEnabled: boolean;
+	wbEnabled: boolean;
+	removed: boolean;
+	components?: string[];
+	specialInk?: boolean;
+	specialInkValue?: string;
+	generateChoke?: boolean;
+	chokeColor?: string;
 }
 
 @Component({
- selector: 'app-separation-colors',
- templateUrl: './separation-colors.component.html',
- styleUrls: ['./separation-colors.component.css']
+	selector: 'app-separation-colors',
+	templateUrl: './separation-colors.component.html',
+	styleUrls: ['./separation-colors.component.css']
 })
 export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewInit, OnDestroy {
- @Input() documentRefreshKey = 0;
+	@Input() documentRefreshKey = 0;
 
 	isRunningInBrowser = false;
 	selectedGraphic = '';
@@ -36,7 +37,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 	isSeparatedDoc = false;
 	graphicNameFromPath = '';
 	graphicSwatches: any[] = [];
-	draggedIndex: number | null = null;
+	// draggedIndex removed as it is handled by CDK
 
 	graphicMenuItems = ['Add separation color', 'Add compound plate', 'Revert', 'Refresh list'];
 
@@ -55,146 +56,153 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 	meshEditValue = '';
 	focusedMeshRowId: number | null = null;
 	private isSavingMesh = false;
+	private isTypingMesh = false;
 
- constructor(private controller: ControllerService, private cdr: ChangeDetectorRef) {
- this.isRunningInBrowser = !(window as any).__adobe_cep__ && !(window as any).leap;
- // Don't initialize with default rows - wait for actual data from document
- this.colorRows = [];
- }
+	// Visibility state for dimming icons
+	visibilityMode: 'allVisible' | 'singleVisible' | 'noneVisible' | 'other' = 'allVisible';
+	activeSingleInk: string | null = null;
 
- ngOnInit(): void {
- this.checkIfSeparatedDocument();
- this.registerGlobalRefreshFunction();
- }
+	constructor(private controller: ControllerService, private cdr: ChangeDetectorRef) {
+		this.isRunningInBrowser = !(window as any).__adobe_cep__ && !(window as any).leap;
+		// Don't initialize with default rows - wait for actual data from document
+		this.colorRows = [];
+	}
 
- ngAfterViewInit(): void {
- // Data loading is handled in checkIfSeparatedDocument
- }
 
- ngOnChanges(changes: SimpleChanges): void {
- if (changes['documentRefreshKey'] && !changes['documentRefreshKey'].firstChange) {
-  console.log('[SEPARATION] Refresh triggered by App (refreshKey changed)');
-  // Reset state when document changes
-  this.colorRows = [];
-  this.graphicSwatches = [];
-  this.checkIfSeparatedDocument();
- }
- }
 
- ngOnDestroy(): void {
- delete (window as any).__LEAP_SEPARATION_COLORS_REFRESH__;
- }
+	ngOnInit(): void {
+		this.checkIfSeparatedDocument();
+		this.registerGlobalRefreshFunction();
+	}
 
- private initializeColorRows(): void {
- this.colorRows = [
-  {
-  id: 1,
-  colorName: 'SL White UB',
-  mesh: '110',
-  micron: 'NA',
-  type: 'separation',
-  layerColor: '#FF6B6B',
-  flashEnabled: true,
-  coolEnabled: false,
-  wbEnabled: true,
-  removed: false
-  },
-  {
-  id: 2,
-  colorName: 'White UB',
-  mesh: '157',
-  micron: 'NA',
-  type: 'compound',
-  components: ['AMARILLO 78H', 'Bicoastal 3CC'],
-  layerColor: '#E8D5C4',
-  flashEnabled: true,
-  coolEnabled: true,
-  wbEnabled: false,
-  specialInk: true,
-  specialInkValue: 'foil',
-  generateChoke: true,
-  chokeColor: 'AMARILLO 78H',
-  removed: false
-  }
- ];
- }
+	ngAfterViewInit(): void {
+		// Data loading is handled in checkIfSeparatedDocument
+	}
 
- private getRandomColor(): string {
- const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E2'];
- return colors[Math.floor(Math.random() * colors.length)];
- }
+	ngOnChanges(changes: SimpleChanges): void {
+		if (changes['documentRefreshKey'] && !changes['documentRefreshKey'].firstChange) {
+			console.log('[SEPARATION] Refresh triggered by App (refreshKey changed)');
+			// Reset state when document changes
+			this.colorRows = [];
+			this.graphicSwatches = [];
+			this.checkIfSeparatedDocument();
+		}
+	}
 
- loadGraphicsList(): void {
- console.log('[SEPARATION] Loading graphics list...');
- this.isLoadingGraphics = true;
+	ngOnDestroy(): void {
+		delete (window as any).__LEAP_SEPARATION_COLORS_REFRESH__;
+	}
 
- this.controller.getGraphicsList()
-  .then(result => {
-  if (result.success && result.graphics && Array.isArray(result.graphics)) {
-   console.log('[SEPARATION] Graphics loaded:', result.graphics);
-   this.graphicOptions = result.graphics;
-   if (!this.selectedGraphic && result.graphics.length > 0) {
-   this.selectedGraphic = result.graphics[0];
-   }
-  } else {
-   console.error('[SEPARATION] Failed to load graphics:', result.error || 'Invalid response');
-   this.graphicOptions = [];
-  }
-  })
-  .catch(err => {
-  console.error('[SEPARATION] Error loading graphics:', err);
-  this.graphicOptions = [];
-  })
-  .finally(() => {
-  this.isLoadingGraphics = false;
-  });
- }
+	private initializeColorRows(): void {
+		this.colorRows = [
+			{
+				id: 1,
+				colorName: 'SL White UB',
+				mesh: '110',
+				micron: 'NA',
+				type: 'separation',
+				layerColor: '#FF6B6B',
+				flashEnabled: true,
+				coolEnabled: false,
+				wbEnabled: true,
+				removed: false
+			},
+			{
+				id: 2,
+				colorName: 'White UB',
+				mesh: '157',
+				micron: 'NA',
+				type: 'compound',
+				components: ['AMARILLO 78H', 'Bicoastal 3CC'],
+				layerColor: '#E8D5C4',
+				flashEnabled: true,
+				coolEnabled: true,
+				wbEnabled: false,
+				specialInk: true,
+				specialInkValue: 'foil',
+				generateChoke: true,
+				chokeColor: 'AMARILLO 78H',
+				removed: false
+			}
+		];
+	}
 
- loadGraphicSwatches(): void {
- if (!this.selectedGraphic) {
-  return;
- }
+	private getRandomColor(): string {
+		const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E2'];
+		return colors[Math.floor(Math.random() * colors.length)];
+	}
 
- console.log('[SEPARATION] Loading swatches for graphic:', this.selectedGraphic);
- this.isLoadingSwatches = true;
+	loadGraphicsList(): void {
+		console.log('[SEPARATION] Loading graphics list...');
+		this.isLoadingGraphics = true;
 
- this.controller.getGraphicSwatches(this.selectedGraphic)
-  .then(result => {
-  if (result.success && result.swatches && Array.isArray(result.swatches)) {
-   console.log('[SEPARATION] Swatches loaded:', result.swatches);
-   this.graphicSwatches = result.swatches;
+		this.controller.getGraphicsList()
+			.then(result => {
+				if (result.success && result.graphics && Array.isArray(result.graphics)) {
+					console.log('[SEPARATION] Graphics loaded:', result.graphics);
+					this.graphicOptions = result.graphics;
+					if (!this.selectedGraphic && result.graphics.length > 0) {
+						this.selectedGraphic = result.graphics[0];
+					}
+				} else {
+					console.error('[SEPARATION] Failed to load graphics:', result.error || 'Invalid response');
+					this.graphicOptions = [];
+				}
+			})
+			.catch(err => {
+				console.error('[SEPARATION] Error loading graphics:', err);
+				this.graphicOptions = [];
+			})
+			.finally(() => {
+				this.isLoadingGraphics = false;
+			});
+	}
 
-   const newColorRows = result.swatches.map((swatchData: any, index: number) => {
-   const colorHex = swatchData.hex || this.getRandomColor();
-   return {
-    id: index + 1,
-    colorName: swatchData.name,
-    mesh: '110',
-    micron: 'NA',
-    type: 'separation' as const,
-    layerColor: colorHex,
-    flashEnabled: true,
-    coolEnabled: false,
-    wbEnabled: true,
-    removed: false
-   };
-   });
+	loadGraphicSwatches(): void {
+		if (!this.selectedGraphic) {
+			return;
+		}
 
-   this.colorRows = newColorRows;
-   this.nextId = newColorRows.length + 1;
-  } else {
-   console.error('[SEPARATION] Failed to load swatches:', result.error);
-   this.graphicSwatches = [];
-  }
-  })
-  .catch(err => {
-  console.error('[SEPARATION] Error loading swatches:', err);
-  this.graphicSwatches = [];
-  })
-  .finally(() => {
-  this.isLoadingSwatches = false;
-  });
- }
+		console.log('[SEPARATION] Loading swatches for graphic:', this.selectedGraphic);
+		this.isLoadingSwatches = true;
+
+		this.controller.getGraphicSwatches(this.selectedGraphic)
+			.then(result => {
+				if (result.success && result.swatches && Array.isArray(result.swatches)) {
+					console.log('[SEPARATION] Swatches loaded:', result.swatches);
+					this.graphicSwatches = result.swatches;
+
+					const newColorRows = result.swatches.map((swatchData: any, index: number) => {
+						const colorHex = swatchData.hex || this.getRandomColor();
+						return {
+							id: index + 1,
+							colorName: swatchData.name,
+							mesh: '110',
+							micron: 'NA',
+							type: 'separation' as const,
+							layerColor: colorHex,
+							flashEnabled: true,
+							coolEnabled: false,
+							wbEnabled: true,
+							removed: false
+						};
+					});
+
+					this.colorRows = newColorRows;
+					this.nextId = newColorRows.length + 1;
+				} else {
+					console.error('[SEPARATION] Failed to load swatches:', result.error);
+					this.graphicSwatches = [];
+				}
+			})
+			.catch(err => {
+				console.error('[SEPARATION] Error loading swatches:', err);
+				this.graphicSwatches = [];
+			})
+			.finally(() => {
+				this.isLoadingSwatches = false;
+			});
+	}
 
 	checkIfSeparatedDocument(): void {
 		console.log('[SEPARATION] Checking if document is separated...');
@@ -526,7 +534,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 			const aIsWhiteUB = this.isWhiteUB(a.colorName);
 			const bIsWhiteUB = this.isWhiteUB(b.colorName);
 			if (aIsWhiteUB === bIsWhiteUB) return 0;
-			return aIsWhiteUB ? 1 : -1;
+			return aIsWhiteUB ? -1 : 1; // White UB at top (return -1 when a is White UB)
 		});
 
 		return sorted;
@@ -538,19 +546,19 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 		return lowerName.includes('white ub') || lowerName.includes('whiteub');
 	}
 
- handleGraphicMenuClick(item: string): void {
- console.log('[SEPARATION] Graphic menu clicked:', item);
+	handleGraphicMenuClick(item: string): void {
+		console.log('[SEPARATION] Graphic menu clicked:', item);
 
- if (item === 'Refresh list') {
-  this.handleRefreshList();
- } else if (item === 'Add separation color') {
-  this.handleAddSeparationColor();
- } else if (item === 'Add compound plate') {
-  this.handleAddCompoundPlate();
- } else if (item === 'Revert') {
-  this.handleRevert();
- }
- }
+		if (item === 'Refresh list') {
+			this.handleRefreshList();
+		} else if (item === 'Add separation color') {
+			this.handleAddSeparationColor();
+		} else if (item === 'Add compound plate') {
+			this.handleAddCompoundPlate();
+		} else if (item === 'Revert') {
+			this.handleRevert();
+		}
+	}
 
 	handleRefreshList(): void {
 		this.hasUIChanges = false;
@@ -666,22 +674,22 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 		this.handleAddCompoundPlate();
 	}
 
- handleRevert(): void {
- console.log('[SEPARATION] Reversing color list order');
- this.colorRows = [...this.colorRows].reverse();
- }
+	handleRevert(): void {
+		console.log('[SEPARATION] Reversing color list order');
+		this.colorRows = [...this.colorRows].reverse();
+	}
 
- handleAddSeparationColor(): void {
- console.log('[SEPARATION] Opening modal to add separation color');
- this.editingRow = null;
- this.isSeparationModalOpen = true;
- }
+	handleAddSeparationColor(): void {
+		console.log('[SEPARATION] Opening modal to add separation color');
+		this.editingRow = null;
+		this.isSeparationModalOpen = true;
+	}
 
- handleAddCompoundPlate(): void {
- console.log('[SEPARATION] Opening modal to add compound plate');
- this.editingRow = null;
- this.isCompoundModalOpen = true;
- }
+	handleAddCompoundPlate(): void {
+		console.log('[SEPARATION] Opening modal to add compound plate');
+		this.editingRow = null;
+		this.isCompoundModalOpen = true;
+	}
 
 	handleSaveSeparationColor(plateData: any): void {
 		if (this.editingRow) {
@@ -723,6 +731,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 		}
 		this.isSeparationModalOpen = false;
 		this.editingRow = null;
+		this.cdr.detectChanges();
 	}
 
 	handleSaveCompoundPlate(plateData: any): void {
@@ -774,6 +783,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 		}
 		this.isCompoundModalOpen = false;
 		this.editingRow = null;
+		this.cdr.detectChanges();
 	}
 
 	handleColorRowMenuClick(item: string, rowId: number): void {
@@ -834,19 +844,23 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 		return candidate;
 	}
 
- handleEditSeparation(rowId: number): void {
- const rowToEdit = this.colorRows.find(row => row.id === rowId);
- if (rowToEdit) {
-  console.log('[SEPARATION] Opening modal to edit:', rowId, 'Type:', rowToEdit.type);
-  this.editingRow = rowToEdit;
+	handleEditSeparation(rowId: number): void {
+		const rowToEdit = this.colorRows.find(row => row.id === rowId);
+		if (rowToEdit) {
+			console.log('[SEPARATION] Opening modal to edit:', rowId, 'Type:', rowToEdit.type);
 
-  if (rowToEdit.type === 'compound') {
-  this.isCompoundModalOpen = true;
-  } else {
-  this.isSeparationModalOpen = true;
-  }
- }
- }
+			// Set editingRow first, then open modal to ensure data is available
+			this.editingRow = rowToEdit;
+			this.cdr.detectChanges(); // Force change detection to ensure editData is set
+
+			if (rowToEdit.type === 'compound') {
+				this.isCompoundModalOpen = true;
+			} else {
+				this.isSeparationModalOpen = true;
+			}
+			this.cdr.detectChanges(); // Force change detection after opening modal
+		}
+	}
 
 	handleRemoveColor(rowId: number): void {
 		const newColorRows = this.colorRows.map(row => {
@@ -866,109 +880,83 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 		console.log('[SEPARATION] Color row removed and moved to bottom:', rowId);
 	}
 
- handleToggleLayerVisibility(colorName: string): void {
- console.log('[SEPARATION] Toggle layer visibility for:', colorName);
+	handleToggleInkVisibility(colorName: string): void {
+		console.log('[SEPARATION] Toggle ink visibility for:', colorName);
 
- this.controller.toggleLayerVisibility(colorName)
-  .then(result => {
-  if (result.success) {
-   if (result.layerFound) {
-   console.log('[SEPARATION] Layer visibility toggled:', result.message, 'Visible:', result.visible);
-   } else {
-   console.log('[SEPARATION] Layer not found:', result.message);
-   }
-  } else {
-   console.error('[SEPARATION] Error toggling layer:', result.error);
-  }
-  })
-  .catch(err => {
-  console.error('[SEPARATION] Failed to toggle layer visibility:', err);
-  });
- }
-
- onDragStart(event: DragEvent, index: number): void {
- this.draggedIndex = index;
- if (event.dataTransfer) {
-  event.dataTransfer.effectAllowed = 'move';
- }
- if (event.currentTarget) {
-  (event.currentTarget as HTMLElement).classList.add('dragging');
- }
- }
-
- onDragEnd(event: DragEvent): void {
- if (event.currentTarget) {
-  (event.currentTarget as HTMLElement).classList.remove('dragging');
- }
- document.querySelectorAll('.exportFieldTable .row').forEach(row => {
-  row.classList.remove('drag-over');
- });
- this.draggedIndex = null;
- }
-
- onDragOver(event: DragEvent): void {
- event.preventDefault();
- if (event.dataTransfer) {
-  event.dataTransfer.dropEffect = 'move';
- }
- }
-
- onDragEnter(event: DragEvent, index: number): void {
- if (this.draggedIndex !== null && this.draggedIndex !== index) {
-  if (event.currentTarget) {
-  (event.currentTarget as HTMLElement).classList.add('drag-over');
-  }
- }
- }
-
- onDragLeave(event: DragEvent): void {
- if (event.currentTarget) {
-  (event.currentTarget as HTMLElement).classList.remove('drag-over');
- }
- }
-
-	onDrop(event: DragEvent, dropIndex: number): void {
-		event.preventDefault();
-		event.stopPropagation();
-
-		if (event.currentTarget) {
-			(event.currentTarget as HTMLElement).classList.remove('drag-over');
-		}
-
-		if (this.draggedIndex === null || this.draggedIndex === dropIndex) return;
-
-		const newColorRows = [...this.colorRows];
-		const draggedItem = newColorRows[this.draggedIndex];
-
-		if (draggedItem.removed) return;
-
-		newColorRows.splice(this.draggedIndex, 1);
-		newColorRows.splice(dropIndex, 0, draggedItem);
-
-		const sortedRows = newColorRows.sort((a, b) => {
-			if (a.removed === b.removed) return 0;
-			return a.removed ? 1 : -1;
-		});
-
-		this.colorRows = sortedRows;
-		this.hasUIChanges = true;
-		console.log('[SEPARATION] Color rows reordered from index', this.draggedIndex, 'to', dropIndex);
-		this.draggedIndex = null;
+		this.controller.toggleInkVisibility(colorName)
+			.then(result => {
+				if (result && result.success) {
+					console.log('[SEPARATION] Ink visibility mode:', result.mode || 'n/a');
+					// Update local state for UI dimming
+					if (result.mode) {
+						this.visibilityMode = result.mode;
+						this.activeSingleInk = result.activeInk || null;
+					}
+					this.cdr.detectChanges();
+				} else {
+					console.error('[SEPARATION] Error toggling ink visibility:', result && result.error);
+				}
+			})
+			.catch(err => {
+				console.error('[SEPARATION] Failed to toggle ink visibility:', err);
+			});
 	}
 
- getSequenceNumber(index: number): string {
- const activeRowsBeforeThis = this.colorRows.slice(0, index).filter(row => !row.removed).length;
- const row = this.colorRows[index];
- return row.removed ? '' : String(activeRowsBeforeThis + 1);
- }
+	isInkDimmed(colorName: string): boolean {
+		if (this.visibilityMode === 'noneVisible') {
+			return true;
+		}
+		if (this.visibilityMode === 'singleVisible' && this.activeSingleInk) {
+			// Dim if this is NOT the active single ink
+			return colorName !== this.activeSingleInk;
+		}
+		return false;
+	}
 
- getAvailableColors(): string[] {
- return this.colorRows.filter(row => row.type === 'separation').map(row => row.colorName);
- }
+	handleToggleHeaderVisibility(): void {
+		console.log('[SEPARATION] Reset ink visibility from header');
 
- isCompoundPlate(row: ColorRow): boolean {
- return row.type === 'compound';
- }
+		this.controller.resetInkVisibility()
+			.then(result => {
+				if (result && result.success) {
+					console.log('[SEPARATION] Ink visibility reset, mode:', result.mode || 'n/a');
+					// Use returned mode (could be 'allVisible' or 'noneVisible')
+					this.visibilityMode = result.mode || 'allVisible';
+					this.activeSingleInk = null;
+					this.cdr.detectChanges();
+				} else {
+					console.error('[SEPARATION] Error resetting ink visibility:', result && result.error);
+				}
+			})
+			.catch(err => {
+				console.error('[SEPARATION] Failed to reset ink visibility:', err);
+			});
+	}
+
+	// Drag and Drop (CDK)
+	drop(event: CdkDragDrop<string[]>): void {
+		if (event.previousIndex === event.currentIndex) {
+			return;
+		}
+
+		moveItemInArray(this.colorRows, event.previousIndex, event.currentIndex);
+		this.hasUIChanges = true;
+		console.log('[SEPARATION] Color rows reordered from index', event.previousIndex, 'to', event.currentIndex);
+	}
+
+	getSequenceNumber(index: number): string {
+		const activeRowsBeforeThis = this.colorRows.slice(0, index).filter(row => !row.removed).length;
+		const row = this.colorRows[index];
+		return row.removed ? '' : String(activeRowsBeforeThis + 1);
+	}
+
+	getAvailableColors(): string[] {
+		return this.colorRows.filter(row => row.type === 'separation').map(row => row.colorName);
+	}
+
+	isCompoundPlate(row: ColorRow): boolean {
+		return row.type === 'compound';
+	}
 
 	getSeparationColor(row: ColorRow): string {
 		return row.layerColor || '#FF6B6B';
@@ -980,16 +968,18 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 		const row = this.colorRows.find(r => r.id === rowId);
 		if (!row || row.removed) return;
 
-		const newSelected = new Set(this.selectedMeshRows);
-		const isCurrentlySelected = newSelected.has(rowId);
+		// 1. Check if row is already selected
+		const isCurrentlySelected = this.selectedMeshRows.has(rowId);
 
 		if (isCurrentlySelected) {
+			// 2. If ALREADY selected, enter Edit Mode for ALL selected rows
 			const newEditing = new Set<number>();
-			newSelected.forEach(id => {
+			this.selectedMeshRows.forEach(id => {
 				newEditing.add(id);
 			});
 
 			this.editingMeshRows = newEditing;
+			// Use the clicked row's mesh as the starting value for the bulk edit
 			this.meshEditValue = row.mesh || '';
 			this.focusedMeshRowId = rowId;
 
@@ -1002,41 +992,51 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 				}
 			}, 0);
 		} else {
-			newSelected.add(rowId);
-			this.selectedMeshRows = newSelected;
+			// 3. If NOT selected, ADD to selection (Additive/Toggle behavior)
+			this.selectedMeshRows.add(rowId);
+			// Force new Set reference to trigger change detection if needed (though we mutated the Set above, Angular might need a new ref)
+			this.selectedMeshRows = new Set(this.selectedMeshRows);
+
+			// Ensure we are NOT in edit mode if we are just adding to selection
 			this.editingMeshRows = new Set<number>();
 			this.meshEditValue = '';
 		}
 	}
 
 	handleMeshInputChange(value: string): void {
+		this.isTypingMesh = true;
 		this.meshEditValue = value;
-
-		// Update all selected rows immediately as user types
-		this.colorRows = this.colorRows.map(row => {
-			if (this.selectedMeshRows.has(row.id)) {
-				return { ...row, mesh: value };
-			}
-			return row;
-		});
-
 		this.hasUIChanges = true;
+
+		// Note: We do NOT mutate row.mesh here anymore.
+		// The inputs bind to [value]="meshEditValue", so they will all update visually.
+		// Committing to data model happens on Save.
+
+		setTimeout(() => {
+			this.isTypingMesh = false;
+		}, 100);
 	}
 
 	handleMeshInputBlur(): void {
+		// Save on blur
+		// We use a small timeout to allow other events (like standard click) to process
+		// But in this case, clicking outside SHOULD save.
 		setTimeout(() => {
-			if (!this.isSavingMesh) {
+			// If we are still in edit mode (meaning we didn't cancel), save.
+			if (this.editingMeshRows.size > 0 && !this.isTypingMesh && !this.isSavingMesh) {
 				this.saveMeshValues();
 			}
-		}, 0);
+		}, 200);
 	}
 
 	handleMeshInputKeyDown(event: KeyboardEvent): void {
 		if (event.key === 'Enter') {
 			event.preventDefault();
+			this.isTypingMesh = false;
 			this.saveMeshValues();
 		} else if (event.key === 'Escape') {
 			event.preventDefault();
+			this.isTypingMesh = false;
 			this.cancelMeshEdit();
 		}
 	}
@@ -1046,17 +1046,16 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 			return;
 		}
 
-		if (this.selectedMeshRows.size === 0 || this.editingMeshRows.size === 0) {
-			this.cancelMeshEdit();
+		if (this.editingMeshRows.size === 0) {
 			return;
 		}
 
 		this.isSavingMesh = true;
-
 		const valueToSave = this.meshEditValue.trim();
 
+		// Update ALL rows that were being edited
 		this.colorRows = this.colorRows.map(row => {
-			if (this.selectedMeshRows.has(row.id)) {
+			if (this.editingMeshRows.has(row.id)) {
 				return { ...row, mesh: valueToSave };
 			}
 			return row;
@@ -1064,8 +1063,9 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 
 		this.hasUIChanges = true;
 
-		this.selectedMeshRows = new Set<number>();
+		// Clear editing state and selection state after save
 		this.editingMeshRows = new Set<number>();
+		this.selectedMeshRows = new Set<number>();
 		this.meshEditValue = '';
 
 		setTimeout(() => {
@@ -1074,8 +1074,10 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 	}
 
 	private cancelMeshEdit(): void {
-		this.selectedMeshRows = new Set<number>();
+		// Just exit edit mode, maybe keep selection?
+		// For now, let's clear everything to return to clean state
 		this.editingMeshRows = new Set<number>();
+		this.selectedMeshRows = new Set<number>();
 		this.meshEditValue = '';
 	}
 
@@ -1142,5 +1144,13 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 			.catch(err => {
 				console.error('[SEPARATION] Error updating SEP TABLE:', err);
 			});
+	}
+
+	handleCancel(): void {
+		debugger;
+		this.isSeparationModalOpen = false;
+		this.isCompoundModalOpen = false;
+		this.editingRow = null;
+		this.cdr.detectChanges();
 	}
 }

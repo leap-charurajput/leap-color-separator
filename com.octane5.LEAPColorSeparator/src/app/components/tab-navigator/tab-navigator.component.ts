@@ -3,6 +3,7 @@ import { GraphicsComponent } from '../../pages/graphics/graphics.component';
 import { SeparationsComponent } from '../../pages/separations/separations.component';
 import { SeparationColorsComponent } from '../../pages/separation-colors/separation-colors.component';
 import { SettingsComponent } from '../../pages/settings/settings.component';
+import { ControllerService } from '../../services/controller.service';
 
 interface Tab {
 	title: string;
@@ -22,6 +23,9 @@ export class TabNavigatorComponent {
  @Input() documentRefreshKey = 0;
  @Output() onTabChange = new EventEmitter<number>();
  @Output() onMenuOptionClick = new EventEmitter<string>();
+	@Output() onRemoveSeparationData = new EventEmitter<void>();
+
+ constructor(private controller: ControllerService) {}
 
 	tabs: Tab[] = [
 		{ title: 'Graphics', component: GraphicsComponent },
@@ -33,38 +37,47 @@ export class TabNavigatorComponent {
  { title: 'Settings', component: SettingsComponent }
  ];
 
- get headerMenuItems(): string[] {
- const menuItems = [
-  'Mark as Reg mark',
-  'Remove separation data from team version'
- ];
+//  get headerMenuItems(): string[] {
+//  const menuItems = [
+//   'Mark as Reg mark',
+//   'Remove separation data from team version'
+//  ];
 
- if (this.menuOptions.length > 0) {
-  if (menuItems.length > 0) {
-   menuItems.push('---');
-  }
-  this.menuOptions.forEach(option => {
-   menuItems.push(option.title);
-  });
- }
+//  if (this.menuOptions.length > 0) {
+//   if (menuItems.length > 0) {
+//    menuItems.push('---');
+//   }
+//   this.menuOptions.forEach(option => {
+//    menuItems.push(option.title);
+//   });
+//  }
 
- return menuItems;
- }
+//  return menuItems;
+//  }
 
  handleTabClick(index: number): void {
  this.onTabChange.emit(index);
  }
 
- handleHeaderMenuClick(item: string): void {
- if (item === '---') return;
+//  handleHeaderMenuClick(item: string): void {
+//  if (item === '---') return;
 
- const menuOption = this.menuOptions.find(opt => opt.title === item);
- if (menuOption && this.onMenuOptionClick) {
-  this.onMenuOptionClick.emit(item);
-  return;
- }
+// 		if (item === 'Remove separation data from team version') {
+// 			this.onRemoveSeparationData.emit();
+// 			return;
+// 		}
 
- }
+// 		if (item === 'Mark as Reg mark') {
+// 			return;
+// 		}
+
+//  const menuOption = this.menuOptions.find(opt => opt.title === item);
+//  if (menuOption && this.onMenuOptionClick) {
+//   this.onMenuOptionClick.emit(item);
+//   return;
+//  }
+
+//  }
 
  renderTabIcon(tab: Tab): string {
  return tab.materialIcon ? tab.materialIcon : '';

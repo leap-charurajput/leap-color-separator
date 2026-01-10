@@ -1,5 +1,7 @@
-<div *ngIf="isOpen" class="modal-overlay" (mousedown)="onOverlayInteraction($event)" (click)="onOverlayInteraction($event)">
-	<div class="profile-modal-container" (mousedown)="onOverlayInteraction($event)" (click)="onOverlayInteraction($event)">
+<div *ngIf="isOpen" class="modal-overlay" (mousedown)="onOverlayInteraction($event)"
+	(click)="onOverlayInteraction($event)">
+	<div class="profile-modal-container" (mousedown)="onOverlayInteraction($event)"
+		(click)="onOverlayInteraction($event)">
 		<div class="modal-header">
 			<h3 class="modal-title">Edit Separation Profile</h3>
 		</div>
@@ -8,52 +10,33 @@
 			<div class="modal-body">
 				<label class="form-field">
 					<span class="field-label">Name:</span>
-					<input
-						type="text"
-						[value]="formState.name"
-						(input)="onInputChange('name', $event)"
-					/>
+					<input type="text" [value]="formState.name" (input)="onInputChange('name', $event)" />
 				</label>
 
 				<label class="form-field">
 					<span class="field-label">Code:</span>
-					<input
-						type="text"
-						[value]="formState.code"
-						(input)="onInputChange('code', $event)"
-					/>
+					<input type="text" [value]="formState.code" (input)="onInputChange('code', $event)" />
 				</label>
 
 				<label class="form-field">
 					<span class="field-label">Color Mesh:</span>
-					<input
-						type="text"
-						[value]="formState.colorMesh"
-						(input)="onInputChange('colorMesh', $event)"
-					/>
+					<input type="text" [value]="formState.colorMesh" (input)="onInputChange('colorMesh', $event)" />
 				</label>
 
 				<label *ngFor="let mesh of formState.underbaseMeshes; let i = index" class="form-field">
 					<span class="field-label">Underbase Mesh {{ i + 1 }}:</span>
-					<input
-						type="text"
-						[value]="mesh"
-						(input)="onMeshChange(i, $event)"
-					/>
+					<input type="text" [value]="mesh" (input)="onMeshChange(i, $event)" />
 				</label>
 
 				<div class="form-field checkbox-field">
-					<app-checkbox
-						[checked]="formState.waterbaseInk"
-						[label]="'Waterbase Ink'"
-						(change)="onCheckboxChange($event)"
-					></app-checkbox>
+					<app-checkbox [checked]="formState.waterbaseInk" [label]="'Waterbase Ink'"
+						(change)="onCheckboxChange($event)"></app-checkbox>
 				</div>
 			</div>
 
 			<div class="modal-footer">
 				<app-button type="button" variant="secondary" (click)="onCancel()">Cancel</app-button>
-				<app-button type="submit" variant="primary">OK</app-button>
+				<app-button type="button" variant="primary" (click)="onSubmit($event)">OK</app-button>
 			</div>
 		</form>
 	</div>
