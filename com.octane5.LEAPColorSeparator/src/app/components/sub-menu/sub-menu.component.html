@@ -1,10 +1,13 @@
-<span class="submenuOpener" #openerRef>
- <span [class]="iconClass" (click)="handleToggle($event)"></span>
- <div #menuRef [class.subMenu]="true" [class.show]="isOpen" [class.drop-up]="menuPosition === 'up'" [class.drop-down]="menuPosition === 'down'">
- <ul>
-  <li *ngFor="let item of items" (click)="handleItemClick(item)">
-  {{item}}
-  </li>
- </ul>
- </div>
+<span class="submenuOpener" #openerRef (mousedown)="handleMouseDown($event)" (dragstart)="handleDragStart($event)">
+	<span [class]="iconClass" (mousedown)="handleToggle($event)" (dragstart)="handleDragStart($event)"></span>
+	<div #menuRef [class.subMenu]="true" [class.show]="isOpen" [class.drop-up]="menuPosition === 'up'"
+		[class.drop-down]="menuPosition === 'down'" (mousedown)="handleMouseDown($event)"
+		(dragstart)="handleDragStart($event)">
+		<ul>
+			<li *ngFor="let item of items" (click)="handleItemClick(item)" (mousedown)="handleMouseDown($event)"
+				(dragstart)="handleDragStart($event)">
+				{{item}}
+			</li>
+		</ul>
+	</div>
 </span>

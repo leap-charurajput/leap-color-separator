@@ -1,145 +1,145 @@
 /* Edit Separation Modal Styles - Dark Theme Only */
 
 .modal-overlay {
- position: fixed;
- top: 0;
- left: 0;
- right: 0;
- bottom: 0;
- background-color: rgba(0, 0, 0, 0.7);
- display: flex;
- align-items: center;
- justify-content: center;
- z-index: 1000;
+	position: fixed;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	background-color: rgba(0, 0, 0, 0.7);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 1000;
 }
 
 .modal-container {
- background-color: var(--inner-bg);
- border-radius: 4px;
- width: 320px;
- max-width: 90%;
- box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
- color: var(--text-color);
+	background-color: #3a3a3a;
+	border-radius: 4px;
+	width: 320px;
+	max-width: 90%;
+	box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+	color: #ffffff;
 }
 
 .modal-header {
- padding: 12px 16px 10px;
- border-bottom: 1px solid var(--border-color);
+	padding: 12px 16px 10px;
+	border-bottom: 1px solid #555555;
 }
 
 .modal-title {
- margin: 0;
- font-size: 13px;
- font-weight: 500;
- text-align: center;
- font-family: 'Adobe Clean', sans-serif;
- color: var(--text-color);
+	margin: 0;
+	font-size: 13px;
+	font-weight: 500;
+	text-align: center;
+	font-family: 'Adobe Clean', sans-serif;
+	color: #ffffff;
 }
 
 .modal-body {
- padding: 16px;
+	padding: 16px;
 }
 
 .form-group {
- margin-bottom: 12px;
+	margin-bottom: 12px;
 }
 
 .form-group-half {
- flex: 1;
+	flex: 1;
 }
 
 .form-row {
- display: flex;
- gap: 8px;
+	display: flex;
+	gap: 8px;
 }
 
 .form-label {
- display: block;
- margin-bottom: 4px;
- font-size: var(--font-11);
- color: var(--text-color);
- font-family: 'Adobe Clean', sans-serif;
+	display: block;
+	margin-bottom: 4px;
+	font-size: 11px;
+	color: #ffffff;
+	font-family: 'Adobe Clean', sans-serif;
 }
 
 .form-input {
- width: 100%;
- padding: 4px 8px;
- background-color: var(--input-bg);
- border: 1px solid var(--border-color);
- border-radius: 3px;
- color: var(--text-color);
- font-size: var(--font-11);
- font-family: 'Adobe Clean', sans-serif;
- box-sizing: border-box;
- height: 24px;
+	width: 100%;
+	padding: 4px 8px;
+	background-color: #2a2a2a;
+	border: 1px solid #555555;
+	border-radius: 3px;
+	color: #ffffff;
+	font-size: 11px;
+	font-family: 'Adobe Clean', sans-serif;
+	box-sizing: border-box;
+	height: 24px;
 }
 
 .form-input:focus {
- outline: none;
- border-color: #0d99ff;
+	outline: none;
+	border-color: #0d99ff;
 }
 
 .form-input::placeholder {
- color: var(--input-border-color);
+	color: #888888;
 }
 
 .icon-toggles {
- display: flex;
- gap: 8px;
- margin-top: 12px;
+	display: flex;
+	gap: 8px;
+	margin-top: 12px;
 }
 
 .icon-toggle {
- width: 32px;
- height: 32px;
- background-color: var(--input-bg);
- border: 1px solid var(--border-color);
- border-radius: 3px;
- display: flex;
- align-items: center;
- justify-content: center;
- cursor: pointer;
- transition: all 0.2s ease;
+	width: 32px;
+	height: 32px;
+	background-color: #2a2a2a;
+	border: 1px solid #555555;
+	border-radius: 3px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+	transition: all 0.2s ease;
 }
 
 .icon-toggle:hover {
- background-color: var(--inner-bg);
- border-color: #0d99ff;
+	background-color: #3a3a3a;
+	border-color: #0d99ff;
 }
 
 .icon-toggle.active {
- background-color: #0d99ff;
- border-color: #0d99ff;
+	/* background-color: #0d99ff;
+ border-color: #0d99ff; */
 }
 
 .icon-toggle .icon-flash,
 .icon-toggle .icon-cool,
 .icon-toggle .icon-wb {
- font-size: 16px;
+	font-size: 16px;
 }
 
 .icon-toggle .icon-flash.disabled,
 .icon-toggle .icon-cool.disabled,
 .icon-toggle .icon-wb.disabled {
- opacity: 0.4;
+	opacity: 0.4;
 }
 
 .icon-toggle.active .icon-flash,
 .icon-toggle.active .icon-cool,
 .icon-toggle.active .icon-wb {
- opacity: 1;
+	opacity: 1;
 }
 
 .modal-footer {
- padding: 12px 16px;
- border-top: 1px solid var(--border-color);
- display: flex;
- justify-content: flex-end;
- gap: 8px;
+	padding: 12px 16px;
+	border-top: 1px solid #555555;
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
 }
 
 .modal-footer button {
- min-width: 70px;
- padding: 4px 12px;
- font-size: var(--font-11);
+	min-width: 70px;
+	padding: 4px 12px;
+	font-size: 11px;
 }

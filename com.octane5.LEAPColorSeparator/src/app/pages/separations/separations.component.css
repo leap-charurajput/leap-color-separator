@@ -16,7 +16,7 @@
 
 .section-header {
 	display: flex;
-	justify-content: space-between;
+	justify-content: flex-end;
 	align-items: center;
 	margin-bottom: 8px;
 }
@@ -133,15 +133,15 @@
 }
 
 .sep-file-link {
+	font-size: 11px;
+	color: rgba(255, 255, 255, 0.5);
+	font-style: italic;
+	padding: 6px 8px;
+	text-align: right;
+	width: 100%;
+	font-family: 'Adobe Clean', sans-serif;
 	background: none;
 	border: none;
-	color: rgba(255, 255, 255, 0.9);
-	font-size: 12px;
-	cursor: pointer;
-	text-decoration: underline;
-	padding: 0;
-	font-family: 'Adobe Clean', sans-serif;
-	text-align: right;
 }
 
 .sep-file-link:hover {
