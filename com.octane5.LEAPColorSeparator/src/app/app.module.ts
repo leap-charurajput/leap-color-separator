@@ -1,6 +1,7 @@
 import { NgModule } from '@angular/core';
 import { BrowserModule } from '@angular/platform-browser';
 import { FormsModule } from '@angular/forms';
+import { DragDropModule } from '@angular/cdk/drag-drop';
 
 import { AppComponent } from './app.component';
 import { TabNavigatorComponent } from './components/tab-navigator/tab-navigator.component';
@@ -24,31 +25,32 @@ import { SettingsComponent } from './pages/settings/settings.component';
 import { ControllerService } from './services/controller.service';
 
 @NgModule({
- declarations: [
- AppComponent,
- TabNavigatorComponent,
- SubMenuComponent,
- ButtonComponent,
- DropdownComponent,
- EditSeparationModalComponent,
- CompoundPlateModalComponent,
- LayerStackVisualizationComponent,
- CheckboxComponent,
- LinkColorsModalComponent,
- ProfilesTableComponent,
- SeparationProfilesPanelComponent,
- EditSeparationProfileModalComponent,
- ExportSeparationsModalComponent,
- SeparationColorsComponent,
- GraphicsComponent,
- SeparationsComponent,
- SettingsComponent
- ],
- imports: [
- BrowserModule,
- FormsModule
- ],
- providers: [ControllerService],
- bootstrap: [AppComponent]
+	declarations: [
+		AppComponent,
+		TabNavigatorComponent,
+		SubMenuComponent,
+		ButtonComponent,
+		DropdownComponent,
+		EditSeparationModalComponent,
+		CompoundPlateModalComponent,
+		LayerStackVisualizationComponent,
+		CheckboxComponent,
+		LinkColorsModalComponent,
+		ProfilesTableComponent,
+		SeparationProfilesPanelComponent,
+		EditSeparationProfileModalComponent,
+		ExportSeparationsModalComponent,
+		SeparationColorsComponent,
+		GraphicsComponent,
+		SeparationsComponent,
+		SettingsComponent
+	],
+	imports: [
+		BrowserModule,
+		FormsModule,
+		DragDropModule
+	],
+	providers: [ControllerService],
+	bootstrap: [AppComponent]
 })
 export class AppModule { }

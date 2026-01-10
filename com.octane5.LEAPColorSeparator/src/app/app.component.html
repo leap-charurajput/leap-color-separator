@@ -1,7 +1,20 @@
-<app-tab-navigator
- [activeTab]="activeTab"
- [selectedMenuOption]="selectedMenuOption"
- [documentRefreshKey]="documentRefreshKey"
- (onTabChange)="onTabChange($event)"
- (onMenuOptionClick)="onMenuOptionClick($event)">
+<app-tab-navigator [activeTab]="activeTab" [selectedMenuOption]="selectedMenuOption"
+ [documentRefreshKey]="documentRefreshKey" (onTabChange)="onTabChange($event)"
+ (onMenuOptionClick)="onMenuOptionClick($event)" (onRemoveSeparationData)="openRemoveConfirmation()">
 </app-tab-navigator>
+
+<div *ngIf="showConfirmDialog" class="modal-overlay" (click)="handleCancelRemove()">
+ <div class="confirm-dialog modal-container" (click)="$event.stopPropagation()">
+  <div class="modal-header">
+   <h3 class="modal-title">Remove Separation Data</h3>
+  </div>
+  <div class="modal-body">
+   <p>Are you sure you want to remove all separation data from this document? This action cannot be undone.</p>
+   <p *ngIf="confirmError" class="error-text">{{ confirmError }}</p>
+  </div>
+  <div class="modal-footer">
+   <app-button variant="secondary" (click)="handleCancelRemove()">Cancel</app-button>
+   <app-button variant="danger" (click)="handleConfirmRemove()">Remove</app-button>
+  </div>
+ </div>
+</div>

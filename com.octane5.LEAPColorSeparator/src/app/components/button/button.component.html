@@ -1,8 +1,5 @@
-<button
- [class]="buttonClasses"
- [disabled]="disabled"
- (click)="handleClick($event)">
- <span *ngIf="icon && iconPosition === 'left'" [class]="'ai-button__icon ' + icon"></span>
- <span class="ai-button__text"><ng-content></ng-content></span>
- <span *ngIf="icon && iconPosition === 'right'" [class]="'ai-button__icon ' + icon"></span>
+<button [class]="buttonClasses" [disabled]="disabled" [type]="type" (click)="handleClick($event)">
+	<span *ngIf="icon && iconPosition === 'left'" [class]="'ai-button__icon ' + icon"></span>
+	<span class="ai-button__text"><ng-content></ng-content></span>
+	<span *ngIf="icon && iconPosition === 'right'" [class]="'ai-button__icon ' + icon"></span>
 </button>

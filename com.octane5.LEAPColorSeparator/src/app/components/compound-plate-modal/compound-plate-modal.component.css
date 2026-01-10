@@ -184,8 +184,8 @@
 }
 
 .icon-toggle.active {
-	background-color: #0d99ff;
-	border-color: #0d99ff;
+	/* background-color: #0d99ff;
+	border-color: #0d99ff; */
 }
 
 .icon-toggle .icon-flash,

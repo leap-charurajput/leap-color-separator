@@ -19,11 +19,21 @@ export class EditSeparationModalComponent implements OnInit, OnChanges {
  wbEnabled = false;
 
  ngOnInit(): void {
- this.initializeForm();
+ // Initialize form if modal is already open when component is created
+ if (this.isOpen) {
+  this.initializeForm();
+ }
  }
 
  ngOnChanges(changes: SimpleChanges): void {
- if (changes['editData'] || changes['isOpen']) {
+ // Initialize form when modal opens (isOpen changes to true) or when editData changes
+ if (changes['isOpen']) {
+  if (this.isOpen) {
+   // Modal is opening - initialize form with editData
+   this.initializeForm();
+  }
+ } else if (changes['editData'] && this.isOpen) {
+  // editData changed while modal is open - update form
   this.initializeForm();
  }
  }
@@ -56,7 +66,7 @@ export class EditSeparationModalComponent implements OnInit, OnChanges {
   wbEnabled: this.wbEnabled
  };
  this.onSave.emit(plateData);
- this.onClose.emit();
+ // Don't emit onClose here - let the parent handle closing after save
  }
 
  handleCancel(): void {

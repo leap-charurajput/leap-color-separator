@@ -87,7 +87,7 @@ function GetXMP(nameSpace, nodeName, document) {
 			var currentXMPString = context.document.XMPString;
 
 			if (xmpModifier._cache[cacheKey] &&
-			    xmpModifier._cacheXMPString[cacheKey] === currentXMPString) {
+				xmpModifier._cacheXMPString[cacheKey] === currentXMPString) {
 				xmp = xmpModifier._cache[cacheKey];
 			} else {
 				xmp = new XMPMeta(currentXMPString);
@@ -104,6 +104,17 @@ function GetXMP(nameSpace, nodeName, document) {
 
 	context.doesStructFieldExist = function (structFieldName) {
 		return context.xmp.doesStructFieldExist(context.destNamespace, context.nodeName, context.destNamespace, structFieldName)
+	}
+
+	context.deleteStructField = function (structFieldName, autoCommit) {
+		if (context.doesStructFieldExist(structFieldName)) {
+			context.xmp.deleteStructField(context.destNamespace, context.nodeName, context.destNamespace, structFieldName);
+			context.hasPendingChanges = true;
+
+			if (autoCommit !== false) {
+				context.commit();
+			}
+		}
 	}
 
 	context.setStructField = function (structFieldName, structFieldValue, doesStringify, autoCommit) {
@@ -386,7 +397,7 @@ function getSeparatedArtLayerNames(doc) {
 			var subLayer = separatedArtLayer.layers[i];
 			layerNames.push(subLayer.name);
 		}
-	} catch (e) {}
+	} catch (e) { }
 	return layerNames;
 }
 function copyAndPrepareSEPDocument(templateFile, destinationFolder, docName, jsonData, styleCodes, profileMetadata) {
@@ -726,6 +737,267 @@ function handleToggleLayerVisibility(params_string) {
 		});
 	}
 }
+
+/*********************************************************
+ * Ink visibility helpers for SEPARATED_ART layer
+ *********************************************************/
+function getSeparatedArtLayer(doc) {
+	try {
+		return doc.layers.getByName(CONSTANTS.LAYER_NAMES.SEPARATED_ART);
+	} catch (e) {
+		return null;
+	}
+}
+
+function getSeparatedArtVisibilityState(separatedArtLayer) {
+	var total = separatedArtLayer.layers.length;
+	var visibleCount = 0;
+
+	for (var i = 0; i < separatedArtLayer.layers.length; i++) {
+		if (separatedArtLayer.layers[i].visible) {
+			visibleCount++;
+		}
+	}
+
+	var mode = "other";
+	if (total === 0) {
+		mode = "empty";
+	} else if (visibleCount === 0) {
+		mode = "noneVisible";
+	} else if (visibleCount === total) {
+		mode = "allVisible";
+	} else if (visibleCount === 1) {
+		mode = "singleVisible";
+	}
+
+	return {
+		total: total,
+		visibleCount: visibleCount,
+		mode: mode
+	};
+}
+
+/*********************************************************
+ * Toggle ink visibility according to SEPARATED_ART rules
+ *
+ * Expected params: { inkName: "PANTONE 123 C" }
+ * States:
+ *  - If all sublayers visible  -> hide all, show only clicked ink
+ *  - If only one visible       -> show all
+ * Returns: { success: true, mode: "allVisible" | "singleVisible" | "other" }
+ *********************************************************/
+function handleToggleInkVisibility(params_string) {
+	try {
+		var params = JSON.parse(params_string);
+		var inkName = params.inkName;
+
+		if (!inkName) {
+			return JSON.stringify({
+				success: false,
+				error: "Ink name is required"
+			});
+		}
+
+		if (!app.documents.length) {
+			return JSON.stringify({
+				success: false,
+				error: "No active document found"
+			});
+		}
+
+		var doc = app.activeDocument;
+
+		// Requirement 1: Hide SIZED_GRAPHICS sublayer
+		try {
+			var sizedArtLayer = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_ART);
+			var sizedGraphicsLayer = sizedArtLayer.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_GRAPHICS);
+			sizedGraphicsLayer.visible = false;
+			// Postpone redraw until end to prevent flicker, or do it here if needed immediately
+		} catch (e) {
+			// Layer might not exist
+		}
+
+		var separatedArtLayer = getSeparatedArtLayer(doc);
+
+		// Fallback to generic toggle if SEPARATED_ART layer is missing
+		if (!separatedArtLayer) {
+			var genericLayer = findLayerByName(doc.layers, inkName);
+			if (!genericLayer) {
+				return JSON.stringify({
+					success: true,
+					layerFound: false,
+					mode: "other",
+					message: "Layer not found: " + inkName
+				});
+			}
+
+			genericLayer.visible = !genericLayer.visible;
+			return JSON.stringify({
+				success: true,
+				layerFound: true,
+				mode: "other",
+				visible: genericLayer.visible
+			});
+		}
+
+		var state = getSeparatedArtVisibilityState(separatedArtLayer);
+		var targetLayer = null;
+
+		for (var i = 0; i < separatedArtLayer.layers.length; i++) {
+			var subLayer = separatedArtLayer.layers[i];
+			if (subLayer.name === inkName) {
+				targetLayer = subLayer;
+				break;
+			}
+		}
+
+		if (!targetLayer) {
+			return JSON.stringify({
+				success: true,
+				layerFound: false,
+				mode: state.mode,
+				message: "Ink sublayer not found in SEPARATED_ART: " + inkName
+			});
+		}
+
+		if (state.mode === "allVisible") {
+			// Switch to Single Visible (Solo Mode)
+			for (var j = 0; j < separatedArtLayer.layers.length; j++) {
+				separatedArtLayer.layers[j].visible = false;
+			}
+			targetLayer.visible = true;
+
+			// Force redraw
+			app.redraw();
+
+			return JSON.stringify({
+				success: true,
+				layerFound: true,
+				mode: "singleVisible",
+				activeInk: targetLayer.name
+			});
+		} else if (state.mode === "singleVisible") {
+			// Requirement 3: Exclusive switching logic
+
+			if (targetLayer.visible) {
+				// Clicked the active one -> Show All (Toggle off)
+				for (var k = 0; k < separatedArtLayer.layers.length; k++) {
+					separatedArtLayer.layers[k].visible = true;
+				}
+
+				app.redraw();
+				return JSON.stringify({
+					success: true,
+					layerFound: true,
+					mode: "allVisible"
+				});
+			} else {
+				// Clicked a different one -> Switch to that one (Exclusive)
+				// Hide all first (to ensure the old one is hidden)
+				for (var k = 0; k < separatedArtLayer.layers.length; k++) {
+					separatedArtLayer.layers[k].visible = false;
+				}
+				// Show the new one
+				targetLayer.visible = true;
+
+				app.redraw();
+				return JSON.stringify({
+					success: true,
+					layerFound: true,
+					mode: "singleVisible",
+					activeInk: targetLayer.name
+				});
+			}
+		} else {
+			// Mixed state -> Default to Show All
+			for (var m = 0; m < separatedArtLayer.layers.length; m++) {
+				separatedArtLayer.layers[m].visible = true;
+			}
+
+			app.redraw();
+			return JSON.stringify({
+				success: true,
+				layerFound: true,
+				mode: "allVisible"
+			});
+		}
+	} catch (e) {
+		return JSON.stringify({
+			success: false,
+			error: e.message || e.toString()
+		});
+	}
+}
+
+/*********************************************************
+ * Reset ink visibility from header eye icon
+ *
+ * - If all sublayers are already visible -> do nothing
+ * - If only one (or some) visible       -> show all sublayers
+ * Returns: { success: true, mode: "allVisible" | "allVisibleNoOp" | "other" }
+ *********************************************************/
+function handleResetInkVisibility(params_string) {
+	try {
+		if (!app.documents.length) {
+			return JSON.stringify({
+				success: false,
+				error: "No active document found"
+			});
+		}
+
+		var doc = app.activeDocument;
+		var separatedArtLayer = getSeparatedArtLayer(doc);
+
+		if (!separatedArtLayer) {
+			return JSON.stringify({
+				success: true,
+				mode: "other",
+				message: "SEPARATED_ART layer not found - no changes made"
+			});
+		}
+
+		var state = getSeparatedArtVisibilityState(separatedArtLayer);
+
+		if (state.mode === "allVisible") {
+			// Toggle to Hide All
+
+			// Requirement 1: Hide SIZED_GRAPHICS when hiding
+			try {
+				var sizedArtLayer = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_ART);
+				var sizedGraphicsLayer = sizedArtLayer.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_GRAPHICS);
+				sizedGraphicsLayer.visible = false;
+			} catch (e) {
+				// Ignore
+			}
+
+			for (var i = 0; i < separatedArtLayer.layers.length; i++) {
+				separatedArtLayer.layers[i].visible = false;
+			}
+
+			app.redraw();
+			return JSON.stringify({
+				success: true,
+				mode: "noneVisible"
+			});
+		} else {
+			// Toggle to Show All
+			for (var i = 0; i < separatedArtLayer.layers.length; i++) {
+				separatedArtLayer.layers[i].visible = true;
+			}
+
+			app.redraw();
+			return JSON.stringify({
+				success: true,
+				mode: "allVisible"
+			});
+		}
+	} catch (e) {
+		return JSON.stringify({
+			success: false,
+			error: e.message || e.toString()
+		});
+	}
+}
 function handleGetTemplateInfo(params_string) {
 	try {
 		if (!app.documents.length) {
@@ -822,11 +1094,11 @@ function handleUpdateSepTable(params_string) {
 				error: "No active document found"
 			});
 		}
-	var doc = app.activeDocument;
-	var errors = [];
-	var updatedRows = 0;
-	var clearedRows = 0;
-	var pgInkDataLayer = findLayerByName(doc.layers, "PG Ink Data");
+		var doc = app.activeDocument;
+		var errors = [];
+		var updatedRows = 0;
+		var clearedRows = 0;
+		var pgInkDataLayer = findLayerByName(doc.layers, "PG Ink Data");
 		if (pgInkDataLayer) {
 			// Track which groups have data (by seq number)
 			var groupsWithData = {};
@@ -907,37 +1179,37 @@ function handleUpdateSepTable(params_string) {
 		} else {
 			errors.push("PG Ink Data layer not found in document");
 		}
-	var gridLabelResult = updateGridColorLabels(doc, separationData);
-	if (gridLabelResult.errors.length > 0) {
-		errors = errors.concat(gridLabelResult.errors);
-	}
-
-	// ===== SAVE SEPARATION COLORS DATA TO XMP =====
-	try {
-		var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
-		if (xmp.isXmpCreated) {
-			xmp.setStructField("LEAPSeparationColorsData", separationData, true, false);
-			xmp.commit();
-			// Save document to persist XMP data
-			try {
-				doc.save();
-			} catch (saveError) {
-				// Could not auto-save document - XMP data committed and will be saved when document is manually saved
-			}
+		var gridLabelResult = updateGridColorLabels(doc, separationData);
+		if (gridLabelResult.errors.length > 0) {
+			errors = errors.concat(gridLabelResult.errors);
 		}
-	} catch (xmpError) {
-		// Continue anyway - XMP storage is not critical
-	}
 
-	return JSON.stringify({
-		success: true,
-		updatedRows: updatedRows,
-		clearedRows: clearedRows,
-		updatedLabels: gridLabelResult.updatedLabels,
-		deletedLabels: gridLabelResult.deletedLabels,
-		totalRows: separationData.length,
-		errors: errors.length > 0 ? errors : undefined
-	});
+		// ===== SAVE SEPARATION COLORS DATA TO XMP =====
+		try {
+			var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
+			if (xmp.isXmpCreated) {
+				xmp.setStructField("LEAPSeparationColorsData", separationData, true, false);
+				xmp.commit();
+				// Save document to persist XMP data
+				try {
+					doc.save();
+				} catch (saveError) {
+					// Could not auto-save document - XMP data committed and will be saved when document is manually saved
+				}
+			}
+		} catch (xmpError) {
+			// Continue anyway - XMP storage is not critical
+		}
+
+		return JSON.stringify({
+			success: true,
+			updatedRows: updatedRows,
+			clearedRows: clearedRows,
+			updatedLabels: gridLabelResult.updatedLabels,
+			deletedLabels: gridLabelResult.deletedLabels,
+			totalRows: separationData.length,
+			errors: errors.length > 0 ? errors : undefined
+		});
 	} catch (e) {
 		return JSON.stringify({
 			success: false,
@@ -1739,6 +2011,67 @@ function handleGetProfileCodeFromName(params_string) {
 			success: true,
 			profileCode: profileCode
 		});
+	} catch (e) {
+		return JSON.stringify({
+			success: false,
+			error: e.message || e.toString()
+		});
+	}
+}
+function handleRemoveSeparationData(params_string) {
+	try {
+		if (!app.documents.length) {
+			return JSON.stringify({
+				success: false,
+				error: "No active document"
+			});
+		}
+
+		var activeDoc = app.activeDocument;
+		var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", activeDoc);
+
+		if (!xmp.isXmpCreated) {
+			return JSON.stringify({
+				success: false,
+				error: "Failed to initialize XMP"
+			});
+		}
+
+		var removedFields = [];
+
+		if (xmp.doesStructFieldExist("GraphicsOrganizationData")) {
+			xmp.deleteStructField("GraphicsOrganizationData", false);
+			removedFields.push("GraphicsOrganizationData");
+		}
+
+		if (xmp.doesStructFieldExist("LEAPSeparationProfileData")) {
+			xmp.deleteStructField("LEAPSeparationProfileData", false);
+			removedFields.push("LEAPSeparationProfileData");
+		}
+
+		if (removedFields.length > 0) {
+			xmp.commit();
+
+			if (activeDoc.fullName && activeDoc.fullName.fsName) {
+				try {
+					activeDoc.save();
+				} catch (saveError) {
+				}
+			}
+
+			return JSON.stringify({
+				success: true,
+				message: "Separation data removed successfully",
+				removedFields: removedFields
+			});
+		} else {
+			return JSON.stringify({
+				success: true,
+				message: "No separation data found to remove",
+				removedFields: []
+			});
+		}
+
 	} catch (e) {
 		return JSON.stringify({
 			success: false,
