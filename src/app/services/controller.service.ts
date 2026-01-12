@@ -98,6 +98,41 @@ export class ControllerService {
   });
  }
 
+ toggleInkVisibility(inkName: string): Promise<any> {
+  this.log('toggleInkVisibility called for ink: ' + inkName);
+
+  return this.ensureSession().then(() => {
+   const params = { inkName: inkName };
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleToggleInkVisibility', params)
+    .then((res: string) => {
+     const result = JSON.parse(res);
+     return result;
+    })
+    .catch((err: any) => {
+     throw err;
+    });
+  });
+ }
+
+ resetInkVisibility(): Promise<any> {
+  this.log('resetInkVisibility called');
+
+  return this.ensureSession().then(() => {
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleResetInkVisibility', {})
+    .then((res: string) => {
+     const result = JSON.parse(res);
+     return result;
+    })
+    .catch((err: any) => {
+     throw err;
+    });
+  });
+ }
+
  updateSepTable(separationData: any[]): Promise<any> {
   this.log('updateSepTable called with ' + separationData.length + ' rows');
 
@@ -152,74 +187,6 @@ export class ControllerService {
      throw err;
     });
   });
- }
-
- async generateUnderbaseLayer(sourceLayerName: string, newNameLayer: string): Promise<string> {
-  console.log(
-   'generateUnderbaseLayer called for sourceLayer: ' +
-    sourceLayerName +
-    ', new layer: ' +
-    newNameLayer
-  );
-
-  await this.ensureSession();
-
-  const safeSource = sourceLayerName.replace(/'/g, "\\'");
-  const safeNew = newNameLayer.replace(/'/g, "\\'");
-
-  const script = `
-	  function duplicateSeparatedArtLayer(sourceLayerName, newNameLayer) {
-		var doc = app.activeDocument;
-  
-		var CONSTANTS = {
-		  LAYER_NAMES: {
-			SEPARATED_ART: 'SEPARATED_ART'
-		  }
-		};
-  
-		var separatedArtLayer;
-		try {
-		  separatedArtLayer = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SEPARATED_ART);
-		} catch (e) {
-		  return 'ERROR: SEPARATED_ART layer not found';
-		}
-  
-		var sourceLayer;
-		try {
-		  sourceLayer = separatedArtLayer.layers.getByName(sourceLayerName);
-		} catch (e) {
-		  return 'ERROR: Source layer not found: ' + sourceLayerName;
-		}
-  
-		var newLayer = separatedArtLayer.layers.add();
-		newLayer.name = newNameLayer;
-  
-		(function copyLayer(src, dst) {
-		  for (var i = src.pageItems.length - 1; i >= 0; i--) {
-			src.pageItems[i].duplicate(dst, ElementPlacement.PLACEATBEGINNING);
-		  }
-  
-		  for (var j = 0; j < src.layers.length; j++) {
-			var srcSub = src.layers[j];
-			var dstSub = dst.layers.add();
-			dstSub.name = srcSub.name;
-			copyLayer(srcSub, dstSub);
-		  }
-		})(sourceLayer, newLayer);
-  
-		return 'OK';
-	  }
-  
-	  duplicateSeparatedArtLayer('${safeSource}', '${safeNew}');
-	`;
-
-  try {
-   const result = await (window as any).leap.scriptLoader().evalScript(script);
-
-   return result;
-  } catch (err) {
-   throw err;
-  }
  }
 
  checkSeparatedDocument(): Promise<any> {
@@ -277,6 +244,74 @@ export class ControllerService {
   });
  }
 
+ async generateUnderbaseLayer(sourceLayerName: string, newNameLayer: string): Promise<string> {
+  console.log(
+   'generateUnderbaseLayer called for sourceLayer: ' +
+    sourceLayerName +
+    ', new layer: ' +
+    newNameLayer
+  );
+
+  await this.ensureSession();
+
+  const safeSource = sourceLayerName.replace(/'/g, "\\'");
+  const safeNew = newNameLayer.replace(/'/g, "\\'");
+
+  const script = `
+		function duplicateSeparatedArtLayer(sourceLayerName, newNameLayer) {
+		  var doc = app.activeDocument;
+	
+		  var CONSTANTS = {
+			LAYER_NAMES: {
+			  SEPARATED_ART: 'SEPARATED_ART'
+			}
+		  };
+	
+		  var separatedArtLayer;
+		  try {
+			separatedArtLayer = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SEPARATED_ART);
+		  } catch (e) {
+			return 'ERROR: SEPARATED_ART layer not found';
+		  }
+	
+		  var sourceLayer;
+		  try {
+			sourceLayer = separatedArtLayer.layers.getByName(sourceLayerName);
+		  } catch (e) {
+			return 'ERROR: Source layer not found: ' + sourceLayerName;
+		  }
+	
+		  var newLayer = separatedArtLayer.layers.add();
+		  newLayer.name = newNameLayer;
+	
+		  (function copyLayer(src, dst) {
+			for (var i = src.pageItems.length - 1; i >= 0; i--) {
+			  src.pageItems[i].duplicate(dst, ElementPlacement.PLACEATBEGINNING);
+			}
+	
+			for (var j = 0; j < src.layers.length; j++) {
+			  var srcSub = src.layers[j];
+			  var dstSub = dst.layers.add();
+			  dstSub.name = srcSub.name;
+			  copyLayer(srcSub, dstSub);
+			}
+		  })(sourceLayer, newLayer);
+	
+		  return 'OK';
+		}
+	
+		duplicateSeparatedArtLayer('${safeSource}', '${safeNew}');
+	  `;
+
+  try {
+   const result = await (window as any).leap.scriptLoader().evalScript(script);
+
+   return result;
+  } catch (err) {
+   throw err;
+  }
+ }
+
  getColorCodesFromExcel(teamCode: string): Promise<any> {
   this.log('getColorCodesFromExcel called for team: ' + teamCode);
 
@@ -293,7 +328,7 @@ export class ControllerService {
  }
 
  getStyleCodesFromExcel(teamCode: string): Promise<any> {
-  console.log('getStyleCodesFromExcel called for team: ' + teamCode);
+  this.log('getStyleCodesFromExcel called for team: ' + teamCode);
 
   return this.ensureSession().then(() => {
    return (window as any).leap
@@ -569,6 +604,29 @@ export class ControllerService {
   });
  }
 
+ removeSeparationData(): Promise<any> {
+  this.log('removeSeparationData called');
+
+  return this.ensureSession().then(() => {
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleRemoveSeparationData', {})
+    .then((res: string) => {
+     try {
+      return JSON.parse(res);
+     } catch (parseErr) {
+      console.error('removeSeparationData: failed to parse response', res, parseErr);
+      return { success: false, error: 'Invalid response from host', raw: res };
+     }
+    })
+    .catch((err: any) => {
+     console.error('removeSeparationData: host call failed', err);
+     const message = err?.message || err?.toString?.() || 'Unknown error';
+     return { success: false, error: message, rawError: err };
+    });
+  });
+ }
+
  performSeparation(
   graphicName: string,
   styleCodes: string[] = [],
@@ -611,9 +669,7 @@ export class ControllerService {
   });
  }
 
- private log(val: string): void {
-  console.log(val);
- }
+ private log(val: string): void {}
 
  private get name(): string {
   return 'Client Controller:: ';

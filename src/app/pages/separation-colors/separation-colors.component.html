@@ -1,278 +1,178 @@
 <div>
- <!-- Show message when document is not a separated document (only in CEP, not browser) -->
- <div *ngIf="!isRunningInBrowser && !isSeparatedDoc" class="separation-colors-not-separated">
-  <div class="panelTitle">Separation Colors</div>
-  <div class="separation-colors-not-separated-message">
-   Front document isnt a LEAP color separation document
-  </div>
- </div>
+	<!-- Show message when document is not a separated document (only in CEP, not browser) -->
+	<div *ngIf="!isRunningInBrowser && !isSeparatedDoc" class="separation-colors-not-separated">
+		<div class="panelTitle">Separation Colors</div>
+		<div class="separation-colors-not-separated-message">
+			Front document isnt a LEAP color separation document
+		</div>
+	</div>
 
- <!-- Main UI - only show when separated doc or running in browser -->
- <div *ngIf="isRunningInBrowser || isSeparatedDoc">
-  <div class="d-flex gap-5 align-center mb-5">
-   <div class="" *ngIf="isSeparatedDoc">
-    <span class="label">Graphic: </span>
-    <span class="value">
-     {{ documentProfileMetadata?.graphicName || graphicNameFromPath }}
-     <span *ngIf="documentProfileMetadata?.profileName"
-      >({{ documentProfileMetadata.profileName }})</span
-     >
-    </span>
-   </div>
-   <div class="" *ngIf="!isSeparatedDoc">
-    <span class="label">Graphic: </span>
-    <span class="value">{{ selectedGraphic }}</span>
-   </div>
-   <div class="ml-auto separation-colors-actions">
-    <button class="separation-action-btn" (click)="handleAddUnderbase()" title="Add underbase">
-     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 11.73 11.73" width="20" height="20">
-      <polygon
-       fill="#fff"
-       points="7.82 3.91 7.82 0 0 0 0 7.82 3.91 7.82 3.91 11.73 11.73 11.73 11.73 3.91 7.82 3.91"
-      />
-      <path
-       fill="#231f20"
-       d="M6.87,3.12v1.63h-2.16v2.19h-1.69v-2.19H.85v-1.63h2.16V1.05h1.69v2.07h2.16Z"
-      />
-     </svg>
-    </button>
-    <button
-     class="separation-action-btn"
-     (click)="handleRefreshList()"
-     [title]="hasUIChanges ? 'Refresh list (unsaved changes)' : 'Refresh list'"
-    >
-     <svg
-      *ngIf="!hasUIChanges"
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 9.72 12.35"
-      width="20"
-      height="20"
-     >
-      <path
-       fill="currentColor"
-       d="M9.72,7.49c0,1.3-.5,2.52-1.42,3.44-.92.92-2.14,1.42-3.44,1.42s-2.52-.5-3.44-1.42c-.9-.92-1.42-2.14-1.42-3.44s.52-2.5,1.42-3.44c.92-.9,2.12-1.42,3.4-1.42l-.61-2.63,5.04,3.47-4.84,3.69.43-2.81c-1.73.02-3.13,1.4-3.13,3.13s1.42,3.15,3.15,3.15,3.13-1.42,3.13-3.15h1.73Z"
-      />
-     </svg>
-     <svg
-      *ngIf="hasUIChanges"
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 15.5 12.35"
-      width="20"
-      height="20"
-     >
-      <path
-       fill="currentColor"
-       d="M9.72,7.49c0,1.3-.5,2.52-1.42,3.44-.92.92-2.14,1.42-3.44,1.42s-2.52-.5-3.44-1.42c-.9-.92-1.42-2.14-1.42-3.44s.52-2.5,1.42-3.44c.92-.9,2.12-1.42,3.4-1.42l-.61-2.63,5.04,3.47-4.84,3.69.43-2.81c-1.73.02-3.13,1.4-3.13,3.13s1.42,3.15,3.15,3.15,3.13-1.42,3.13-3.15h1.73Z"
-      />
-      <g transform="translate(8.2, 7.2)">
-       <g transform="scale(1.2)">
-        <path
-         fill="#ffcb00"
-         d="M5.72,4.51c0,.37-.29.64-.64.64h-5.23c-.35,0-.65-.28-.65-.64,0-.11.03-.22.09-.32l2.63-4.54c.11-.2.31-.32.55-.32s.44.12.55.32l2.62,4.54c.05.1.08.21.08.32ZM1.94,3.99c0,.29.23.52.53.52s.53-.23.53-.52-.23-.54-.53-.54-.53.23-.53.54ZM1.99,2.95h.95v-2.13h-.95v2.13Z"
-        />
-       </g>
-      </g>
-     </svg>
-    </button>
-    <button
-     class="separation-action-btn"
-     (click)="handleExportProcess()"
-     title="Export to document"
-    >
-     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12.23 13.38" width="20" height="20">
-      <path
-       fill="currentColor"
-       d="M8.62,0H1.25v5.21h1.58V1.58h4.4c.73,0,1.23.48,1.23,1.01v1.63h1.5c.44,0,.68.07.68.59v6.98H2.83v-3.23h-1.58v4.81h10.98V3.7l-3.61-3.7Z"
-      />
-      <polygon
-       fill="currentColor"
-       points="3.69 5.95 0 5.95 0 7.82 3.66 7.82 3.66 9.84 7.14 6.85 3.69 3.88 3.69 5.95"
-      />
-     </svg>
-    </button>
-   </div>
-  </div>
+	<!-- Main UI - only show when separated doc or running in browser -->
+	<div *ngIf="isRunningInBrowser || isSeparatedDoc">
+		<div class="d-flex gap-5 align-center mb-5">
+			<div class="" *ngIf="isSeparatedDoc">
+				<span class="label">Graphic: </span>
+				<span class="value">
+					{{documentProfileMetadata?.graphicName || graphicNameFromPath}}
+					<span *ngIf="documentProfileMetadata?.profileName">({{documentProfileMetadata.profileName}})</span>
+				</span>
+			</div>
+			<div class="" *ngIf="!isSeparatedDoc">
+				<span class="label">Graphic: </span>
+				<span class="value">{{selectedGraphic}}</span>
+			</div>
+			<div class="ml-auto separation-colors-actions">
+				<button class="separation-action-btn" (click)="handleAddUnderbase()" title="Add underbase">
+					<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 11.73 11.73" width="20" height="20">
+						<polygon fill="#fff"
+							points="7.82 3.91 7.82 0 0 0 0 7.82 3.91 7.82 3.91 11.73 11.73 11.73 11.73 3.91 7.82 3.91" />
+						<path fill="#231f20" d="M6.87,3.12v1.63h-2.16v2.19h-1.69v-2.19H.85v-1.63h2.16V1.05h1.69v2.07h2.16Z" />
+					</svg>
+				</button>
+				<button class="separation-action-btn" (click)="handleRefreshList()"
+					[title]="hasUIChanges ? 'Refresh list (unsaved changes)' : 'Refresh list'">
+					<svg *ngIf="!hasUIChanges" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9.72 12.35" width="20" height="20">
+						<path fill="currentColor"
+							d="M9.72,7.49c0,1.3-.5,2.52-1.42,3.44-.92.92-2.14,1.42-3.44,1.42s-2.52-.5-3.44-1.42c-.9-.92-1.42-2.14-1.42-3.44s.52-2.5,1.42-3.44c.92-.9,2.12-1.42,3.4-1.42l-.61-2.63,5.04,3.47-4.84,3.69.43-2.81c-1.73.02-3.13,1.4-3.13,3.13s1.42,3.15,3.15,3.15,3.13-1.42,3.13-3.15h1.73Z" />
+					</svg>
+					<svg *ngIf="hasUIChanges" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 15.5 12.35" width="20" height="20">
+						<path fill="currentColor"
+							d="M9.72,7.49c0,1.3-.5,2.52-1.42,3.44-.92.92-2.14,1.42-3.44,1.42s-2.52-.5-3.44-1.42c-.9-.92-1.42-2.14-1.42-3.44s.52-2.5,1.42-3.44c.92-.9,2.12-1.42,3.4-1.42l-.61-2.63,5.04,3.47-4.84,3.69.43-2.81c-1.73.02-3.13,1.4-3.13,3.13s1.42,3.15,3.15,3.15,3.13-1.42,3.13-3.15h1.73Z" />
+						<g transform="translate(8.2, 7.2)">
+							<g transform="scale(1.2)">
+								<path fill="#ffcb00"
+									d="M5.72,4.51c0,.37-.29.64-.64.64h-5.23c-.35,0-.65-.28-.65-.64,0-.11.03-.22.09-.32l2.63-4.54c.11-.2.31-.32.55-.32s.44.12.55.32l2.62,4.54c.05.1.08.21.08.32ZM1.94,3.99c0,.29.23.52.53.52s.53-.23.53-.52-.23-.54-.53-.54-.53.23-.53.54ZM1.99,2.95h.95v-2.13h-.95v2.13Z" />
+							</g>
+						</g>
+					</svg>
+				</button>
+				<button class="separation-action-btn" (click)="handleExportProcess()" title="Export to document">
+					<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12.23 13.38" width="20" height="20">
+						<path fill="currentColor"
+							d="M8.62,0H1.25v5.21h1.58V1.58h4.4c.73,0,1.23.48,1.23,1.01v1.63h1.5c.44,0,.68.07.68.59v6.98H2.83v-3.23h-1.58v4.81h10.98V3.7l-3.61-3.7Z" />
+						<polygon fill="currentColor"
+							points="3.69 5.95 0 5.95 0 7.82 3.66 7.82 3.66 9.84 7.14 6.85 3.69 3.88 3.69 5.95" />
+					</svg>
+				</button>
+			</div>
+		</div>
 
-  <div class="panelTitle mb-5">Separation colors</div>
+		<div class="panelTitle mb-5">Separation colors</div>
 
-  <div *ngIf="isLoadingSwatches" class="panelTitle mx-5">
-   <p class="mt-15">Loading...</p>
-  </div>
+		<div *ngIf="isLoadingSwatches" class="panelTitle mx-5">
+			<p class="mt-15">Loading...</p>
+		</div>
 
-  <div
-   *ngIf="
-    !isLoadingSwatches && !isSeparatedDoc && !isLoadingGraphics && graphicOptions.length === 0
-   "
-   class="panelTitle mx-5"
-  >
-   <p class="mt-15">
-    <span *ngIf="isRunningInBrowser">Please run this in Illustrator</span>
-    <span *ngIf="!isRunningInBrowser">No graphics found in document.</span>
-   </p>
-  </div>
+		<div *ngIf="!isLoadingSwatches && !isSeparatedDoc && !isLoadingGraphics && graphicOptions.length === 0"
+			class="panelTitle mx-5">
+			<p class="mt-15">
+				<span *ngIf="isRunningInBrowser">Please run this in Illustrator</span>
+				<span *ngIf="!isRunningInBrowser">No graphics found in document.</span>
+			</p>
+		</div>
 
-  <div
-   *ngIf="
-    !isLoadingSwatches && (isSeparatedDoc || (!isLoadingGraphics && graphicOptions.length > 0))
-   "
-   class="separation-colors-table-container border-1"
-   data-submenu-boundary
-  >
-   <div class="thRow row d-flex align-center">
-    <div class="col"><span>SEQ</span></div>
-    <div class="col bigger"><span>Ink</span></div>
-    <div class="col"><span>Mesh</span></div>
-    <div class="col"><span>Micron</span></div>
-    <div class="col text-center"><span>Flash</span></div>
-    <div class="col text-center"><span>Cool</span></div>
-    <div class="col text-center"><span>WB</span></div>
-    <div class="col emptyCol"></div>
-   </div>
-   <div
-    *ngIf="colorRows.length === 0"
-    class="panelTitle mx-5"
-    style="padding: 20px; text-align: center"
-   >
-    <p class="mt-15" style="color: rgba(255, 255, 255, 0.6)">No color rows loaded</p>
-   </div>
-   <div class="exportFieldTable" *ngIf="colorRows.length > 0">
-    <div
-     *ngFor="let row of colorRows; let i = index"
-     class="row d-flex align-center"
-     [class.removed-row]="row.removed"
-     [draggable]="!row.removed"
-     (dragstart)="onDragStart($event, i)"
-     (dragend)="onDragEnd($event)"
-     (dragover)="onDragOver($event)"
-     (dragenter)="onDragEnter($event, i)"
-     (dragleave)="onDragLeave($event)"
-     (drop)="onDrop($event, i)"
-     [style.cursor]="row.removed ? 'not-allowed' : 'move'"
-     [style.pointer-events]="row.removed ? 'none' : 'auto'"
-    >
-     <div class="col d-flex align-center gap-3">
-      <span class="icon-DRAG" [style.cursor]="row.removed ? 'not-allowed' : 'grab'"></span>
-      <span>{{ getSequenceNumber(i) }}</span>
-     </div>
-     <div class="col bigger">
-      <div class="d-flex gap-5 align-center">
-       <div
-        class="fieldIcon"
-        (click)="handleToggleLayerVisibility(row.colorName)"
-        style="cursor: pointer"
-       >
-        <span
-         *ngIf="isCompoundPlate(row) || isWhiteUB(row.colorName)"
-         class="icon-colorIcon"
-        ></span>
-        <span
-         *ngIf="!isCompoundPlate(row) && !isWhiteUB(row.colorName)"
-         class="squareColorIcon"
-         [style.background]="getSeparationColor(row)"
-        ></span>
-       </div>
-       <span>{{ row.colorName }}</span>
-      </div>
-     </div>
-     <div
-      class="col mesh-cell-editable"
-      [class.editing]="isMeshEditing(row.id)"
-      [class.selected]="isMeshSelected(row.id)"
-      (click)="handleMeshCellClick(row.id, $event)"
-     >
-      <input
-       *ngIf="isMeshEditing(row.id)"
-       type="text"
-       [value]="meshEditValue"
-       (input)="handleMeshInputChange($event.target.value)"
-       (blur)="handleMeshInputBlur()"
-       (keydown)="handleMeshInputKeyDown($event)"
-       [attr.data-mesh-row-id]="row.id"
-       style="
-        width: 100%;
-        background: transparent;
-        border: 1px solid #7bb4ff;
-        color: rgba(255, 255, 255, 0.9);
-        padding: 2px 4px;
-        font-size: 11px;
-        font-family: 'Adobe Clean', sans-serif;
-       "
-      />
-      <span *ngIf="!isMeshEditing(row.id)">{{ row.mesh }}</span>
-     </div>
-     <div class="col">{{ row.micron }}</div>
-     <div class="col text-center">
-      <span
-       [class.icon-flash]="true"
-       [class.disabled]="!row.flashEnabled"
-       (click)="!row.removed && handleToggleFlash(row.id)"
-       [style.cursor]="row.removed ? 'not-allowed' : 'pointer'"
-       [style.pointer-events]="row.removed ? 'none' : 'auto'"
-      ></span>
-     </div>
-     <div class="col text-center">
-      <span
-       [class.icon-cool]="true"
-       [class.disabled]="!row.coolEnabled"
-       (click)="!row.removed && handleToggleCool(row.id)"
-       [style.cursor]="row.removed ? 'not-allowed' : 'pointer'"
-       [style.pointer-events]="row.removed ? 'none' : 'auto'"
-      ></span>
-     </div>
-     <div class="col text-center">
-      <span
-       [class.icon-wb]="true"
-       [class.disabled]="!row.wbEnabled"
-       (click)="!row.removed && handleToggleWb(row.id)"
-       [style.cursor]="row.removed ? 'not-allowed' : 'pointer'"
-       [style.pointer-events]="row.removed ? 'none' : 'auto'"
-      ></span>
-     </div>
-     <div
-      class="col text-center"
-      [style.pointer-events]="row.removed ? 'none' : 'auto'"
-      [style.opacity]="row.removed ? 0.3 : 1"
-     >
-      <app-sub-menu
-       [items]="['Edit', 'Add second hit...', 'Remove color']"
-       [hidden]="row.removed"
-       (onItemClick)="handleColorRowMenuClick($event, row.id)"
-      ></app-sub-menu>
-     </div>
-    </div>
-   </div>
-  </div>
+		<div *ngIf="!isLoadingSwatches && (isSeparatedDoc || (!isLoadingGraphics && graphicOptions.length > 0))"
+			class="separation-colors-table-container border-1" data-submenu-boundary>
+			<div class="thRow row d-flex align-center">
+				<div class="col"><span>SEQ</span></div>
+				<div class="col text-center">
+					<span class="icon-toggle-clickable" title="Toggle ink layer visibility"
+						[class.dimmed]="visibilityMode === 'singleVisible'" (click)="handleToggleHeaderVisibility()">
+						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14">
+							<path fill="currentColor"
+								d="M12 5C6.5 5 2.1 8.2.5 12c1.6 3.8 6 7 11.5 7s9.9-3.2 11.5-7C21.9 8.2 17.5 5 12 5zm0 11c-2.2 0-4-1.8-4-4s1.8-4 4-4 4 1.8 4 4-1.8 4-4 4zm0-6.5A2.5 2.5 0 1 0 14.5 12 2.5 2.5 0 0 0 12 9.5z" />
+						</svg>
+					</span>
+				</div>
+				<div class="col bigger"><span>Ink</span></div>
+				<div class="col"><span>Mesh</span></div>
+				<div class="col"><span>Micron</span></div>
+				<div class="col text-center"><span>Flash</span></div>
+				<div class="col text-center"><span>Cool</span></div>
+				<div class="col text-center"><span>WB</span></div>
+				<div class="col emptyCol"></div>
+			</div>
+			<div *ngIf="colorRows.length === 0" class="panelTitle mx-5" style="padding: 20px; text-align: center;">
+				<p class="mt-15" style="color: rgba(255, 255, 255, 0.6);">No color rows loaded</p>
+			</div>
+			<div class="exportFieldTable" *ngIf="colorRows.length > 0" cdkDropList (cdkDropListDropped)="drop($event)">
+				<div *ngFor="let row of colorRows; let i = index" class="row d-flex align-center"
+					[class.removed-row]="row.removed" cdkDrag [cdkDragDisabled]="row.removed"
+					[style.cursor]="row.removed ? 'not-allowed' : 'move'" [style.pointer-events]="row.removed ? 'none' : 'auto'">
+					<div class="col d-flex align-center gap-3">
+						<span class="icon-DRAG" [style.cursor]="row.removed ? 'not-allowed' : 'grab'" cdkDragHandle></span>
+						<span>{{getSequenceNumber(i)}}</span>
+					</div>
+					<div class="col text-center">
+						<span class="icon-toggle-clickable" [class.disabled]="row.removed"
+							[class.dimmed]="isInkDimmed(row.colorName)" title="Toggle ink layer visibility"
+							(click)="!row.removed && handleToggleInkVisibility(row.colorName)">
+							<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14">
+								<path fill="currentColor"
+									d="M12 5C6.5 5 2.1 8.2.5 12c1.6 3.8 6 7 11.5 7s9.9-3.2 11.5-7C21.9 8.2 17.5 5 12 5zm0 11c-2.2 0-4-1.8-4-4s1.8-4 4-4 4 1.8 4 4-1.8 4-4 4zm0-6.5A2.5 2.5 0 1 0 14.5 12 2.5 2.5 0 0 0 12 9.5z" />
+							</svg>
+						</span>
+					</div>
+					<div class="col bigger">
+						<div class="d-flex gap-5 align-center">
+							<div class="fieldIcon">
+								<span *ngIf="isCompoundPlate(row) || isWhiteUB(row.colorName)" class="icon-colorIcon"></span>
+								<span *ngIf="!isCompoundPlate(row) && !isWhiteUB(row.colorName)" class="squareColorIcon"
+									[style.background]="getSeparationColor(row)"></span>
+							</div>
+							<span>{{row.colorName}}</span>
+						</div>
+					</div>
+					<div class="col mesh-cell-editable" [class.editing]="isMeshEditing(row.id)"
+						[class.selected]="isMeshSelected(row.id)" (click)="handleMeshCellClick(row.id, $event)">
+						<input *ngIf="isMeshEditing(row.id)" type="text" [value]="meshEditValue"
+							(input)="handleMeshInputChange($event.target.value)" (blur)="handleMeshInputBlur()"
+							(keydown)="handleMeshInputKeyDown($event)" [attr.data-mesh-row-id]="row.id"
+							style="width: 100%; background: transparent; border: 1px solid #7bb4ff; color: rgba(255,255,255,0.9); padding: 2px 4px; font-size: 11px; font-family: 'Adobe Clean', sans-serif;" />
+						<span *ngIf="!isMeshEditing(row.id)">{{row.mesh}}</span>
+					</div>
+					<div class="col">{{row.micron}}</div>
+					<div class="col text-center">
+						<span [class.icon-flash]="true" [class.disabled]="!row.flashEnabled"
+							(click)="!row.removed && handleToggleFlash(row.id)"
+							[style.cursor]="row.removed ? 'not-allowed' : 'pointer'"
+							[style.pointer-events]="row.removed ? 'none' : 'auto'"></span>
+					</div>
+					<div class="col text-center">
+						<span [class.icon-cool]="true" [class.disabled]="!row.coolEnabled"
+							(click)="!row.removed && handleToggleCool(row.id)"
+							[style.cursor]="row.removed ? 'not-allowed' : 'pointer'"
+							[style.pointer-events]="row.removed ? 'none' : 'auto'"></span>
+					</div>
+					<div class="col text-center">
+						<span [class.icon-wb]="true" [class.disabled]="!row.wbEnabled"
+							(click)="!row.removed && handleToggleWb(row.id)" [style.cursor]="row.removed ? 'not-allowed' : 'pointer'"
+							[style.pointer-events]="row.removed ? 'none' : 'auto'"></span>
+					</div>
+					<div class="col text-center" [style.pointer-events]="row.removed ? 'none' : 'auto'"
+						[style.opacity]="row.removed ? 0.3 : 1">
+						<app-sub-menu *ngIf="!row.removed" [items]="['Edit', 'Add second hit...', 'Remove color']"
+							(onItemClick)="handleColorRowMenuClick($event, row.id)"></app-sub-menu>
+					</div>
+				</div>
+			</div>
+		</div>
 
-  <app-layer-stack-visualization
-   [colorRows]="colorRows"
-   garmentColor="#4A5568"
-   garmentName="Garment: Athletic Navy"
-  >
-  </app-layer-stack-visualization>
+		<app-layer-stack-visualization [colorRows]="colorRows" garmentColor="#4A5568" garmentName="Garment: Athletic Navy">
+		</app-layer-stack-visualization>
 
-  <app-edit-separation-modal
-   [isOpen]="isSeparationModalOpen"
-   [editData]="editingRow"
-   (onClose)="isSeparationModalOpen = false; editingRow = null"
-   (onSave)="handleSaveSeparationColor($event)"
-  >
-  </app-edit-separation-modal>
+		<app-edit-separation-modal [isOpen]="isSeparationModalOpen" [editData]="editingRow" (onClose)="handleCancel($event)"
+			(onSave)="handleSaveSeparationColor($event)">
+		</app-edit-separation-modal>
 
-  <app-compound-plate-modal
-   [isOpen]="isCompoundModalOpen"
-   [editData]="editingRow"
-   [availableColors]="getAvailableColors()"
-   (onClose)="isCompoundModalOpen = false; editingRow = null"
-   (onSave)="handleSaveCompoundPlate($event)"
-  >
-  </app-compound-plate-modal>
+		<app-compound-plate-modal [isOpen]="isCompoundModalOpen" [editData]="editingRow"
+			[availableColors]="getAvailableColors()" (onClose)="handleCancel($event)"
+			(onSave)="handleSaveCompoundPlate($event)">
+		</app-compound-plate-modal>
 
-  <app-export-separations-modal
-   [isOpen]="isExportModalOpen"
-   (close)="isExportModalOpen = false"
-   (export)="handleExportSeparations($event)"
-  >
-  </app-export-separations-modal>
-  <!-- End main UI -->
- </div>
+		<app-export-separations-modal [isOpen]="isExportModalOpen" (close)="isExportModalOpen = false"
+			(export)="handleExportSeparations($event)">
+		</app-export-separations-modal>
+		<!-- End main UI -->
+	</div>
 </div>

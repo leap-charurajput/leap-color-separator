@@ -1,5 +1,6 @@
 <div *ngIf="isOpen" class="modal-overlay" (mousedown)="onOverlayClick($event)" (click)="onOverlayClick($event)">
-	<div class="compound-modal-container modal-container" (mousedown)="onOverlayClick($event)" (click)="onOverlayClick($event)">
+	<div class="compound-modal-container modal-container" (mousedown)="onOverlayClick($event)"
+		(click)="onOverlayClick($event)">
 		<div class="modal-header">
 			<h3 class="modal-title">Create/Edit compound plate (UB)</h3>
 		</div>
@@ -7,24 +8,14 @@
 		<div class="modal-body">
 			<div class="form-group">
 				<label class="form-label">Name:</label>
-				<input
-					type="text"
-					class="form-input"
-					[value]="name"
-					(input)="onNameInput($event)"
-					placeholder="White UB"
-				/>
+				<input type="text" class="form-input" [value]="name" (input)="onNameInput($event)" placeholder="White UB" />
 			</div>
 
 			<div class="form-group">
 				<div class="components-list">
 					<div *ngFor="let color of availableColors; let i = index" class="component-checkbox">
-						<input
-							type="checkbox"
-							[id]="'component-' + i"
-							[checked]="isComponentSelected(color)"
-							(change)="handleComponentToggle(color)"
-						/>
+						<input type="checkbox" [id]="'component-' + i" [checked]="isComponentSelected(color)"
+							(change)="handleComponentToggle(color)" />
 						<label [for]="'component-' + i">{{color}}</label>
 					</div>
 				</div>
@@ -33,42 +24,23 @@
 			<div class="form-row-compound">
 				<div class="form-group form-group-mesh">
 					<label class="form-label">Mesh</label>
-					<input
-						type="text"
-						class="form-input"
-						[value]="mesh"
-						(input)="onMeshInput($event)"
-					/>
+					<input type="text" class="form-input" [value]="mesh" (input)="onMeshInput($event)" />
 				</div>
 				<div class="form-group form-group-micron">
 					<label class="form-label">Micron</label>
-					<input
-						type="text"
-						class="form-input"
-						[value]="micron"
-						(input)="onMicronInput($event)"
-					/>
+					<input type="text" class="form-input" [value]="micron" (input)="onMicronInput($event)" />
 				</div>
 
 				<div class="icon-toggles-inline">
-					<button
-						[class.icon-toggle]="true"
-						[class.active]="flashEnabled"
-						(click)="flashEnabled = !flashEnabled"
+					<button [class.icon-toggle]="true" [class.active]="flashEnabled" (click)="flashEnabled = !flashEnabled"
 						title="Flash">
 						<span [class.icon-flash]="true" [class.disabled]="!flashEnabled"></span>
 					</button>
-					<button
-						[class.icon-toggle]="true"
-						[class.active]="coolEnabled"
-						(click)="coolEnabled = !coolEnabled"
+					<button [class.icon-toggle]="true" [class.active]="coolEnabled" (click)="coolEnabled = !coolEnabled"
 						title="Cool">
 						<span [class.icon-cool]="true" [class.disabled]="!coolEnabled"></span>
 					</button>
-					<button
-						[class.icon-toggle]="true"
-						[class.active]="wbEnabled"
-						(click)="wbEnabled = !wbEnabled"
+					<button [class.icon-toggle]="true" [class.active]="wbEnabled" (click)="wbEnabled = !wbEnabled"
 						title="Water Based">
 						<span [class.icon-wb]="true" [class.disabled]="!wbEnabled"></span>
 					</button>
@@ -77,18 +49,11 @@
 
 			<div class="form-group form-row">
 				<div class="checkbox-group">
-					<input
-						type="checkbox"
-						id="generate-choke"
-						[checked]="generateChoke"
-						(change)="generateChoke = $event.target.checked"
-					/>
+					<input type="checkbox" id="generate-choke" [checked]="generateChoke"
+						(change)="generateChoke = $event.target.checked" />
 					<label for="generate-choke">Generate choke path</label>
 				</div>
-				<select
-					class="form-select"
-					[value]="chokeColor"
-					(change)="onChokeColorChange($event)"
+				<select class="form-select" [value]="chokeColor" (change)="onChokeColorChange($event)"
 					[disabled]="!generateChoke">
 					<option value="">Choose color...</option>
 					<option *ngFor="let color of availableColors" [value]="color">{{color}}</option>
@@ -97,8 +62,8 @@
 		</div>
 
 		<div class="modal-footer">
-			<app-button variant="secondary" (onClick)="handleCancel()">Cancel</app-button>
-			<app-button variant="primary" (onClick)="handleGenerate()" [disabled]="!isFormValid">Generate</app-button>
+			<app-button variant="secondary" (click)="handleCancel()">Cancel</app-button>
+			<app-button variant="primary" (click)="handleGenerate()" [disabled]="!isFormValid">Generate</app-button>
 		</div>
 	</div>
 </div>

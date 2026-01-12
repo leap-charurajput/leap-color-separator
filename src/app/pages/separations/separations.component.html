@@ -1,113 +1,82 @@
 <div class="graphic-separation-container">
- <div class="panelTitle mb-5">Manage Separations</div>
+	<div *ngIf="!hasVersionDocument && !isCheckingDocument" class="organize-graphics-content">
+		<div class="panelTitle mx-5" style="text-align: center; padding: 40px 20px;">
+			<span *ngIf="isRunningInBrowser">Please run this in Illustrator</span>
+			<span *ngIf="!isRunningInBrowser">Please open the version document</span>
+		</div>
+	</div>
 
- <div *ngIf="!hasVersionDocument && !isCheckingDocument" class="organize-graphics-content">
-  <div class="panelTitle mx-5" style="text-align: center; padding: 40px 20px">
-   <span *ngIf="isRunningInBrowser">Please run this in Illustrator</span>
-   <span *ngIf="!isRunningInBrowser">Please open the version document</span>
-  </div>
- </div>
+	<div *ngIf="hasVersionDocument && !hasGraphicsPositions && !isLoadingGraphics && !isCheckingDocument"
+		class="organize-graphics-content">
+		<div class="panelTitle mx-5" style="text-align: center; padding: 40px 20px;">
+			Please organize the graphics first before doing separation
+		</div>
+	</div>
 
- <div
-  *ngIf="hasVersionDocument && !hasGraphicsPositions && !isLoadingGraphics && !isCheckingDocument"
-  class="organize-graphics-content"
- >
-  <div class="panelTitle mx-5" style="text-align: center; padding: 40px 20px">
-   Please organize the graphics first before doing separation
-  </div>
- </div>
+	<div *ngIf="isLoadingGraphics || isLoadingSeparations || isCheckingDocument" class="organize-graphics-content">
+		<div class="panelTitle mx-5" style="text-align: center; padding: 40px 20px;">
+			Loading...
+		</div>
+	</div>
 
- <div
-  *ngIf="isLoadingGraphics || isLoadingSeparations || isCheckingDocument"
-  class="organize-graphics-content"
- >
-  <div class="panelTitle mx-5" style="text-align: center; padding: 40px 20px">Loading...</div>
- </div>
+	<div *ngIf="hasVersionDocument && hasGraphicsPositions && !isLoadingGraphics && !isCheckingDocument">
+		<div class="">
+			<app-dropdown label="Graphic" [value]="selectedGraphic" [items]="graphicOptions"
+				(onChange)="onGraphicChange($event)" placeholder="Choose graphic..."></app-dropdown>
+			<div *ngIf="graphicOptions.length === 0" style="color: #ff6b6b; font-size: 12px; margin-top: 5px;">
+				No graphics available. Debug: graphicOptions.length = {{ graphicOptions.length }}
+			</div>
+		</div>
 
- <div
-  *ngIf="hasVersionDocument && hasGraphicsPositions && !isLoadingGraphics && !isCheckingDocument"
- >
-  <div class="section mb-15">
-   <app-dropdown
-    label="Graphic:"
-    [value]="selectedGraphic"
-    [items]="graphicOptions"
-    (onChange)="onGraphicChange($event)"
-    placeholder="Choose graphic..."
-   ></app-dropdown>
-   <div
-    *ngIf="graphicOptions.length === 0"
-    style="color: #ff6b6b; font-size: 12px; margin-top: 5px"
-   >
-    No graphics available. Debug: graphicOptions.length = {{ graphicOptions.length }}
-   </div>
-  </div>
+		<div class="">
+			<div class="section-header">
+				<button class="add-separation-link">Add Separation...</button>
+			</div>
 
-  <div class="separations-section">
-   <div class="section-header">
-    <span class="section-title">Separations</span>
-    <button class="add-separation-link">Add Separation...</button>
-   </div>
-
-   <div class="separations-list">
-    <div *ngIf="isLoadingSeparations" class="no-separations-message">Loading separations...</div>
-    <div *ngIf="!isLoadingSeparations && separations.length === 0" class="no-separations-message">
-     No separations found.
-    </div>
-    <div *ngFor="let separation of separations" class="separation-profile">
-     <div class="separation-profile-header">
-      <div class="separation-profile-info">
-       <div class="profile-name">Profile: {{ separation.profile }}</div>
-       <div class="profile-styles">Styles: {{ separation.styles.join(', ') }}</div>
-       <div class="profile-colors">Colors: {{ getSelectedGraphicColors().join(', ') }}</div>
-      </div>
-      <div class="separation-profile-right">
-       <div class="separation-profile-actions">
-        <app-sub-menu
-         [items]="['Duplicate', 'Edit']"
-         (onItemClick)="handleSeparationMenuClick($event, separation.id)"
-         iconClass="openerImage icon-ellipsis"
-        ></app-sub-menu>
-       </div>
-       <div class="separation-profile-content">
-        <div *ngIf="getSeparationPath(separation)" class="sep-file-link-wrapper">
-         <button
-          class="sep-file-link"
-          (click)="handleOpenSeparation(getSeparationPath(separation)!)"
-          title="Click to open separation document"
-         >
-          {{ getFileNameFromPath(getSeparationPath(separation)!) }}
-         </button>
-        </div>
-        <div *ngIf="!getSeparationPath(separation)" class="sep-not-created">
-         Separation not created
-        </div>
-        <div class="generate-button-section">
-         <app-button
-          (click)="handleGenerateSeparations(separation.id)"
-          variant="primary"
-          size="medium"
-          [disabled]="!graphicFolderExists || isCheckingFolder || hasUnknownProfile(separation)"
-         >
-          Generate Separations
-         </app-button>
-         <div *ngIf="hasUnknownProfile(separation)" class="folder-check-note">
-          Please add profile information for the missing style code{{
-           getMissingStyleCodes(separation).length > 1 ? 's' : ''
-          }}: {{ getMissingStyleCodes(separation).join(', ') }}
-         </div>
-         <div
-          *ngIf="!graphicFolderExists && !isCheckingFolder && !hasUnknownProfile(separation)"
-          class="folder-check-note"
-         >
-          Art must be exported before separations can be created
-         </div>
-        </div>
-       </div>
-      </div>
-     </div>
-    </div>
-   </div>
-  </div>
- </div>
+			<div class="separations-list">
+				<div *ngIf="isLoadingSeparations" class="no-separations-message">Loading separations...</div>
+				<div *ngIf="!isLoadingSeparations && separations.length === 0" class="no-separations-message">No separations
+					found.</div>
+				<div *ngFor="let separation of separations" class="separation-profile">
+					<div class="separation-profile-header">
+						<div class="separation-profile-info">
+							<div class="profile-name">Profile: {{ separation.profile }}</div>
+							<div class="profile-styles">Styles: {{ separation.styles.join(', ') }}</div>
+							<div class="profile-colors">Colors: {{ getSelectedGraphicColors().join(', ') }}</div>
+						</div>
+						<div class="separation-profile-right">
+							<div class="separation-profile-actions">
+								<app-sub-menu [items]="['Duplicate', 'Edit']"
+									(onItemClick)="handleSeparationMenuClick($event, separation.id)"
+									iconClass="openerImage icon-ellipsis"></app-sub-menu>
+							</div>
+							<div class="separation-profile-content">
+								<div *ngIf="getSeparationPath(separation)" class="sep-file-link-wrapper">
+									<button class="sep-file-link" (click)="handleOpenSeparation(getSeparationPath(separation)!)"
+										title="Click to open separation document">
+										{{ getFileNameFromPath(getSeparationPath(separation)!) }}
+									</button>
+								</div>
+								<div *ngIf="!getSeparationPath(separation)" class="sep-not-created">Separation not created</div>
+								<div class="generate-button-section">
+									<app-button (click)="handleGenerateSeparations(separation.id)" variant="primary" size="medium"
+										[disabled]="!graphicFolderExists || isCheckingFolder || hasUnknownProfile(separation)">
+										Generate Separations
+									</app-button>
+									<div *ngIf="hasUnknownProfile(separation)" class="folder-check-note">
+										Please add profile information for the missing style code{{ getMissingStyleCodes(separation).length
+										> 1 ? 's' : '' }}: {{ getMissingStyleCodes(separation).join(', ') }}
+									</div>
+									<div *ngIf="!graphicFolderExists && !isCheckingFolder && !hasUnknownProfile(separation)"
+										class="folder-check-note">
+										Art must be exported before separations can be created
+									</div>
+								</div>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
 </div>

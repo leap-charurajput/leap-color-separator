@@ -1,8 +1,6 @@
-import * as XLSX from 'xlsx';
+const XLSX = require('xlsx');
 const fs = window.cep_node.require('fs');
 const path = window.cep_node.require('path');
-
-console.log('LEAPColorSeparator: leap-src-index.js');
 
 class ScriptLoader {
  EvalScript_ErrMessage = 'EvalScript error.';
@@ -66,7 +64,7 @@ function getServerBasePath() {
  //  }
 
  try {
-  const os = window.cep_node.require('os');
+  const os = require('os');
   const homeDir = os.homedir();
   const settingsPath = path.join(
    homeDir,
@@ -94,7 +92,6 @@ function findExcelFileInBatchFolder(documentPath) {
   }
 
   let currentDir = path.dirname(documentPath);
-  console.log('PATH', path, 'currentDIR', currentDir);
   let teamoutsFolder = null;
   while (currentDir) {
    const folderName = path.basename(currentDir);
@@ -205,6 +202,8 @@ async function getColorCodesFromExcel(teamCode, documentPath) {
    );
   }
 
+  console.log('workbook', { workbook });
+
   if (!workbook || !workbook.SheetNames || workbook.SheetNames.length === 0) {
    throw new Error(`Excel file appears to be empty or invalid: ${excelFilePath}`);
   }
@@ -252,12 +251,6 @@ async function getColorCodesFromExcel(teamCode, documentPath) {
 }
 
 async function getStyleCodesFromExcel(teamCode, documentPath) {
- console.log(
-  'getStyleCodesFromExcel called with teamCode 100:',
-  teamCode,
-  'documentPath:',
-  documentPath
- );
  try {
   if (!teamCode) {
    throw new Error('Team code is required');
@@ -266,7 +259,6 @@ async function getStyleCodesFromExcel(teamCode, documentPath) {
   let excelFilePath;
   if (documentPath) {
    excelFilePath = findExcelFileInBatchFolder(documentPath);
-   console.log('Found excelFilePath:', excelFilePath, 'for documentPath:', documentPath);
    if (!excelFilePath) {
     throw new Error('Excel file not found in BATCH folder');
    }
@@ -848,12 +840,6 @@ class Leap {
  }
 
  async getStyleCodesFromExcel(teamCode, documentPath) {
-  console.log(
-   'getStyleCodesFromExcel called with teamCode 200:',
-   teamCode,
-   'documentPath:',
-   documentPath
-  );
   try {
    if (!documentPath) {
     try {

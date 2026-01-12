@@ -20,13 +20,6 @@
  <span class="tab-title">{{tab.title}}</span>
  <span class="hoverTitle">{{tab.title}}</span>
 </li>
-<li class="ml-auto dropDownMenuHeader">
- <app-sub-menu
- [items]="headerMenuItems"
- (onItemClick)="handleHeaderMenuClick($event)"
- iconClass="openerImage icon-ellipsis">
- </app-sub-menu>
-</li>
 </ul>
 <div class="settingsTabContent">
 <div *ngFor="let tab of tabs; let i = index" [class.innerTabContent]="true" [class.show]="activeTab === i">

@@ -26,7 +26,7 @@ export class SettingsComponent implements OnInit {
 	addUnderbase = true;
 	selectedSection = 'Separation Profiles';
 
-	constructor(private controller: ControllerService) {}
+	constructor(private controller: ControllerService) { }
 
 	ngOnInit(): void {
 		this.loadProfiles();
