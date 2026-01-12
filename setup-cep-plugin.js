@@ -12,7 +12,7 @@ const os = require('os');
 const PLUGIN_NAME = 'com.octane5.LEAPColorSeparator';
 const CEP_PLUGIN_OUTPUT = path.join(__dirname, PLUGIN_NAME);
 const JSX_FOLDER = path.join(__dirname, 'src', 'jsx');
-const REMOTE_APP_URL = 'http://localhost:6002'; // http://salesforce-connector.metadesign.org.in  | http://localhost:6002
+const REMOTE_APP_URL = 'http://salesforce-connector.metadesign.org.in'; // http://salesforce-connector.metadesign.org.in  | http://localhost:6002
 
 // Get CEP extensions directory based on OS
 function getCEPExtensionsDir() {
