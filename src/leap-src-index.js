@@ -59,6 +59,7 @@ class ScriptLoader {
 var scriptLoader = new ScriptLoader();
 
 function getServerBasePath() {
+ // commment this
  //  if (process.env.LEAP_SERVER_PATH) {
  //   return process.env.LEAP_SERVER_PATH;
  //  }
