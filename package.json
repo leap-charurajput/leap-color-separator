@@ -1,7 +1,7 @@
 {
- "name": "leap-color-separator-angular",
+ "name": "com.octane5.LEAPColorSeparator",
  "version": "1.0.0",
- "description": "LEAP Color Separator - Angular Version",
+ "description": "LEAP Color Separator",
  "scripts": {
   "build": "ng build",
   "build:leap": "webpack --config webpack.leap.config.js --env mode=development",

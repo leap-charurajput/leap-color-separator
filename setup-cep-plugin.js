@@ -84,7 +84,7 @@ function createManifest() {
 <ExtensionManifest xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
                    ExtensionBundleId="com.octane5.LEAPColorSeparator"
                    ExtensionBundleVersion="1.0.1"
-                   ExtensionBundleName="LEAP Color Separator Angular"
+                   ExtensionBundleName="com.octane5.LEAPColorSeparator"
                    Version="7.0">
   <ExtensionList>
     <Extension Id="com.octane5.LEAPColorSeparator" Version="1.0.1">
