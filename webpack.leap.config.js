@@ -25,8 +25,7 @@ module.exports = (env) => ({
     options: {
      presets: ['@babel/preset-env']
     }
-   }
-  ]
+   }]
  },
  resolve: {
   extensions: ['.js', '.jsx'],

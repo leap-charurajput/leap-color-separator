@@ -19,7 +19,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 	@Input() documentRefreshKey = 0;
 
 	isRunningInBrowser = false;
-	selectedGraphic = '';
+	expandedGraphics: Set<string> = new Set();
 	graphicOptions: string[] = [];
 	isLoadingGraphics = false;
 	teamCode = '';
@@ -28,8 +28,8 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 	graphicsData: any[] = [];
 	availableColors: string[] = [];
 	separationPaths: { [key: string]: string } = {};
-	graphicFolderExists = false;
-	isCheckingFolder = false;
+	graphicFolderStatus: { [key: string]: boolean } = {};
+	isCheckingFolderMap: { [key: string]: boolean } = {};
 	hasVersionDocument = false;
 	isCheckingDocument = false;
 	hasGraphicsPositions = false;
@@ -170,9 +170,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 					this.teamCode = result.data.teamCode;
 					if (this.teamCode && this.teamCode !== '') {
 						this.loadAvailableColors();
-						if (this.selectedGraphic) {
-							this.loadSeparations();
-						}
+						this.loadSeparations();
 					}
 				}
 			})
@@ -217,30 +215,28 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 				if (result.success && result.graphics && Array.isArray(result.graphics)) {
 					this.graphicOptions = [...result.graphics];
 
-					if (!this.selectedGraphic || !result.graphics.includes(this.selectedGraphic)) {
-						this.selectedGraphic = result.graphics.length > 0 ? result.graphics[0] : '';
+					// Initialize expanded state for all graphics
+					this.expandedGraphics.clear();
+					this.graphicOptions.forEach(g => this.expandedGraphics.add(g));
 
-						if (this.selectedGraphic) {
-							this.checkGraphicFolderExists();
-							this.loadSeparationPaths();
-							if (this.teamCode && this.teamCode !== '') {
-								this.loadSeparations();
-							}
-						}
+					this.checkAllGraphicFolders();
+					this.loadSeparationPaths();
+
+					if (this.teamCode && this.teamCode !== '') {
+						this.loadSeparations();
 					}
+
 					this.checkGraphicsPositions();
 					this.cdr.detectChanges();
 				} else {
 
 					this.graphicOptions = [];
-					this.selectedGraphic = '';
 					this.hasGraphicsPositions = false;
 				}
 			})
 			.catch(err => {
 
 				this.graphicOptions = [];
-				this.selectedGraphic = '';
 				this.hasGraphicsPositions = false;
 			})
 			.finally(() => {
@@ -327,9 +323,9 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 					}
 
 					if (result.success && result.separationPaths) {
-					const paths = result.separationPaths;
-					const keys = Object.keys(paths);
-					this.separationPaths = paths;
+						const paths = result.separationPaths;
+						const keys = Object.keys(paths);
+						this.separationPaths = paths;
 					} else {
 
 
@@ -416,11 +412,11 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 			});
 	}
 
-	getSelectedGraphicColors(): string[] {
-		if (!this.selectedGraphic || this.graphicsData.length === 0) {
+	getGraphicColors(graphicName: string): string[] {
+		if (!graphicName || this.graphicsData.length === 0) {
 			return [];
 		}
-		const graphic = this.graphicsData.find((g: any) => g.name === this.selectedGraphic);
+		const graphic = this.graphicsData.find((g: any) => g.name === graphicName);
 		if (graphic && graphic.colors !== undefined) {
 			if (graphic.colors === null) {
 				return this.availableColors;
@@ -433,8 +429,8 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 		return [];
 	}
 
-	handleGenerateSeparations(separationId: number): void {
-		if (!this.selectedGraphic) {
+	handleGenerateSeparations(separationId: number, graphicName: string): void {
+		if (!graphicName) {
 
 			return;
 		}
@@ -447,7 +443,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 
 		const styleCodes = separation.styles || [];
 		const profileName = separation.profile || '';
-		const graphicColors = this.getSelectedGraphicColors();
+		const graphicColors = this.getGraphicColors(graphicName);
 
 		const getProfileCodeAndCreateSeparation = async () => {
 			let profileCode = null;
@@ -473,11 +469,11 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 				profileCode: profileCode,
 				styleCodes: styleCodes,
 				colorCodes: graphicColors,
-				graphicName: this.selectedGraphic,
+				graphicName: graphicName,
 				createdDate: new Date().toISOString()
 			};
 
-			return this.controller.performSeparation(this.selectedGraphic, styleCodes, profileMetadata);
+			return this.controller.performSeparation(graphicName, styleCodes, profileMetadata);
 		};
 
 		getProfileCodeAndCreateSeparation()
@@ -564,29 +560,43 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 		}
 	}
 
-	checkGraphicFolderExists(): void {
-		if (!this.selectedGraphic || this.selectedGraphic.trim() === '') {
-			this.graphicFolderExists = false;
+	checkAllGraphicFolders(): void {
+		this.graphicOptions.forEach(graphic => {
+			this.checkGraphicFolderExists(graphic);
+		});
+	}
+
+	checkGraphicFolderExists(graphic: string): void {
+		if (!graphic || graphic.trim() === '') {
+			this.graphicFolderStatus[graphic] = false;
 			return;
 		}
 
-		this.isCheckingFolder = true;
-		this.controller.checkGraphicFolderExists(this.selectedGraphic)
+		this.isCheckingFolderMap[graphic] = true;
+		this.controller.checkGraphicFolderExists(graphic)
 			.then(result => {
 				if (result.success) {
-					this.graphicFolderExists = result.folderExists || false;
+					this.graphicFolderStatus[graphic] = result.folderExists || false;
 				} else {
-					this.graphicFolderExists = false;
+					this.graphicFolderStatus[graphic] = false;
 				}
 			})
 			.catch(err => {
 
-				this.graphicFolderExists = false;
+				this.graphicFolderStatus[graphic] = false;
 			})
 			.finally(() => {
-				this.isCheckingFolder = false;
+				this.isCheckingFolderMap[graphic] = false;
 				this.cdr.detectChanges();
 			});
+	}
+
+	isFolderChecking(graphic: string): boolean {
+		return !!this.isCheckingFolderMap[graphic];
+	}
+
+	getGraphicFolderStatus(graphic: string): boolean {
+		return !!this.graphicFolderStatus[graphic];
 	}
 
 	getFileNameFromPath(path: string): string {
@@ -606,12 +616,12 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 		return [];
 	}
 
-	getSeparationPath(separation: Separation): string | null {
-		if (!this.selectedGraphic || !separation.profile) {
+	getSeparationPath(separation: Separation, graphicName: string): string | null {
+		if (!graphicName || !separation.profile) {
 			return null;
 		}
 		const profileName = separation.profile || '';
-		const compositeKey = `${this.selectedGraphic}_${profileName}`;
+		const compositeKey = `${graphicName}_${profileName}`;
 		let separationPath = this.separationPaths[compositeKey] || null;
 
 		if (!separationPath) {
@@ -626,21 +636,18 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 			}
 		}
 
-		if (this.selectedGraphic) {
-
-		}
-
 		return separationPath;
 	}
 
-	onGraphicChange(graphic: string): void {
-
-		this.selectedGraphic = graphic;
-		this.checkGraphicFolderExists();
-		this.loadSeparationPaths();
-		if (this.teamCode && this.teamCode !== '') {
-			this.loadSeparations();
+	toggleGraphic(graphic: string): void {
+		if (this.expandedGraphics.has(graphic)) {
+			this.expandedGraphics.delete(graphic);
+		} else {
+			this.expandedGraphics.add(graphic);
 		}
-		this.cdr.detectChanges();
+	}
+
+	isGraphicExpanded(graphic: string): boolean {
+		return this.expandedGraphics.has(graphic);
 	}
 }

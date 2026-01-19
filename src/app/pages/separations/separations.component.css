@@ -14,11 +14,77 @@
 	margin-top: 20px;
 }
 
+.graphic-section-wrapper {
+	margin-bottom: 15px;
+}
+
+.header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+}
+
+.graphic-header {
+	display: flex;
+	align-items: center;
+	padding: 5px 0;
+	cursor: default;
+	user-select: none;
+}
+
+.graphic-header.clickable {
+	cursor: pointer;
+}
+
+.graphic-header.clickable:hover {
+	opacity: 0.9;
+}
+
+.disclosure-icon {
+	font-size: 10px;
+	transition: transform 0.2s;
+	width: 12px;
+	height: 12px;
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	margin-right: 4px;
+}
+
+.disclosure-icon.expanded {
+	transform: rotate(90deg);
+}
+
+.graphic-title {
+	font-size: 12px;
+	font-weight: 700;
+	font-family: 'Adobe Clean', sans-serif;
+}
+
+.graphic-name {
+	font-weight: 700;
+}
+
+.graphic-content {
+	margin-top: 5px;
+}
+
+.graphic-divider {
+	border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+	margin-top: 20px;
+	margin-bottom: 20px;
+}
+
+.graphic-section-wrapper:last-child .graphic-divider {
+	display: none;
+}
+
 .section-header {
 	display: flex;
 	justify-content: flex-end;
 	align-items: center;
-	margin-bottom: 8px;
+	margin-bottom: 5px;
+	margin-top: -10px;
 }
 
 .section-title {
@@ -79,6 +145,8 @@
 	min-width: 200px;
 	padding-top: 0;
 	align-self: flex-start;
+	overflow: visible;
+	/* Ensure menu is not clipped */
 }
 
 .profile-name {
@@ -111,10 +179,8 @@
 
 .separation-profile-actions {
 	display: flex;
-	align-items: flex-start;
-	flex-shrink: 0;
-	margin-top: 0;
-	margin-bottom: auto;
+	align-items: center;
+	flex-direction: row;
 }
 
 .separation-profile-content {
@@ -123,13 +189,11 @@
 	gap: 4px;
 	align-items: flex-end;
 	width: 100%;
-	margin-top: -20px;
 }
 
 .sep-file-link-wrapper {
-	margin-bottom: 0;
-	width: 100%;
-	text-align: right;
+	display: flex;
+	align-items: center;
 }
 
 .sep-file-link {
