@@ -211,11 +211,24 @@ export class AppComponent implements OnInit, OnDestroy {
 					case 'removeSeparationDataFromTeamVersion':
 						this.openRemoveConfirmation();
 						break;
+
 					case 'settings':
 						this.onMenuOptionClick('Settings');
 						break;
+
 					case 'markAsReg':
 						break;
+
+					case 'leapServerSettings':
+						this.controller.selectAndSaveLeapSettings().then((result: any) => {
+							if (result.success) {
+								console.log(`Leap path updated successfully`);
+							} else if (!result.cancelled) {
+								console.error(`Error updating LEAP Data path: ${result.error}`);
+							}
+						});
+						break;
+
 					default:
 						break;
 				}
@@ -227,6 +240,7 @@ export class AppComponent implements OnInit, OnDestroy {
 					<MenuItem Id="markAsReg" Label="Mark as Reg mark" Enabled="true"/> \
 					<MenuItem Id="removeSeparationDataFromTeamVersion" Label="Remove separation data from team version" Enabled="true"/> \
 					<MenuItem Label="---" /> \
+					<MenuItem Id="leapServerSettings" Label="Leap Server Settings" Enabled="true"/> \
 					<MenuItem Id="settings" Label="Settings" Enabled="true"/> \
 				</Menu>';
 			csInterface.setPanelFlyoutMenu(flyoutXML);
