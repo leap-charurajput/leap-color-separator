@@ -25,6 +25,7 @@
 	top: 0;
 	background-color: #5f5f5f;
 	z-index: 1;
+	font-weight: bold;
 }
 
 .separation-colors-table-container::-webkit-scrollbar {
@@ -224,6 +225,10 @@
 	margin-right: 8px;
 	min-width: 0;
 	flex-shrink: 1;
+}
+
+.thRow .col.width-8 {
+	width: 8% !important;
 }
 
 .thRow .col span {
@@ -503,4 +508,8 @@ body.medium-light .separation-action-btn .add-underbase-icon .add-underbase-plus
 
 .ml-5 {
 	margin-left: 5px;
+}
+
+.mr-15 {
+	margin-right: 15px !important
 }

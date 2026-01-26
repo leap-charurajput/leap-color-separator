@@ -1309,6 +1309,11 @@ input[type=text].smallerInput {
 	margin-right: 8px;
 }
 
+.thRow .col .width-8 {
+	width: 8% !important;
+	margin-right: 0px !important;
+}
+
 .thRow .col span {
 	font-size: 11px;
 }
@@ -1336,8 +1341,12 @@ input[type=text].smallerInput {
 	margin-right: 8px;
 }
 
+.exportFieldTable .row .col.width-8 {
+	width: 8% !important;
+}
+
 .exportFieldTable .row .col span {
-	font-size: 16px;
+	font-size: 11px;
 }
 
 .exportFieldTable .row .col.bigger {
@@ -1380,4 +1389,8 @@ input[type=text].smallerInput {
 	-webkit-font-feature-settings: 'liga';
 	-webkit-font-smoothing: antialiased;
 	color: #d6d6d6;
+}
+
+.mr-15 {
+	margin-right: 15px;
 }
