@@ -1,54 +1,71 @@
-import { Component, Input, Output, EventEmitter, ElementRef, ViewChild, HostListener, AfterViewInit } from '@angular/core';
+import { Component, Input, Output, EventEmitter, ElementRef, ViewChild, AfterViewInit, ChangeDetectorRef } from '@angular/core';
+import { ConnectedPosition } from '@angular/cdk/overlay';
 
 @Component({
- selector: 'app-sub-menu',
- templateUrl: './sub-menu.component.html',
- styleUrls: ['./sub-menu.component.css']
+    selector: 'app-sub-menu',
+    templateUrl: './sub-menu.component.html',
+    styleUrls: ['./sub-menu.component.css']
 })
 export class SubMenuComponent implements AfterViewInit {
- @Input() items: string[] = [];
- @Input() iconClass = 'icon-ellipsis';
- @Output() onItemClick = new EventEmitter<string>();
+    @Input() items: string[] = [];
+    @Input() iconClass = 'icon-ellipsis';
+    @Output() onItemClick = new EventEmitter<string>();
 
- @ViewChild('openerRef') openerRef!: ElementRef;
- @ViewChild('menuRef') menuRef!: ElementRef;
+    @ViewChild('openerRef', { read: ElementRef }) openerRef!: ElementRef;
 
- isOpen = false;
- menuPosition: 'up' | 'down' = 'down';
+    isOpen = false;
+    positions: ConnectedPosition[] = [
+        {
+            originX: 'end',
+            originY: 'bottom',
+            overlayX: 'end',
+            overlayY: 'top',
+            offsetY: 4
+        },
+        {
+            originX: 'start',
+            originY: 'bottom',
+            overlayX: 'start',
+            overlayY: 'top',
+            offsetY: 4
+        }
+    ];
 
- @HostListener('document:mousedown', ['$event'])
- onDocumentClick(event: MouseEvent): void {
- if (this.openerRef && !this.openerRef.nativeElement.contains(event.target)) {
-  this.isOpen = false;
- }
- }
+    constructor(private cdr: ChangeDetectorRef) { }
 
- ngAfterViewInit(): void {
+    ngAfterViewInit(): void {
+    }
 
- }
+    handleToggle(event: Event): void {
+        event.stopPropagation();
+        event.preventDefault();
+        this.isOpen = !this.isOpen;
+        this.cdr.detectChanges();
+    }
 
- handleToggle(event: Event): void {
- event.stopPropagation();
- event.preventDefault(); // Prevent parent draggable elements from intercepting
- this.isOpen = !this.isOpen;
- // Always open downward - no position calculation needed
- this.menuPosition = 'down';
- }
+    handleItemClick(item: string, event?: Event): void {
+        if (event) {
+            event.stopPropagation();
+            event.preventDefault();
+        }
+        this.isOpen = false;
+        this.onItemClick.emit(item);
+        this.cdr.detectChanges();
+    }
 
- handleItemClick(item: string): void {
- this.isOpen = false;
- this.onItemClick.emit(item);
- }
+    onBackdropClick(): void {
+        this.isOpen = false;
+        this.cdr.detectChanges();
+    }
 
- // Block drag/selection when interacting with the menu so row dragging doesn't eat clicks
- handleMouseDown(event: Event): void {
-  event.stopPropagation();
-  event.preventDefault();
- }
+    // Block drag/selection when interacting with the menu so row dragging doesn't eat clicks
+    handleMouseDown(event: Event): void {
+        event.stopPropagation();
+        event.preventDefault();
+    }
 
- handleDragStart(event: DragEvent): void {
-  event.stopPropagation();
-  event.preventDefault();
- }
-
+    handleDragStart(event: DragEvent): void {
+        event.stopPropagation();
+        event.preventDefault();
+    }
 }

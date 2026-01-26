@@ -1,33 +1,37 @@
-import { Component, Input, Output, EventEmitter, ElementRef, ViewChild, HostListener, OnChanges, SimpleChanges, ChangeDetectorRef } from '@angular/core';
+import { Component, Input, Output, EventEmitter, ElementRef, ViewChild, OnChanges, SimpleChanges, ChangeDetectorRef } from '@angular/core';
+import { ConnectedPosition } from '@angular/cdk/overlay';
 
 @Component({
- selector: 'app-dropdown',
- templateUrl: './dropdown.component.html',
- styleUrls: ['./dropdown.component.css']
+	selector: 'app-dropdown',
+	templateUrl: './dropdown.component.html',
+	styleUrls: ['./dropdown.component.css']
 })
 export class DropdownComponent implements OnChanges {
- @Input() label?: string;
- @Input() value?: string;
- @Input() items: string[] = [];
- @Input() placeholder = 'Pick document...';
- @Output() onChange = new EventEmitter<string>();
+	@Input() label?: string;
+	@Input() value?: string;
+	@Input() items: string[] = [];
+	@Input() placeholder = 'Pick document...';
+	@Input() disabled = false;
+	@Output() onChange = new EventEmitter<string>();
 
- @ViewChild('dropdownRef') dropdownRef!: ElementRef;
+	@ViewChild('dropdownOrigin', { read: ElementRef }) dropdownOrigin!: ElementRef;
 
- isOpen = false;
- selectedValue = '';
+	isOpen = false;
+	selectedValue = '';
+	dropdownWidth = 0;
+	positions: ConnectedPosition[] = [
+		{
+			originX: 'start',
+			originY: 'bottom',
+			overlayX: 'start',
+			overlayY: 'top',
+			offsetY: 0
+		}
+	];
 
- constructor(private cdr: ChangeDetectorRef) {}
+	constructor(private cdr: ChangeDetectorRef) { }
 
- @HostListener('document:click', ['$event'])
- onDocumentClick(event: MouseEvent): void {
- if (this.isOpen && this.dropdownRef && !this.dropdownRef.nativeElement.contains(event.target)) {
-  this.isOpen = false;
-  this.cdr.detectChanges();
- }
- }
-
- ngOnChanges(changes: SimpleChanges): void {
+	ngOnChanges(changes: SimpleChanges): void {
 		if (changes['value'] && changes['value'].currentValue !== undefined) {
 			this.selectedValue = changes['value'].currentValue;
 		}
@@ -36,25 +40,38 @@ export class DropdownComponent implements OnChanges {
 		}
 	}
 
- get displayValue(): string {
- return this.selectedValue || this.placeholder;
- }
+	get displayValue(): string {
+		return this.selectedValue || this.placeholder;
+	}
 
- handleToggle(event: Event): void {
- event.stopPropagation();
- event.preventDefault();
- this.isOpen = !this.isOpen;
- this.cdr.detectChanges();
- }
+	handleToggle(event: Event): void {
+		if (this.disabled) return;
+		event.stopPropagation();
+		event.preventDefault();
 
- handleItemClick(item: string, event?: Event): void {
- if (event) {
-  event.stopPropagation();
-  event.preventDefault();
- }
- this.selectedValue = item;
- this.isOpen = false;
- this.onChange.emit(item);
- this.cdr.detectChanges();
- }
+		if (!this.isOpen) {
+			// Mark width of the trigger to match dropdown width
+			const rect = this.dropdownOrigin.nativeElement.getBoundingClientRect();
+			this.dropdownWidth = rect.width;
+		}
+
+		this.isOpen = !this.isOpen;
+		this.cdr.detectChanges();
+	}
+
+	handleItemClick(item: string, event?: Event): void {
+		if (event) {
+			event.stopPropagation();
+			event.preventDefault();
+		}
+		this.selectedValue = item;
+		this.isOpen = false;
+		this.onChange.emit(item);
+		this.cdr.detectChanges();
+	}
+
+	onBackdropClick(): void {
+		this.isOpen = false;
+		this.cdr.detectChanges();
+	}
 }

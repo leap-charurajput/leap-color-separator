@@ -3,6 +3,8 @@ import { BrowserModule } from '@angular/platform-browser';
 import { FormsModule } from '@angular/forms';
 import { DragDropModule } from '@angular/cdk/drag-drop';
 
+import { OverlayModule } from '@angular/cdk/overlay';
+
 import { AppComponent } from './app.component';
 import { TabNavigatorComponent } from './components/tab-navigator/tab-navigator.component';
 import { SubMenuComponent } from './components/sub-menu/sub-menu.component';
@@ -48,7 +50,8 @@ import { ControllerService } from './services/controller.service';
 	imports: [
 		BrowserModule,
 		FormsModule,
-		DragDropModule
+		DragDropModule,
+		OverlayModule
 	],
 	providers: [ControllerService],
 	bootstrap: [AppComponent]
