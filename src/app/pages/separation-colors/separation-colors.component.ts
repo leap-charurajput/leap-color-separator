@@ -1090,7 +1090,10 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  }
 
  getAvailableColors(): string[] {
-  return this.colorRows.filter((row) => row.type === 'separation').map((row) => row.colorName);
+  console.log('[SEPARATION] Getting available separation colors', this.colorRows);
+  return this.colorRows
+   .filter((row) => row.type === 'separation' && !/ub/i.test(row.colorName))
+   .map((row) => row.colorName);
  }
 
  isCompoundPlate(row: ColorRow): boolean {
