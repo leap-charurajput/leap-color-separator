@@ -66,7 +66,8 @@ export class SettingsComponent implements OnInit {
 
   this.controller.saveAppVersion(this.selectedEnvironmentUrl).then((result) => {
    if (result) {
-    console.log('Environment URL saved:', this.selectedEnvironmentUrl);
+    alert('Restart Adobe Illustrator for this change to take effect');
+    // console.log('Environment URL saved:', this.selectedEnvironmentUrl);
    } else {
     console.error('Failed to save environment URL');
    }
