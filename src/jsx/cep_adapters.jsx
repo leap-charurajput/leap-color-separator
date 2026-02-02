@@ -1094,6 +1094,7 @@ function handleUpdateSepTable(params_string) {
 				error: "No active document found"
 			});
 		}
+		app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS;
 		var doc = app.activeDocument;
 		var errors = [];
 		var updatedRows = 0;

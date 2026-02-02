@@ -253,7 +253,8 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 
       setTimeout(() => {
        this.handleRefreshList();
-      }, 500); // Small delay to ensure Illustrator is ready
+       this.hasUIChanges = false;
+      }, 500);
      } else {
       console.log('[SEPARATION] No profile metadata found in XMP');
       this.documentProfileMetadata = null;
@@ -947,7 +948,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
     console.error('[SEPARATION] Failed to create second hit underbase', err);
    })
    .finally(() => {
-    this.updateSepTableInDocument(); // ✅ update SEP TABLE after underbase generation
+    this.handleRefreshList(); // ✅ update SEP TABLE after underbase generation
    });
  }
 
