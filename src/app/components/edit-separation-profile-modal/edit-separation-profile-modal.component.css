@@ -40,12 +40,19 @@
 
 .form-field {
 	display: flex;
-	flex-direction: column;
-	gap: 6px;
+	flex-direction: row;
+	align-items: center;
+	gap: 10px;
 	font-size: 11px;
 }
 
+.form-field .field-label {
+	width: 100px;
+	flex-shrink: 0;
+}
+
 .form-field input[type="text"] {
+	flex: 1;
 	height: 28px;
 	padding: 0 8px;
 	border-radius: 4px;

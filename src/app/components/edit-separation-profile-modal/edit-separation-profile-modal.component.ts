@@ -7,6 +7,7 @@ interface ProfileFormState {
 	colorMesh: string;
 	underbaseMeshes: string[];
 	waterbaseInk: boolean;
+	colorNameFormat: boolean;
 }
 
 const defaultProfile: ProfileFormState = {
@@ -15,7 +16,8 @@ const defaultProfile: ProfileFormState = {
 	code: '',
 	colorMesh: '',
 	underbaseMeshes: ['', '', '', ''],
-	waterbaseInk: false
+	waterbaseInk: false,
+	colorNameFormat: false
 };
 
 @Component({
