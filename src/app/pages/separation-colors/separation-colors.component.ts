@@ -1290,7 +1290,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  }
 
  handleCancel(): void {
-  debugger;
+  // debugger;
   this.isSeparationModalOpen = false;
   this.isCompoundModalOpen = false;
   this.editingRow = null;
