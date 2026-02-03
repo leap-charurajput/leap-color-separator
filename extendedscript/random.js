@@ -53,4 +53,4 @@ function createCompoundPlate(parentLayerName, subLayerNames, newLayerName) {
  return compoundLayer.name;
 }
 
-createCompoundPlate('SEPARATIONS', ['Cyan', 'Magenta', 'Yellow'], 'CMY_COMPOUND');
+createCompoundPlate('SEPARATED_ART', ['PANTONE 652 C'], 'PANTONE 652 C COMPOUND');
