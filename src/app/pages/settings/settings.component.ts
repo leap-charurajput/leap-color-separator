@@ -69,7 +69,7 @@ export class SettingsComponent implements OnInit {
     alert('Restart Adobe Illustrator for this change to take effect');
     // console.log('Environment URL saved:', this.selectedEnvironmentUrl);
    } else {
-    console.error('Failed to save environment URL');
+    alert('Failed to save environment URL');
    }
   });
  }
