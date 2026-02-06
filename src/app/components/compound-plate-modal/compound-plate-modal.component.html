@@ -79,6 +79,18 @@
 
    <div class="form-group form-row">
     <div class="checkbox-group">
+     <label class="form-label">Fill Color</label>
+    </div>
+    <select class="form-select" [value]="fillColor" (change)="onFillColorChange($event)">
+     <option value="">Choose fill color...</option>
+     <option *ngFor="let color of fillColors" [value]="color">
+      {{ color }}
+     </option>
+    </select>
+   </div>
+
+   <div class="form-group form-row">
+    <div class="checkbox-group">
      <input
       type="checkbox"
       id="generate-choke"

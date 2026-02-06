@@ -622,6 +622,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  }
 
  private sortColorRowsWithWhiteUBAtBottom(rows: ColorRow[]): ColorRow[] {
+  // Currently sorting is disabled as per request, but this function can be re-enabled if needed
   if (!rows || rows.length === 0) return rows;
 
   const sorted = [...rows].sort((a, b) => {
@@ -631,7 +632,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
    return aIsWhiteUB ? -1 : 1; // White UB at top (return -1 when a is White UB)
   });
 
-  return sorted;
+  return rows;
  }
 
  isWhiteUB(colorName: string): boolean {
@@ -797,12 +798,14 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   console.log('[SEPARATION] Opening modal to add separation color');
   this.editingRow = null;
   this.isSeparationModalOpen = true;
+  this.cdr.detectChanges(); // Ensure modal opens with fresh state
  }
 
  handleAddCompoundPlate(): void {
   console.log('[SEPARATION] Opening modal to add compound plate');
   this.editingRow = null;
   this.isCompoundModalOpen = true;
+  this.cdr.detectChanges(); // Ensure modal opens with fresh state
  }
 
  handleSaveSeparationColor(plateData: any): void {
@@ -890,11 +893,14 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
     chokeColor: plateData.chokeColor,
     removed: false
    };
-   this.colorRows = [...this.colorRows, newRow];
+   this.colorRows = [newRow, ...this.colorRows];
    this.nextId++;
    this.hasUIChanges = true;
    console.log('[SEPARATION] New compound plate added:', newRow);
   }
+  setTimeout(() => {
+   this.handleRefreshList();
+  }, 500);
   this.isCompoundModalOpen = false;
   this.editingRow = null;
   this.cdr.detectChanges();
@@ -949,6 +955,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
    })
    .finally(() => {
     this.handleRefreshList(); // ✅ update SEP TABLE after underbase generation
+    this.cdr.detectChanges();
    });
  }
 
@@ -1290,7 +1297,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  }
 
  handleCancel(): void {
-  debugger;
+  // debugger;
   this.isSeparationModalOpen = false;
   this.isCompoundModalOpen = false;
   this.editingRow = null;
