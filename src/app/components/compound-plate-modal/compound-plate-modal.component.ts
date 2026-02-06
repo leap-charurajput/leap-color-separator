@@ -150,6 +150,7 @@ export class CompoundPlateModalComponent implements OnInit, OnChanges {
 
  onNameInput(event: Event): void {
   this.name = (event.target as HTMLInputElement).value;
+  this.cdr.detectChanges();
  }
 
  onMicronInput(event: Event): void {

@@ -899,6 +899,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
    console.log('[SEPARATION] New compound plate added:', newRow);
   }
   setTimeout(() => {
+   this.hasUIChanges = false;
    this.handleRefreshList();
   }, 500);
   this.isCompoundModalOpen = false;
