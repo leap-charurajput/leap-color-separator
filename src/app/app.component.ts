@@ -240,7 +240,6 @@ export class AppComponent implements OnInit, OnDestroy {
 					<MenuItem Id="markAsReg" Label="Mark as Reg mark" Enabled="true"/> \
 					<MenuItem Id="removeSeparationDataFromTeamVersion" Label="Remove separation data from team version" Enabled="true"/> \
 					<MenuItem Label="---" /> \
-					<MenuItem Id="leapServerSettings" Label="Leap Server Settings" Enabled="true"/> \
 					<MenuItem Id="settings" Label="Settings" Enabled="true"/> \
 				</Menu>';
 			csInterface.setPanelFlyoutMenu(flyoutXML);
