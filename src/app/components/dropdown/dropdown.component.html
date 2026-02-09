@@ -1,4 +1,4 @@
-<div class="d-flex gap-5 align-center mb-5">
+<div class="d-flex gap-5 align-center">
     <span *ngIf="label">{{label}}:</span>
     <div class="dropDownWrap" [class.opened]="isOpen" cdkOverlayOrigin #dropdownOrigin="cdkOverlayOrigin"
         (click)="handleToggle($event)">

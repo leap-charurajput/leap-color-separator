@@ -15,12 +15,7 @@
         (onChange)="selectedSection = $event" placeholder="Select section..."></app-dropdown>
     </div>
 
-    <!-- Environment selector -->
-    <div class="settings-dropdown-wrapper">
-      <span aria-hidden="true">Version</span>
-      <app-dropdown [value]="selectedEnvironmentKey" [items]="environmentKeys" (onChange)="onEnvironmentChange($event)"
-        placeholder="Select environment..."></app-dropdown>
-    </div>
+
 
     <app-separation-profiles-panel *ngIf="selectedSection === 'Separation Profiles'" title="Separation Profiles"
       description="Template presets for separation runs" [profiles]="profiles" (addProfile)="handleAddProfile()"
@@ -28,6 +23,12 @@
       (deleteProfile)="handleDeleteProfile($event)"></app-separation-profiles-panel>
 
     <div *ngIf="selectedSection === 'General Settings'" class="general-settings-content">
+      <!-- Environment selector -->
+      <div class="settings-dropdown-wrapper">
+        <label class="settings-field-label">Version</label>
+        <app-dropdown [value]="selectedEnvironmentKey" [items]="environmentKeys"
+          (onChange)="onEnvironmentChange($event)" placeholder="Select environment..."></app-dropdown>
+      </div>
       <div class="settings-field">
         <label class="settings-field-label">Default mesh</label>
         <input type="text" class="settings-field-input" [(ngModel)]="defaultMesh" />
