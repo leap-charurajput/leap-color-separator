@@ -199,13 +199,89 @@ export class ControllerService {
         .evalScript('handleCheckSeparatedDocument', {})
         .then((res: string) => {
           const result = JSON.parse(res);
-
-          return result;
+          return this.enrichSeparatedDocWithLinks(result);
         })
         .catch((err: any) => {
           throw err;
         });
     });
+  }
+
+  private enrichSeparatedDocWithLinks(result: any): Promise<any> {
+    if (
+      !result?.success ||
+      !result?.data?.isSeparatedDoc ||
+      result.data.teamVersionPath ||
+      result.data.leapTemplatePath
+    ) {
+      return Promise.resolve(result);
+    }
+
+    const docPath = result.data.docPath;
+    if (!docPath) return Promise.resolve(result);
+
+    const script = this.buildGetSeparatedDocumentLinksScript(docPath);
+    return evalScript(script)
+      .then((linksRes: any) => {
+        try {
+          const links = JSON.parse(linksRes || '{}');
+          if (links?.success && result.data) {
+            if (links.teamVersionPath)
+              result.data.teamVersionPath = links.teamVersionPath;
+            if (links.teamVersionName)
+              result.data.teamVersionName = links.teamVersionName;
+            if (links.leapTemplatePath)
+              result.data.leapTemplatePath = links.leapTemplatePath;
+            if (links.leapTemplateName)
+              result.data.leapTemplateName = links.leapTemplateName;
+          }
+        } catch (_) { }
+        return result;
+      })
+      .catch(() => result);
+  }
+
+  private buildGetSeparatedDocumentLinksScript(docPath: string): string {
+    const escapedPath = JSON.stringify(docPath);
+    return `
+(function() {
+  var docPath = ${escapedPath};
+  if (!docPath || docPath.indexOf('09 SEPARATIONS') === -1) {
+    return JSON.stringify({ success: true, teamVersionPath: null, teamVersionName: null, leapTemplatePath: null, leapTemplateName: null });
+  }
+  var result = { success: true, teamVersionPath: null, teamVersionName: null, leapTemplatePath: null, leapTemplateName: null };
+  try {
+    var docFile = new File(docPath);
+    var graphicFolder = docFile.parent;
+    var teamCodeFolder = graphicFolder.parent;
+    var leagueSepFolder = teamCodeFolder.parent;
+    var separationsFolder = leagueSepFolder.parent;
+    var rootFolder = separationsFolder.parent;
+    var league = leagueSepFolder.name;
+    var docName = docFile.name;
+    var originalName = docName.replace(/-SEP.*(\\\\.ai)$/i, '$1');
+    if (originalName === docName && docName.indexOf('-SEP') !== -1) {
+      originalName = docName.substring(0, docName.indexOf('-SEP')) + '.ai';
+    }
+    var teamOutsFolder = new Folder(rootFolder.fsName + '/01 TEAMOUTS');
+    var leagueFolder = new Folder(teamOutsFolder.fsName + '/' + league);
+    var aiFolder = new Folder(leagueFolder.fsName + '/AI');
+    var teamVersionFile = new File(aiFolder.fsName + '/' + originalName);
+    var templateFolder = Folder(teamOutsFolder.parent);
+    var templateFolderName = Folder(templateFolder.fsName.replace(' ASSETS', '')).name;
+    var templateFile = File(templateFolder.parent.fsName + '/' + templateFolderName + '.ai');
+    if (templateFile.exists) {
+      result.leapTemplatePath = templateFile.fsName;
+      result.leapTemplateName = decodeURI(templateFile.name);
+    }
+    if (teamVersionFile.exists) {
+      result.teamVersionPath = teamVersionFile.fsName;
+      result.teamVersionName = decodeURI(teamVersionFile.name);
+    }
+  } catch (e) {}
+  return JSON.stringify(result);
+})();
+`;
   }
 
   getSeparationProfiles(): Promise<any> {

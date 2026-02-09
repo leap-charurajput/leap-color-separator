@@ -1,5 +1,27 @@
 <div class="graphic-separation-container">
-	<div *ngIf="!hasVersionDocument && !isCheckingDocument" class="organize-graphics-content">
+	<div *ngIf="isSeparatedDoc" class="organize-graphics-content">
+		<div class="panelTitle mb-5">Manage Separations</div>
+		<div class="panelTitle mx-5" style="text-align: center; padding: 40px 20px;">
+			<ng-container *ngIf="separatedDocInfo.teamVersionName || separatedDocInfo.leapTemplateName">
+				<div *ngIf="separatedDocInfo.teamVersionName"
+					class="sep-doc-link-row"
+					(click)="openDocument(separatedDocInfo.teamVersionPath || '')">
+					Open team version: <span class="sep-doc-link ml-10">{{ separatedDocInfo.teamVersionName }}</span>
+				</div>
+				<div *ngIf="separatedDocInfo.leapTemplateName"
+					class="sep-doc-link-row"
+					(click)="openDocument(separatedDocInfo.leapTemplatePath || '')">
+					Open LEAP template: <span class="sep-doc-link ml-10">{{ separatedDocInfo.leapTemplateName }}</span>
+				</div>
+			</ng-container>
+			<div *ngIf="!separatedDocInfo.teamVersionName && !separatedDocInfo.leapTemplateName"
+				class="panelTitle mx-5" style="text-align: center; padding: 40px 20px;">
+				Separated document is open. Team version and template links are not available.
+			</div>
+		</div>
+	</div>
+
+	<div *ngIf="!hasVersionDocument && !isSeparatedDoc && !isCheckingDocument" class="organize-graphics-content">
 		<div class="panelTitle mx-5" style="text-align: center; padding: 40px 20px;">
 			<span *ngIf="isRunningInBrowser">Please run this in Illustrator</span>
 			<span *ngIf="!isRunningInBrowser">Please open the version document</span>
@@ -19,7 +41,7 @@
 		</div>
 	</div>
 
-	<div *ngIf="hasVersionDocument && hasGraphicsPositions && !isLoadingGraphics && !isCheckingDocument">
+	<div *ngIf="hasVersionDocument && !isSeparatedDoc && hasGraphicsPositions && !isLoadingGraphics && !isCheckingDocument">
 
 		<div *ngIf="graphicOptions.length === 0"
 			style="color: #ff6b6b; font-size: 12px; margin-top: 5px; text-align: center;">

@@ -37,6 +37,13 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
 	isSaving = false;
 	hasVersionDocument = false;
 	isCheckingDocument = false;
+	isSeparatedDoc = false;
+	separatedDocInfo: {
+		teamVersionName?: string;
+		teamVersionPath?: string;
+		leapTemplateName?: string;
+		leapTemplatePath?: string;
+	} = {};
 	samePlatesOptions: string[] = [];
 
 	private isMounted = true;
@@ -110,8 +117,22 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
 
 	private performVersionDocumentCheck(): Promise<void> {
 		this.isCheckingDocument = true;
-		return this.controller.getTemplateInfo()
+		return this.controller.checkSeparatedDocument()
+			.then(separatedResult => {
+				if (separatedResult.success && separatedResult.data?.isSeparatedDoc) {
+					this.isSeparatedDoc = true;
+					this.hasVersionDocument = false;
+					this.separatedDocInfo = separatedResult.data || {};
+					this.isCheckingDocument = false;
+					this.cdr.detectChanges();
+					return;
+				}
+				this.isSeparatedDoc = false;
+				this.separatedDocInfo = {};
+				return this.controller.getTemplateInfo();
+			})
 			.then(result => {
+				if (this.isSeparatedDoc || !result) return;
 				if (result.success && result.hasDocument) {
 					const isVersionFile = result.hasDocument && result.data && result.data.teamCode;
 					this.hasVersionDocument = isVersionFile || false;
@@ -544,5 +565,10 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
 	get isSinglePosition(): boolean {
 		const validPositionOptions = this.positionOptions.filter(opt => opt !== 'Choose');
 		return validPositionOptions.length === 1;
+	}
+
+	openDocument(filePath: string): void {
+		if (this.isRunningInBrowser) return;
+		this.controller.openSeparationDocument(filePath);
 	}
 }

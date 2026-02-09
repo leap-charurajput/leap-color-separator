@@ -38,10 +38,17 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
  separationPaths: { [key: string]: string } = {};
  graphicFolderStatus: { [key: string]: boolean } = {};
  isCheckingFolderMap: { [key: string]: boolean } = {};
- hasVersionDocument = false;
- isCheckingDocument = false;
- hasGraphicsPositions = false;
- private documentActivateHandler: (() => void) | null = null;
+	hasVersionDocument = false;
+	isCheckingDocument = false;
+	hasGraphicsPositions = false;
+	isSeparatedDoc = false;
+	separatedDocInfo: {
+		teamVersionName?: string;
+		teamVersionPath?: string;
+		leapTemplateName?: string;
+		leapTemplatePath?: string;
+	} = {};
+	private documentActivateHandler: (() => void) | null = null;
 
  constructor(private controller: ControllerService, private cdr: ChangeDetectorRef) {
   this.isRunningInBrowser = !(window as any).__adobe_cep__ && !(window as any).leap;
@@ -126,20 +133,26 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
   } catch (err) {}
  }
 
- checkVersionDocument(): void {
-  this.isCheckingDocument = true;
-  this.controller
-   .checkSeparatedDocument()
-   .then((separatedResult) => {
-    if (separatedResult.success && separatedResult.data && separatedResult.data.isSeparatedDoc) {
-     this.hasVersionDocument = false;
-     this.isCheckingDocument = false;
-     return;
-    }
-    return this.controller.getTemplateInfo();
-   })
-   .then((result) => {
-    if (result && result.success && result.hasDocument) {
+	checkVersionDocument(): void {
+		this.isCheckingDocument = true;
+		this.controller
+			.checkSeparatedDocument()
+			.then((separatedResult) => {
+				if (separatedResult.success && separatedResult.data && separatedResult.data.isSeparatedDoc) {
+					this.isSeparatedDoc = true;
+					this.separatedDocInfo = separatedResult.data || {};
+					this.hasVersionDocument = false;
+					this.isCheckingDocument = false;
+					this.cdr.detectChanges();
+					return;
+				}
+				this.isSeparatedDoc = false;
+				this.separatedDocInfo = {};
+				return this.controller.getTemplateInfo();
+			})
+			.then((result) => {
+				if (this.isSeparatedDoc || !result) return;
+				if (result.success && result.hasDocument) {
      const isVersionFile = result.hasDocument && result.data && result.data.teamCode;
      this.hasVersionDocument = isVersionFile || false;
 
@@ -591,7 +604,12 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
   return [];
  }
 
- getSeparationPath(separation: Separation, graphicName: string): string | null {
+	openDocument(filePath: string): void {
+		if (this.isRunningInBrowser) return;
+		this.controller.openSeparationDocument(filePath);
+	}
+
+	getSeparationPath(separation: Separation, graphicName: string): string | null {
   if (!graphicName || !separation.profile) {
    return null;
   }

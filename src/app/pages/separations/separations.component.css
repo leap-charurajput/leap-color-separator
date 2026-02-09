@@ -243,3 +243,18 @@
 	color: #888;
 	font-family: 'Adobe Clean', sans-serif;
 }
+
+.sep-doc-link-row {
+	cursor: pointer;
+	padding: 10px 0;
+	font-style: italic;
+}
+
+.sep-doc-link {
+	text-decoration: underline;
+	cursor: pointer;
+}
+
+.ml-10 {
+	margin-left: 10px;
+}
