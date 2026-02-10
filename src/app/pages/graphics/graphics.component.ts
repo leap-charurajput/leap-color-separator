@@ -364,6 +364,18 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
 		}
 	}
 
+	closeLinkColorsModal(): void {
+		this.modalState = {
+			isOpen: false,
+			graphicId: null,
+			graphicName: '',
+			availableColors: [],
+			selectedColors: [],
+			isLoadingColors: false
+		};
+		this.cdr.detectChanges();
+	}
+
 	handleColorsClick(graphicId: string, graphicName: string): void {
 		this.modalState = {
 			isOpen: true,
@@ -373,6 +385,7 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
 			selectedColors: [],
 			isLoadingColors: true
 		};
+		this.cdr.detectChanges(); // Ensure graphic name displays immediately
 
 		this.controller.getColorCodesFromExcel(this.teamCode)
 			.then(result => {
@@ -394,7 +407,6 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
 						isLoadingColors: false
 					};
 				} else {
-
 					this.modalState = {
 						isOpen: true,
 						graphicId,
@@ -404,9 +416,9 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
 						isLoadingColors: false
 					};
 				}
+				this.cdr.detectChanges();
 			})
-			.catch(err => {
-
+			.catch(() => {
 				this.modalState = {
 					isOpen: true,
 					graphicId,
@@ -415,6 +427,7 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
 					selectedColors: [],
 					isLoadingColors: false
 				};
+				this.cdr.detectChanges();
 			});
 	}
 
@@ -437,7 +450,7 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
 			);
 		}
 
-		this.modalState = { isOpen: false, graphicId: null, graphicName: '', availableColors: [], selectedColors: [], isLoadingColors: false };
+		this.closeLinkColorsModal();
 		this.saveToLocalStorage();
 	}
 

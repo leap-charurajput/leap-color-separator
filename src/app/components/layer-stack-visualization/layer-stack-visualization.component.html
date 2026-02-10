@@ -3,9 +3,14 @@
 
  <div class="d-flex gap-5">
   <div class="layer-stack-visualization" [style.height.px]="containerHeight">
-   <!-- Base Garment - Using base.svg with dynamic color -->
+   <!-- Base Garment - Dynamic type from styleInfo.Icon, color from bodyColor -->
    <div class="garment-base">
-    <img [src]="getGarmentImageSrc(selectedGarmentId)" alt="Base Garment" class="garment-svg" />
+    <img
+     [src]="getGarmentImageSrc(activeGarmentId)"
+     [alt]="activeGarment.label + ' Garment'"
+     class="garment-svg"
+     (error)="onGarmentImageError($event)"
+    />
    </div>
 
    <!-- Stacked Layers - Using trapezoidal shape like color.svg -->
@@ -86,7 +91,7 @@
    </div>
 
    <div class="label-item garment-label" style="bottom: 10px">
-    <span class="label-text">{{ garmentName }}</span>
+    <span class="label-text">{{ garmentName }}{{ garmentLabelText }}</span>
    </div>
   </div>
 

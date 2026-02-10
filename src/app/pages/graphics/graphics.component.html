@@ -155,7 +155,7 @@
 		[availableColors]="modalState.availableColors"
 		[selectedColors]="modalState.selectedColors"
 		[isLoadingColors]="modalState.isLoadingColors"
-		(close)="modalState = { isOpen: false, graphicId: null, graphicName: '', availableColors: [], selectedColors: [], isLoadingColors: false }"
+		(close)="closeLinkColorsModal()"
 		(save)="handleColorsSave(modalState.graphicId!, $event)"
 	></app-link-colors-modal>
 </div>

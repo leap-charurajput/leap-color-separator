@@ -1,6 +1,6 @@
-import { Component, Input, OnInit, OnDestroy, ChangeDetectorRef } from '@angular/core';
+import { Component, Input, OnInit, OnDestroy, OnChanges, SimpleChanges, ChangeDetectorRef, NgZone } from '@angular/core';
 import { ControllerService } from '../../services/controller.service';
-import { Subject, takeUntil } from 'rxjs';
+import { Subject } from 'rxjs';
 
 interface GarmentOption {
 	id: string;
@@ -24,10 +24,14 @@ interface ColorRow {
 	templateUrl: './layer-stack-visualization.component.html',
 	styleUrls: ['./layer-stack-visualization.component.css']
 })
-export class LayerStackVisualizationComponent implements OnInit, OnDestroy {
+export class LayerStackVisualizationComponent implements OnInit, OnDestroy, OnChanges {
 	@Input() colorRows: ColorRow[] = [];
 	@Input() garmentColor = '#4A5568';
-	@Input() garmentName = 'Garment: Athletic Navy';
+	@Input() garmentName = 'Garment: ';
+	@Input() styleInfo: { [key: string]: string } | null = null;
+	@Input() documentRefreshKey = 0;
+	@Input() bodyColorFromDocument: string | null = null;
+	@Input() bodyColorNameFromDocument: string = '';
 
 	garmentOptions: GarmentOption[] = [
 		{ id: 'base', label: 'Base', svg: 'assets/images/base.svg' },
@@ -66,12 +70,47 @@ export class LayerStackVisualizationComponent implements OnInit, OnDestroy {
 
 	constructor(
 		private controller: ControllerService,
-		private cdr: ChangeDetectorRef
+		private cdr: ChangeDetectorRef,
+		private ngZone: NgZone
 	) {
 	}
 
 	ngOnInit(): void {
-		this.fetchBodyColor();
+		if (this.bodyColorFromDocument) {
+			this.bodyColor = this.bodyColorFromDocument;
+			this.bodyColorName = this.bodyColorNameFromDocument || '';
+			this.colorizeSvgs();
+		} else {
+			this.fetchBodyColor();
+		}
+	}
+
+	ngOnChanges(changes: SimpleChanges): void {
+		if (changes['styleInfo']) {
+			const icon = this.styleInfo?.['Icon'];
+			const styleDesc = this.styleInfo?.['Style Desc'] || this.styleInfo?.['Style  Desc'] || this.styleInfo?.['StyleDesc'] || '';
+			console.log('[LayerStackVisualization] styleInfo changed:', this.styleInfo, '| Icon:', icon, '| Style Desc:', styleDesc, '| activeGarmentId:', this.activeGarmentId);
+			this.cdr.detectChanges();
+		}
+		if (changes['bodyColorFromDocument'] || changes['bodyColorNameFromDocument']) {
+			if (this.bodyColorFromDocument) {
+				this.bodyColor = this.bodyColorFromDocument;
+				this.bodyColorName = this.bodyColorNameFromDocument || '';
+				this.colorizedForColor = null;
+				this.colorizeSvgs();
+			}
+			this.cdr.detectChanges();
+		}
+		if (changes['documentRefreshKey'] && !changes['documentRefreshKey'].firstChange) {
+			this.colorizedForColor = null;
+			if (this.bodyColorFromDocument) {
+				this.bodyColor = this.bodyColorFromDocument;
+				this.bodyColorName = this.bodyColorNameFromDocument || '';
+				this.colorizeSvgs();
+			} else {
+				this.fetchBodyColor();
+			}
+		}
 	}
 
 	ngOnDestroy(): void {
@@ -81,6 +120,70 @@ export class LayerStackVisualizationComponent implements OnInit, OnDestroy {
 
 	get selectedGarment(): GarmentOption {
 		return this.garmentOptions.find(g => g.id === this.selectedGarmentId) || this.garmentOptions[0];
+	}
+
+	/**
+	 * Map Icon name from Styles.xlsx to garment option ID (same logic as React)
+	 */
+	private getGarmentIdFromIconName(iconName: string | undefined): string | null {
+		if (!iconName) return null;
+		const iconLower = iconName.toLowerCase().trim();
+
+		const iconMap: { [key: string]: string } = {
+			'ss tee': 'ss-tee',
+			'ss v neck': 'ss-vneck',
+			'ss v-neck': 'ss-vneck',
+			'ss vneck': 'ss-vneck',
+			'crew tee': 'ss-tee',
+			'a/ss crew tee': 'ss-tee',
+			'w/ss v-neck tee': 'ss-vneck',
+			'w/ss v neck tee': 'ss-vneck',
+			'ls tee': 'ls-tee',
+			'ls zip': 'ls-zip',
+			'hoodie': 'hoodie',
+			'jacket': 'jacket',
+			'jersey': 'jersey',
+			'polo': 'polo',
+			'poh': 'poh',
+			'pants': 'pants',
+			'shorts': 'shorts',
+			'tank': 'tank',
+			'duffle': 'duffle',
+			'other': 'other',
+			'base': 'base'
+		};
+
+		if (iconMap[iconLower]) return iconMap[iconLower];
+		if (iconLower.includes('crew tee') || (iconLower.includes('ss') && iconLower.includes('crew'))) return 'ss-tee';
+		if ((iconLower.includes('v-neck') || iconLower.includes('v neck') || iconLower.includes('vneck')) &&
+			(iconLower.includes('ss') || iconLower.includes('tee'))) return 'ss-vneck';
+		if (iconLower.includes('ls tee') || (iconLower.includes('long sleeve') && iconLower.includes('tee'))) return 'ls-tee';
+		if (iconLower.includes('ls zip') || (iconLower.includes('long sleeve') && iconLower.includes('zip'))) return 'ls-zip';
+
+		return null;
+	}
+
+	/**
+	 * Active garment ID - from styleInfo.Icon when available, else fallback to base
+	 */
+	get activeGarmentId(): string {
+		if (this.styleInfo?.['Icon']) {
+			const mappedId = this.getGarmentIdFromIconName(this.styleInfo['Icon']);
+			if (mappedId && this.garmentOptions.some(g => g.id === mappedId)) {
+				return mappedId;
+			}
+		}
+		return this.selectedGarmentId || 'base';
+	}
+
+	get activeGarment(): GarmentOption {
+		return this.garmentOptions.find(g => g.id === this.activeGarmentId) || this.garmentOptions[0];
+	}
+
+	/** Garment label - Style Desc or body color name. Tries multiple Excel column names. */
+	get garmentLabelText(): string {
+		const styleDesc = this.styleInfo?.['Style Desc'] || this.styleInfo?.['Style  Desc'] || this.styleInfo?.['StyleDesc'] || '';
+		return styleDesc || this.bodyColorName || this.bodyColorNameFromDocument || '';
 	}
 
 	get activeColors(): ColorRow[] {
@@ -125,18 +228,17 @@ export class LayerStackVisualizationComponent implements OnInit, OnDestroy {
 	fetchBodyColor(): void {
 		this.controller.getBodyColor()
 			.then((result: any) => {
-				if (result.success && result.bodyColor) {
-					this.bodyColor = result.bodyColor;
-					if (result.colorName) {
-						this.bodyColorName = result.colorName;
+				this.ngZone.run(() => {
+					if (result.success && result.bodyColor) {
+						this.bodyColor = result.bodyColor;
+						this.bodyColorName = result.colorName || '';
+						this.colorizeSvgs();
 					}
-					this.colorizeSvgs();
-				} else {
-
-				}
+					this.cdr.detectChanges();
+				});
 			})
-			.catch((err: any) => {
-
+			.catch(() => {
+				this.ngZone.run(() => this.cdr.detectChanges());
 			});
 	}
 
@@ -174,7 +276,7 @@ export class LayerStackVisualizationComponent implements OnInit, OnDestroy {
 
 		this.coloredSvgs = newColoredSvgs;
 		this.colorizedForColor = this.bodyColor;
-		this.cdr.detectChanges();
+		this.ngZone.run(() => this.cdr.detectChanges());
 	}
 
 	getLayerColor(row: ColorRow, index: number): string {
@@ -200,5 +302,12 @@ export class LayerStackVisualizationComponent implements OnInit, OnDestroy {
 
 	getGarmentImageSrc(garmentId: string): string {
 		return this.coloredSvgs[garmentId] || this.garmentOptions.find(g => g.id === garmentId)?.svg || '';
+	}
+
+	onGarmentImageError(event: Event): void {
+		const img = event.target as HTMLImageElement;
+		if (this.activeGarmentId !== 'base') {
+			img.src = this.getGarmentImageSrc('base');
+		}
 	}
 }

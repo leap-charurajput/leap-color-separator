@@ -277,7 +277,11 @@
   <app-layer-stack-visualization
    [colorRows]="colorRows"
    garmentColor="#4A5568"
-   garmentName="Garment: Athletic Navy"
+   garmentName="Garment: "
+   [styleInfo]="documentProfileMetadata?.styleInfo || null"
+   [documentRefreshKey]="documentRefreshKey"
+   [bodyColorFromDocument]="bodyColorFromDocument"
+   [bodyColorNameFromDocument]="bodyColorNameFromDocument"
   >
   </app-layer-stack-visualization>
 

@@ -9,6 +9,7 @@ import {
  OnInit,
  SimpleChanges
 } from '@angular/core';
+import { NgZone } from '@angular/core';
 import { ControllerService } from '../../services/controller.service';
 
 interface ColorRow {
@@ -54,6 +55,8 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  nextId = 3;
  hasUIChanges = false;
  documentProfileMetadata: any = null;
+ bodyColorFromDocument: string | null = null;
+ bodyColorNameFromDocument: string = '';
 
  isSeparationModalOpen = false;
  isCompoundModalOpen = false;
@@ -71,7 +74,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  visibilityMode: 'allVisible' | 'singleVisible' | 'noneVisible' | 'other' = 'allVisible';
  activeSingleInk: string | null = null;
 
- constructor(private controller: ControllerService, private cdr: ChangeDetectorRef) {
+ constructor(private controller: ControllerService, private cdr: ChangeDetectorRef, private ngZone: NgZone) {
   this.isRunningInBrowser = !(window as any).__adobe_cep__ && !(window as any).leap;
   // Don't initialize with default rows - wait for actual data from document
   this.colorRows = [];
@@ -228,28 +231,66 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   this.controller
    .checkSeparatedDocument()
    .then((result) => {
-    console.log('[SEPARATION] ========================================');
-    console.log('[SEPARATION] checkSeparatedDocument - Complete Result:');
-    console.log('[SEPARATION] ========================================');
-    console.log('[SEPARATION] Full result object:', JSON.stringify(result.data, null, 2));
-    console.log('[SEPARATION] result.success:', result.success);
+    this.ngZone.run(() => {
+     console.log('[SEPARATION] ========================================');
+     console.log('[SEPARATION] checkSeparatedDocument - Complete Result:');
+     console.log('[SEPARATION] ========================================');
+     console.log('[SEPARATION] Full result object:', JSON.stringify(result.data, null, 2));
+     console.log('[SEPARATION] result.success:', result.success);
 
-    if (!result.success || !result.data || !result.data.hasDocument) {
-     console.log('[SEPARATION] No data structure found or request failed');
-     this.setUIForNonSeparatedDocument();
-     return;
-    }
+     if (!result.success || !result.data || !result.data.hasDocument) {
+      console.log('[SEPARATION] No data structure found or request failed');
+      this.setUIForNonSeparatedDocument();
+      return;
+     }
 
-    const data = result.data;
+     const data = result.data;
 
-    if (data.isSeparatedDoc) {
-     this.isSeparatedDoc = true;
-     this.cdr.detectChanges(); // Force change detection to update template
+     if (data.isSeparatedDoc) {
+      this.isSeparatedDoc = true;
+      const bodyColorData = data.bodyColor;
+      this.bodyColorFromDocument = (bodyColorData && (bodyColorData as any).bodyColor) ? (bodyColorData as any).bodyColor : null;
+      this.bodyColorNameFromDocument = (bodyColorData && (bodyColorData as any).colorName) ? (bodyColorData as any).colorName : '';
      if (data.profileMetaData) {
       console.log('[SEPARATION] Setting profile metadata from XMP:', data.profileMetaData);
-      this.documentProfileMetadata = data.profileMetaData;
-      this.selectedGraphic = data.profileMetaData.graphicName || '';
-      this.graphicNameFromPath = data.profileMetaData.graphicName || '';
+      const profileMetaData = data.profileMetaData;
+      const existingStyleInfo = profileMetaData.styleInfo;
+      const styleCodes = profileMetaData.styleCodes;
+
+      if (existingStyleInfo) {
+       console.log('[SEPARATION] Using existing styleInfo from XMP');
+       this.documentProfileMetadata = profileMetaData;
+      } else if (styleCodes && Array.isArray(styleCodes) && styleCodes.length > 0 && this.controller.getStyleInformation) {
+       console.log('[SEPARATION] Fetching styleInfo for styleCodes:', styleCodes);
+       this.documentProfileMetadata = profileMetaData;
+       this.controller.getStyleInformation(styleCodes)
+        .then((styleInfoResult: any) => {
+         console.log('[SEPARATION] getStyleInformation result:', styleInfoResult);
+         this.ngZone.run(() => {
+          if (styleInfoResult && styleInfoResult.success && styleInfoResult.styleInfoMap) {
+           const firstStyleCode = styleCodes[0];
+           const styleInfo = styleInfoResult.styleInfoMap[firstStyleCode] || null;
+           console.log('[SEPARATION] Merged styleInfo for', firstStyleCode, ':', styleInfo);
+           this.documentProfileMetadata = styleInfo
+            ? { ...profileMetaData, styleInfo }
+            : profileMetaData;
+          } else {
+           console.warn('[SEPARATION] getStyleInformation: no success or styleInfoMap', styleInfoResult);
+          }
+          this.cdr.detectChanges();
+         });
+        })
+        .catch((err: any) => {
+         console.error('[SEPARATION] getStyleInformation failed:', err);
+         this.ngZone.run(() => this.cdr.detectChanges());
+        });
+      } else {
+       console.log('[SEPARATION] Skip getStyleInformation: styleCodes=', styleCodes, 'hasGetStyleInfo=', !!this.controller.getStyleInformation);
+       this.documentProfileMetadata = profileMetaData;
+      }
+
+      this.selectedGraphic = profileMetaData.graphicName || '';
+      this.graphicNameFromPath = profileMetaData.graphicName || '';
 
       setTimeout(() => {
        this.handleRefreshList();
@@ -320,11 +361,12 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
        this.isLoadingSwatches = false;
       }
      }
-    } else {
-     this.isSeparatedDoc = false;
-     this.cdr.detectChanges(); // Force change detection
-     this.setUIForNonSeparatedDocument();
-    }
+     } else {
+      this.isSeparatedDoc = false;
+      this.cdr.detectChanges();
+      this.setUIForNonSeparatedDocument();
+     }
+    });
    })
    .catch((err) => {
     console.error('[SEPARATION] Error checking separated document:', err);
@@ -338,6 +380,8 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   this.isSeparatedDoc = false;
   this.graphicNameFromPath = '';
   this.documentProfileMetadata = null;
+  this.bodyColorFromDocument = null;
+  this.bodyColorNameFromDocument = '';
   this.colorRows = [];
   this.graphicSwatches = [];
   this.selectedGraphic = '';

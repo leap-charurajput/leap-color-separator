@@ -451,12 +451,12 @@ getAppVersion();
     }
   }
 
-  getColorCodesFromExcel(teamCode: string): Promise<any> {
+  getColorCodesFromExcel(teamCode: string, documentPath?: string): Promise<any> {
     this.log('getColorCodesFromExcel called for team: ' + teamCode);
 
     return this.ensureSession().then(() => {
       return (window as any).leap
-        .getColorCodesFromExcel(teamCode)
+        .getColorCodesFromExcel(teamCode, documentPath)
         .then((result: any) => {
           return result;
         })
@@ -466,13 +466,16 @@ getAppVersion();
     });
   }
 
-  getStyleCodesFromExcel(teamCode: string): Promise<any> {
+  getStyleCodesFromExcel(teamCode: string, documentPath?: string): Promise<any> {
     this.log('getStyleCodesFromExcel called for team: ' + teamCode);
+    console.log('[Separations] getStyleCodesFromExcel – teamCode:', teamCode, '| documentPath:', documentPath ?? '(missing)');
 
     return this.ensureSession().then(() => {
       return (window as any).leap
-        .getStyleCodesFromExcel(teamCode)
+        .getStyleCodesFromExcel(teamCode, documentPath)
         .then((result: any) => {
+          const count = result?.styleCodes?.length ?? 0;
+          console.log('[Separations] getStyleCodesFromExcel result – success:', !!result?.success, '| styleCodes count:', count, result?.error ? '| error: ' + result.error : '');
           return result;
         })
         .catch((err: any) => {
@@ -483,11 +486,15 @@ getAppVersion();
 
   getProfileNamesFromExcel(styleCodes: string[]): Promise<any> {
     this.log('getProfileNamesFromExcel called with ' + styleCodes.length + ' style codes');
+    console.log('[Separations] getProfileNamesFromExcel – styleCodes count:', styleCodes?.length ?? 0, '| codes:', styleCodes ?? []);
 
     return this.ensureSession().then(() => {
       return (window as any).leap
         .getProfileNamesFromExcel(styleCodes)
         .then((result: any) => {
+          const mapKeys = result?.profileMap ? Object.keys(result.profileMap) : [];
+          const missing = styleCodes?.filter((sc) => !result?.profileMap?.[sc] || result?.profileMap?.[sc] === 'Unknown Profile') ?? [];
+          console.log('[Separations] getProfileNamesFromExcel result – success:', !!result?.success, '| profileMap entries:', mapKeys.length, missing.length ? '| style codes with no profile: ' + JSON.stringify(missing) : '');
           return result;
         })
         .catch((err: any) => {
@@ -738,6 +745,27 @@ getAppVersion();
           return result;
         })
         .catch((err: any) => {
+          throw err;
+        });
+    });
+  }
+
+  getStyleInformation(styleCodes: string[]): Promise<{ success: boolean; styleInfoMap?: { [key: string]: any }; error?: string }> {
+    console.log('[Controller] getStyleInformation called, styleCodes:', styleCodes);
+    const win = window as any;
+    if (!win.leap) {
+      console.error('[Controller] getStyleInformation: window.leap is not defined');
+      return Promise.reject(new Error('leap not available'));
+    }
+    return this.ensureSession().then(() => {
+      return win.leap
+        .getStyleInformation(styleCodes)
+        .then((result: any) => {
+          console.log('[Controller] getStyleInformation result:', result);
+          return result;
+        })
+        .catch((err: any) => {
+          console.error('[Controller] getStyleInformation failed:', err);
           throw err;
         });
     });

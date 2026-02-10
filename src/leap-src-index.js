@@ -151,8 +151,10 @@ function findExcelFileInBatchFolder(documentPath) {
    return null;
   }
 
+  console.log('[Separations] findExcelFileInBatchFolder – documentPath:', documentPath, '| excelFilePath:', excelFilePath);
   return excelFilePath;
  } catch (error) {
+  console.log('[Separations] findExcelFileInBatchFolder – no Excel found for documentPath:', documentPath, '| error:', error?.message ?? error);
   return null;
  }
 }
@@ -264,15 +266,8 @@ async function getStyleCodesFromExcel(teamCode, documentPath) {
     throw new Error('Excel file not found in BATCH folder');
    }
   } else {
-   const serverBasePath = getServerBasePath();
-   if (!serverBasePath) {
-    throw new Error('Server base path not found and document path not provided');
-   }
-   const normalizedBasePath = serverBasePath.replace(/\/$/, '');
-   excelFilePath = path.join(normalizedBasePath, 'SETTINGS', 'LEAP_SEPS', 'Data', 'CL0.xlsx');
-   if (!fs.existsSync(excelFilePath)) {
-    throw new Error(`Excel file not found at: ${excelFilePath}`);
-   }
+   console.log('[Separations] getStyleCodesFromExcel – document path not provided');
+   throw new Error('Document path not provided');
   }
 
   let workbook;
@@ -292,6 +287,7 @@ async function getStyleCodesFromExcel(teamCode, documentPath) {
   const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
   if (data.length === 0) {
+   console.log('[Separations] getStyleCodesFromExcel – Excel sheet empty, teamCode:', teamCode);
    return [];
   }
 
@@ -300,6 +296,7 @@ async function getStyleCodesFromExcel(teamCode, documentPath) {
   const styleCodeColIndex = headerRow.findIndex((col) => col === 'Lineup Style Code');
 
   if (teamCodeColIndex === -1 || styleCodeColIndex === -1) {
+   console.log('[Separations] getStyleCodesFromExcel – required columns missing. headerRow:', headerRow);
    throw new Error('Required columns not found in Excel file');
   }
 
@@ -320,7 +317,9 @@ async function getStyleCodesFromExcel(teamCode, documentPath) {
    }
   }
 
-  return Array.from(styleSet).sort();
+  const styleCodes = Array.from(styleSet).sort();
+  console.log('[Separations] getStyleCodesFromExcel – teamCode:', teamCode, '| styleCodes count:', styleCodes.length, '| styleCodes:', styleCodes);
+  return styleCodes;
  } catch (error) {
   throw new Error(`Failed to read Excel file: ${error.message}`);
  }
@@ -407,9 +406,99 @@ async function getProfileNamesFromExcel(styleCodes) {
    }
   }
 
+  const withProfile = Object.keys(profileMap);
+  const missing = styleCodes.filter((sc) => !profileMap[sc]);
+  console.log('[Separations] getProfileNamesFromExcel – styleCodes requested:', styleCodes.length, '| found in Styles.xlsx:', withProfile.length, '| profileMap:', profileMap);
+  if (missing.length) {
+   console.log('[Separations] getProfileNamesFromExcel – style codes NOT in Styles.xlsx (will show as Unknown Profile):', missing);
+  }
   return profileMap;
  } catch (error) {
   throw new Error(`Failed to read Excel file: ${error.message}`);
+ }
+}
+
+/**
+ * Get full style information from Styles.xlsx (Icon, Style Desc, and all columns)
+ * Returns styleInfoMap: { [styleCode]: { Icon, Style Desc, ... } }
+ */
+async function getStyleInformation(styleCodes) {
+ try {
+  console.log('[getStyleInformation] Called with styleCodes:', styleCodes);
+  if (!styleCodes || !Array.isArray(styleCodes) || styleCodes.length === 0) {
+   throw new Error('Style codes array is required');
+  }
+
+  const serverBasePath = getServerBasePath();
+  console.log('[getStyleInformation] serverBasePath:', serverBasePath || '(null)');
+  if (!serverBasePath) {
+   throw new Error('Server base path not found');
+  }
+
+  const normalizedBasePath = serverBasePath.replace(/\/$/, '');
+  const excelFilePath = path.join(
+   normalizedBasePath,
+   'SETTINGS',
+   'LEAP_SEPS',
+   'Data',
+   'Styles.xlsx'
+  );
+
+  if (!fs.existsSync(excelFilePath)) {
+   console.error('[getStyleInformation] File not found at:', excelFilePath);
+   throw new Error(`Excel file not found at: ${excelFilePath}`);
+  }
+  console.log('[getStyleInformation] Reading Excel from:', excelFilePath);
+
+  let workbook;
+  try {
+   const fileBuffer = fs.readFileSync(excelFilePath);
+   workbook = XLSX.read(fileBuffer, { type: 'buffer' });
+   console.log('[getStyleInformation] Read Excel via buffer, size:', fileBuffer.length);
+  } catch (bufferError) {
+   console.log('[getStyleInformation] Buffer read failed, trying readFile:', bufferError.message);
+   workbook = XLSX.readFile(excelFilePath);
+  }
+
+  const sheetName = workbook.SheetNames[0];
+  const worksheet = workbook.Sheets[sheetName];
+  const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+  if (data.length === 0) {
+   console.log('[getStyleInformation] Sheet is empty');
+   return { success: true, styleInfoMap: {} };
+  }
+
+  const headerRow = data[0];
+  const styleCodeColIndex = headerRow.findIndex((col) => col === 'Style Code');
+  if (styleCodeColIndex === -1) {
+   console.error('[getStyleInformation] No Style Code column. Headers:', headerRow);
+   throw new Error('Required columns not found in Excel file');
+  }
+
+  const styleCodesSet = new Set(styleCodes.map((sc) => String(sc).trim()));
+  const styleInfoMap = {};
+  for (let row = 1; row < data.length; row++) {
+   const rowData = data[row];
+   if (rowData && rowData[styleCodeColIndex]) {
+    const styleCode = String(rowData[styleCodeColIndex]).trim();
+    if (styleCodesSet.has(styleCode)) {
+     const styleInfo = {};
+     headerRow.forEach((columnName, colIndex) => {
+      if (columnName && rowData[colIndex] !== undefined && rowData[colIndex] !== null) {
+       styleInfo[columnName] = String(rowData[colIndex]).trim();
+      }
+     });
+     styleInfoMap[styleCode] = styleInfo;
+    }
+   }
+  }
+
+  console.log('[getStyleInformation] Found styleInfoMap for:', Object.keys(styleInfoMap), styleInfoMap);
+  return { success: true, styleInfoMap };
+ } catch (error) {
+  console.error('[getStyleInformation] Error:', error.message, error);
+  return { success: false, error: error.message || 'Failed to read Excel file' };
  }
 }
 
@@ -438,15 +527,7 @@ async function getGraphicPlacementOptions(documentPath) {
     throw new Error(`Cannot get file stats for Excel file: ${excelFilePath}`);
    }
   } else {
-   const serverBasePath = getServerBasePath();
-   if (!serverBasePath) {
-    throw new Error('Server base path not found and document path not provided');
-   }
-   const normalizedBasePath = serverBasePath.replace(/\/$/, '');
-   excelFilePath = path.join(normalizedBasePath, 'SETTINGS', 'LEAP_SEPS', 'Data', 'CL0.xlsx');
-   if (!fs.existsSync(excelFilePath)) {
-    throw new Error(`Excel file not found at: ${excelFilePath}`);
-   }
+   throw new Error('Document path not provided');
   }
 
   let workbook;
@@ -878,6 +959,21 @@ class Leap {
    };
   } catch (error) {
    this.log(`Error getting profile names: ${error.message}`);
+   return {
+    success: false,
+    error: error.message
+   };
+  }
+ }
+
+ async getStyleInformation(styleCodes) {
+  try {
+   console.log('[Leap.getStyleInformation] Called with:', styleCodes);
+   const result = await getStyleInformation(styleCodes);
+   console.log('[Leap.getStyleInformation] Returning:', result);
+   return result;
+  } catch (error) {
+   console.error('[Leap.getStyleInformation] Error:', error);
    return {
     success: false,
     error: error.message

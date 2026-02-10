@@ -42,6 +42,8 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 	isCheckingDocument = false;
 	hasGraphicsPositions = false;
 	isSeparatedDoc = false;
+	/** Current version document path; used to resolve project Batch Excel for style/color codes. */
+	versionDocumentPath: string | null = null;
 	separatedDocInfo: {
 		teamVersionName?: string;
 		teamVersionPath?: string;
@@ -142,6 +144,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 					this.isSeparatedDoc = true;
 					this.separatedDocInfo = separatedResult.data || {};
 					this.hasVersionDocument = false;
+					this.versionDocumentPath = null;
 					this.isCheckingDocument = false;
 					this.cdr.detectChanges();
 					return;
@@ -155,6 +158,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 				if (result.success && result.hasDocument) {
      const isVersionFile = result.hasDocument && result.data && result.data.teamCode;
      this.hasVersionDocument = isVersionFile || false;
+     this.versionDocumentPath = result.documentPath || null;
 
      if (this.hasVersionDocument) {
       this.loadGraphicsList();
@@ -164,6 +168,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
      }
     } else {
      this.hasVersionDocument = false;
+     this.versionDocumentPath = null;
     }
    })
    .catch((err) => {
@@ -181,6 +186,9 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
    .then((result) => {
     if (result.success && result.data && result.data.teamCode) {
      this.teamCode = result.data.teamCode;
+     if (result.documentPath) {
+      this.versionDocumentPath = result.documentPath;
+     }
      if (this.teamCode && this.teamCode !== '') {
       this.loadAvailableColors();
       this.loadSeparations();
@@ -200,7 +208,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
   }
 
   this.controller
-   .getColorCodesFromExcel(this.teamCode)
+   .getColorCodesFromExcel(this.teamCode, this.versionDocumentPath || undefined)
    .then((result) => {
     if (result.success && result.colors && Array.isArray(result.colors)) {
      this.availableColors = result.colors;
@@ -229,14 +237,14 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
      this.expandedGraphics.clear();
      this.graphicOptions.forEach((g) => this.expandedGraphics.add(g));
 
-     this.checkAllGraphicFolders();
-     this.loadSeparationPaths();
+    this.checkAllGraphicFolders();
+    this.loadSeparationPaths();
 
-     if (this.teamCode && this.teamCode !== '') {
+    if (this.teamCode && this.teamCode !== '' && this.versionDocumentPath) {
       this.loadSeparations();
-     }
+    }
 
-     this.checkGraphicsPositions();
+    this.checkGraphicsPositions();
      this.cdr.detectChanges();
     } else {
      this.graphicOptions = [];
@@ -355,20 +363,24 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
  }
 
  loadSeparations(): void {
+  const logPrefix = '[Separations] Profile generation:';
   if (this.isRunningInBrowser) {
    return;
   }
 
   if (!this.teamCode || this.teamCode === '') {
+   console.log(logPrefix, 'Skipped – missing teamCode:', this.teamCode || '(empty)');
    return;
   }
 
+  console.log(logPrefix, 'Inputs – teamCode:', this.teamCode, '| versionDocumentPath:', this.versionDocumentPath);
   this.isLoadingSeparations = true;
 
   this.controller
-   .getStyleCodesFromExcel(this.teamCode)
+   .getStyleCodesFromExcel(this.teamCode, this.versionDocumentPath || undefined)
    .then((styleResult) => {
     if (!styleResult.success || !styleResult.styleCodes || styleResult.styleCodes.length === 0) {
+     console.warn(logPrefix, 'Step 1 – Style codes: missing or failed. success:', styleResult?.success, '| count:', styleResult?.styleCodes?.length ?? 0, '| error:', styleResult?.error ?? 'none');
      this.separations = [];
      this.isLoadingSeparations = false;
      this.cdr.detectChanges();
@@ -376,9 +388,11 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
     }
 
     const styleCodes = styleResult.styleCodes;
+    console.log(logPrefix, 'Step 1 – Style codes from Excel:', styleCodes.length, 'codes:', styleCodes);
 
     return this.controller.getProfileNamesFromExcel(styleCodes).then((profileResult) => {
      if (!profileResult.success || !profileResult.profileMap) {
+      console.warn(logPrefix, 'Step 2 – Profile names: missing or failed. success:', profileResult?.success, '| error:', profileResult?.error ?? 'none');
       this.separations = [];
       this.isLoadingSeparations = false;
       this.cdr.detectChanges();
@@ -386,6 +400,21 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
      }
 
      const profileMap = profileResult.profileMap;
+     const styleCodesWithProfile: string[] = [];
+     const styleCodesMissingProfile: string[] = [];
+     styleCodes.forEach((sc: string) => {
+      const name = profileMap[sc];
+      if (name && name !== 'Unknown Profile') {
+       styleCodesWithProfile.push(sc);
+      } else {
+       styleCodesMissingProfile.push(sc);
+      }
+     });
+     console.log(logPrefix, 'Step 2 – Profile map from Styles.xlsx: found for', styleCodesWithProfile.length, 'style codes:', Object.fromEntries(styleCodesWithProfile.map((sc) => [sc, profileMap[sc]])));
+     if (styleCodesMissingProfile.length > 0) {
+      console.warn(logPrefix, 'Step 2 – Style codes with no profile (will show as "Unknown Profile"):', styleCodesMissingProfile);
+     }
+
      const profileGroups: { [key: string]: string[] } = {};
      styleCodes.forEach((styleCode: string) => {
       const profileName = profileMap[styleCode] || 'Unknown Profile';
@@ -394,6 +423,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
       }
       profileGroups[profileName].push(styleCode);
      });
+     console.log(logPrefix, 'Step 3 – Profile groups (profile → style codes):', profileGroups);
 
      const separationsList = Object.keys(profileGroups).map((profileName, index) => ({
       id: index + 1,
@@ -404,12 +434,14 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
       isCreated: false
      }));
 
+     console.log(logPrefix, 'Step 4 – Generated separations:', separationsList.length, 'profiles:', separationsList.map((s) => ({ id: s.id, profile: s.profile, styles: s.styles })));
      this.separations = separationsList;
      this.isLoadingSeparations = false;
      this.cdr.detectChanges();
     });
    })
    .catch((err) => {
+    console.error(logPrefix, 'Error loading separations:', err);
     this.separations = [];
     this.isLoadingSeparations = false;
     this.cdr.detectChanges();
