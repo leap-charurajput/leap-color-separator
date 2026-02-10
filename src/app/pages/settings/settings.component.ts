@@ -29,7 +29,7 @@ export class SettingsComponent implements OnInit {
 
  // 🔑 Environment config
  environments = {
-  Production: 'https://www.netlify.com', //'http://salesforce-connector.metadesign.org.in'
+  Production: 'http://salesforce-connector.metadesign.org.in',
   Development: 'http://dev-leap-seps.metadesign.org.in',
   Localhost: 'http://localhost:6002'
  } as const;
