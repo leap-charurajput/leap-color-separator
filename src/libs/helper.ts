@@ -1,4 +1,4 @@
-const csInterface = new (window as any).CSInterface();
+export const csInterface = new (window as any).CSInterface();
 
 export async function evalScript(script: any) {
  let res = await new Promise((resolve, reject) => {
