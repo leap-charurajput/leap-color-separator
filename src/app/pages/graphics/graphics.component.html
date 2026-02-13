@@ -75,13 +75,13 @@
 							{{ graphic.name }}
 						</span>
 					</div>
-					<div class="col d-flex align-center" style="width: 25%;">
+					<div class="col d-flex align-center" style="width: 25%;" (click)="$event.stopPropagation()">
 						<app-dropdown
 							[value]="graphic.position"
 							[items]="positionOptions"
 							(onChange)="handlePositionChange(graphic.id, $event)"
 							placeholder="Choose..."
-							[disabled]="(graphic.id === 'all' && isSingleGraphic) || isSinglePosition"
+							[disabled]="graphic.id === 'all' && isSingleGraphic"
 						></app-dropdown>
 					</div>
 					<div class="col d-flex align-center" style="width: 25%;">
@@ -90,7 +90,7 @@
 							[items]="samePlatesOptions"
 							(onChange)="handleSamePlatesChange(graphic.id, $event)"
 							placeholder="Same as..."
-							[disabled]="isSingleGraphic"
+							[disabled]="isSingleGraphic || isSinglePosition"
 						></app-dropdown>
 					</div>
 					<div class="col d-flex align-center justify-center" style="width: 15%;">

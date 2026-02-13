@@ -629,6 +629,23 @@ getAppVersion();
     });
   }
 
+  deleteAllPlatesInSeparationDoc(): Promise<any> {
+    this.log('deleteAllPlatesInSeparationDoc called');
+
+    return this.ensureSession().then(() => {
+      return (window as any).leap
+        .scriptLoader()
+        .evalScript('handleDeleteAllPlatesInSeparationDocument', {})
+        .then((res: string) => {
+          const result = JSON.parse(res);
+          return result;
+        })
+        .catch((err: any) => {
+          throw err;
+        });
+    });
+  }
+
   openSeparationDocument(filePath: string): Promise<any> {
     this.log('openSeparationDocument called for: ' + filePath);
 
@@ -902,6 +919,78 @@ getAppVersion();
       } else {
         // File doesn't exist or error reading
         resolve('');
+      }
+    });
+  }
+
+  loadGeneralSettings(): Promise<{ success: boolean; data?: any; error?: string }> {
+    return new Promise((resolve) => {
+      const cep = (window as any).cep;
+      if (!cep || !cep.fs) {
+        resolve({
+          success: true,
+          data: { defaultMesh: '110', addUnderbase: true, artistName: '', artistInitials: '' }
+        });
+        return;
+      }
+
+      const os = (window as any).cep_node.require('os');
+      const path = (window as any).cep_node.require('path');
+      const homeDir = os.homedir();
+      const settingsFolder = path.join(homeDir, 'Documents', 'LEAP Settings', 'LEAP_Seps');
+      const settingsFile = path.join(settingsFolder, 'general_Settings.json');
+
+      const result = cep.fs.readFile(settingsFile);
+      if (result.err === 0) {
+        try {
+          const data = JSON.parse(result.data);
+          resolve({ success: true, data: data || {} });
+        } catch (e) {
+          console.error('Error parsing general settings file', e);
+          resolve({
+            success: true,
+            data: { defaultMesh: '110', addUnderbase: true, artistName: '', artistInitials: '' }
+          });
+        }
+      } else {
+        resolve({
+          success: true,
+          data: { defaultMesh: '110', addUnderbase: true, artistName: '', artistInitials: '' }
+        });
+      }
+    });
+  }
+
+  saveGeneralSettings(settings: {
+    defaultMesh?: string;
+    addUnderbase?: boolean;
+    artistName?: string;
+    artistInitials?: string;
+  }): Promise<{ success: boolean; error?: string }> {
+    return new Promise((resolve) => {
+      const cep = (window as any).cep;
+      if (!cep || !cep.fs) {
+        resolve({ success: true });
+        return;
+      }
+
+      const os = (window as any).cep_node.require('os');
+      const path = (window as any).cep_node.require('path');
+      const homeDir = os.homedir();
+      const settingsFolder = path.join(homeDir, 'Documents', 'LEAP Settings', 'LEAP_Seps');
+      const settingsFile = path.join(settingsFolder, 'general_Settings.json');
+
+      const mkdirResult = cep.fs.makedir(settingsFolder);
+      if (mkdirResult.err !== 0 && mkdirResult.err !== 17) {
+        resolve({ success: false, error: 'Failed to create settings directory' });
+        return;
+      }
+
+      const writeResult = cep.fs.writeFile(settingsFile, JSON.stringify(settings, null, 2));
+      if (writeResult.err === 0) {
+        resolve({ success: true });
+      } else {
+        resolve({ success: false, error: 'Error writing settings file: ' + writeResult.err });
       }
     });
   }

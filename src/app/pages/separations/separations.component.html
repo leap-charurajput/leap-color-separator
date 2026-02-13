@@ -1,22 +1,38 @@
 <div class="graphic-separation-container">
 	<div *ngIf="isSeparatedDoc" class="organize-graphics-content">
-		<div class="panelTitle mb-5">Manage Separations</div>
-		<div class="panelTitle mx-5" style="text-align: center; padding: 40px 20px;">
-			<ng-container *ngIf="separatedDocInfo.teamVersionName || separatedDocInfo.leapTemplateName">
-				<div *ngIf="separatedDocInfo.teamVersionName"
-					class="sep-doc-link-row"
-					(click)="openDocument(separatedDocInfo.teamVersionPath || '')">
-					Open team version: <span class="sep-doc-link ml-10">{{ separatedDocInfo.teamVersionName }}</span>
-				</div>
-				<div *ngIf="separatedDocInfo.leapTemplateName"
-					class="sep-doc-link-row"
-					(click)="openDocument(separatedDocInfo.leapTemplatePath || '')">
-					Open LEAP template: <span class="sep-doc-link ml-10">{{ separatedDocInfo.leapTemplateName }}</span>
+		<div class="current-sep-block">
+			<div class="current-sep-heading">Current sep</div>
+			<ng-container *ngIf="separatedDocInfo.teamVersionName || separatedDocInfo.leapTemplateName || getCurrentSepGraphicName() || getCurrentSepGeneratedLine()">
+				<div class="current-sep-rows">
+					<div *ngIf="separatedDocInfo.leapTemplateName" class="current-sep-row">
+						<span class="current-sep-label">LEAP Template:</span>
+						<span class="current-sep-value sep-doc-link" (click)="openDocument(separatedDocInfo.leapTemplatePath || '')">{{ separatedDocInfo.leapTemplateName }}</span>
+					</div>
+					<div *ngIf="separatedDocInfo.teamVersionName" class="current-sep-row">
+						<span class="current-sep-label">LEAP Team Version:</span>
+						<span class="current-sep-value sep-doc-link" (click)="openDocument(separatedDocInfo.teamVersionPath || '')">{{ separatedDocInfo.teamVersionName }}</span>
+					</div>
+					<div *ngIf="getCurrentSepGraphicName()" class="current-sep-row">
+						<span class="current-sep-label">Graphic:</span>
+						<span class="current-sep-value">{{ getCurrentSepGraphicName() }}</span>
+					</div>
+					<div *ngIf="getCurrentSepGeneratedLine()" class="current-sep-row">
+						<span class="current-sep-label">Generated</span>
+						<span class="current-sep-value">{{ getCurrentSepGeneratedLine() }}</span>
+					</div>
 				</div>
 			</ng-container>
-			<div *ngIf="!separatedDocInfo.teamVersionName && !separatedDocInfo.leapTemplateName"
-				class="panelTitle mx-5" style="text-align: center; padding: 40px 20px;">
+			<div *ngIf="!separatedDocInfo.teamVersionName && !separatedDocInfo.leapTemplateName && !getCurrentSepGraphicName() && !getCurrentSepGeneratedLine()"
+				class="current-sep-fallback">
 				Separated document is open. Team version and template links are not available.
+			</div>
+			<div class="current-sep-actions">
+				<button type="button" class="current-sep-action-link" (click)="handleDeleteAllPlates()" title="Delete all sublayers in layer SEPARATED_ART">
+					Delete All Plates
+				</button>
+				<button type="button" class="current-sep-action-link" (click)="handleRecreateAllPlates()" title="Delete all sublayers in layer SEPARATED_ART then create separations">
+					Recreate All Plates
+				</button>
 			</div>
 		</div>
 	</div>
@@ -108,7 +124,7 @@
 									<div class="generate-button-section">
 										<app-button (click)="handleGenerateSeparations(separation.id, graphic)"
 											variant="primary" size="medium"
-											[disabled]="!getGraphicFolderStatus(graphic) || isFolderChecking(graphic) || hasUnknownProfile(separation)">
+											[disabled]="!getGraphicFolderStatus(graphic) || isFolderChecking(graphic) || hasUnknownProfile(separation) || isProfileMissingInSettings(separation)">
 											Generate Separations
 										</app-button>
 										<div *ngIf="hasUnknownProfile(separation)" class="folder-check-note">
@@ -116,7 +132,10 @@
 											getMissingStyleCodes(separation).length
 											> 1 ? 's' : '' }}: {{ getMissingStyleCodes(separation).join(', ') }}
 										</div>
-										<div *ngIf="!getGraphicFolderStatus(graphic) && !isFolderChecking(graphic) && !hasUnknownProfile(separation)"
+										<div *ngIf="isProfileMissingInSettings(separation)" class="folder-check-note">
+											Profile missing. Please add from Separation Profile Settings.
+										</div>
+										<div *ngIf="!getGraphicFolderStatus(graphic) && !isFolderChecking(graphic) && !hasUnknownProfile(separation) && !isProfileMissingInSettings(separation)"
 											class="folder-check-note">
 											Art must be exported before separations can be created
 										</div>

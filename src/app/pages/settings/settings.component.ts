@@ -25,6 +25,8 @@ export class SettingsComponent implements OnInit {
  selectedProfile: Profile | null = null;
  defaultMesh = '110';
  addUnderbase = true;
+ artistName = '';
+ artistInitials = '';
  selectedSection = 'Separation Profiles';
 
  // 🔑 Environment config
@@ -45,6 +47,7 @@ export class SettingsComponent implements OnInit {
  async ngOnInit(): Promise<void> {
   this.loadProfiles();
   this.loadLeapServerPath();
+  this.loadGeneralSettings();
 
   try {
    const result = await this.controller.getAppVersion();
@@ -79,6 +82,31 @@ export class SettingsComponent implements OnInit {
     alert('Restart Adobe Illustrator for this change to take effect');
    } else {
     alert('Failed to save environment URL');
+   }
+  });
+ }
+
+ loadGeneralSettings(): void {
+  this.controller.loadGeneralSettings().then((result) => {
+   if (result.success && result.data) {
+    this.defaultMesh = result.data.defaultMesh != null ? String(result.data.defaultMesh) : '110';
+    this.addUnderbase = result.data.addUnderbase !== undefined ? result.data.addUnderbase : true;
+    this.artistName = result.data.artistName != null ? String(result.data.artistName) : '';
+    this.artistInitials = result.data.artistInitials != null ? String(result.data.artistInitials) : '';
+   }
+  });
+ }
+
+ saveGeneralSettings(): void {
+  const settings = {
+   defaultMesh: this.defaultMesh,
+   addUnderbase: this.addUnderbase,
+   artistName: this.artistName,
+   artistInitials: this.artistInitials
+  };
+  this.controller.saveGeneralSettings(settings).then((result) => {
+   if (!result.success) {
+    console.error('Failed to save general settings:', result.error);
    }
   });
  }
