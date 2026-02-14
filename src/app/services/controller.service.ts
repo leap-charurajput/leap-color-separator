@@ -683,22 +683,84 @@ getAppVersion();
     });
   }
 
-  exportPostscript(): Promise<any> {
-    this.log('exportPostscript called');
+  exportPostscript(inks: string[]): Promise<any> {
+    this.log('exportPostscript called with ' + (inks?.length ?? 0) + ' inks');
 
     return this.ensureSession().then(() => {
-      return (window as any).leap
-        .scriptLoader()
-        .evalScript('handleExportPostscript', {})
-        .then((res: string) => {
-          const result = JSON.parse(res);
-
+      const script = this.buildExportPostscriptScript(Array.isArray(inks) ? inks : []);
+      return evalScript(script)
+        .then((res: unknown) => {
+          const str = typeof res === 'string' ? res : '';
+          const result = str ? JSON.parse(str) : { success: false, error: 'No result' };
           return result;
         })
         .catch((err: any) => {
           throw err;
         });
     });
+  }
+
+  private buildExportPostscriptScript(inks: string[]): string {
+    const safeInks = Array.isArray(inks) ? inks : [];
+    const inksLiteral = JSON.stringify(safeInks);
+    return `
+(function() {
+ try {
+  var inks = ${inksLiteral};
+  if (!app.documents.length) {
+   return JSON.stringify({ success: false, error: "No active document found" });
+  }
+  var doc = app.activeDocument;
+  var docFile = new File(doc.fullName);
+  var docFolder = docFile.parent;
+  var docName = docFile.name.replace(/\\.[^\\.]+$/, '');
+  var outputPath = docFolder.fsName + "/" + docName + ".ps";
+
+  var jobOptions = new PrintJobOptions();
+  var printOptions = new PrintOptions();
+  printOptions.printerName = app.printerList[0].name;
+  printOptions.PPDName = 'Device Independent';
+  printOptions.printToFile = true;
+  printOptions.jobOptions = jobOptions;
+
+  var colorSepOptions = new PrintColorSeparationOptions();
+  colorSepOptions.colorSeparationMode = PrintColorSeparationMode.HOSTBASEDSEPARATION;
+  colorSepOptions.convertSpotColors = false;
+  colorSepOptions.overprintBlack = true;
+
+  var _inkList = doc.inkList;
+  var printInks = [];
+  var inksLookup = {};
+  for (var i = 0; i < inks.length; i++) {
+   inksLookup[inks[i].toUpperCase()] = true;
+  }
+  for (var i = 0; i < _inkList.length; i++) {
+   var ink = _inkList[i];
+   var inkName = ink.name.toUpperCase();
+   if (inksLookup[inkName]) {
+    printInks.push(ink);
+   }
+  }
+
+  colorSepOptions.inkList = printInks;
+  printOptions.colorSeparationOptions = colorSepOptions;
+  printOptions.file = new File(outputPath);
+
+  app.activeDocument.print(printOptions);
+
+  return JSON.stringify({
+   success: true,
+   message: "PostScript exported successfully",
+   filePath: outputPath
+  });
+ } catch (e) {
+  return JSON.stringify({
+   success: false,
+   error: "Error exporting PostScript: " + (e.message || e.toString())
+  });
+ }
+})();
+`;
   }
 
   exportSeparationsPreviewPDF(): Promise<any> {

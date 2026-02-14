@@ -295,6 +295,69 @@ function findPageItemByName(container, itemName) {
 
 	return null;
 }
+
+// Set fill overprint only (not stroke) on a single path item
+function setOverprintOnPathItem(pathItem) {
+	try {
+		if (pathItem.filled) {
+			pathItem.fillOverprint = true;
+		}
+	} catch (e) {
+	}
+}
+
+// Recursively set fill overprint on all paths in a container (group, layer, etc.)
+function setFillOverprintOnContainer(container) {
+	if (!container) return;
+	try {
+		if (container.typename === "PathItem") {
+			setOverprintOnPathItem(container);
+			return;
+		}
+		if (container.typename === "CompoundPathItem") {
+			if (container.pathItems && container.pathItems.length > 0) {
+				for (var p = 0; p < container.pathItems.length; p++) {
+					setOverprintOnPathItem(container.pathItems[p]);
+				}
+			}
+			return;
+		}
+		if (container.typename === "PlacedItem") {
+			try {
+				if (typeof container.overprint !== "undefined") {
+					container.overprint = true;
+				}
+			} catch (opErr) {
+			}
+			return;
+		}
+		if (container.pageItems && container.pageItems.length > 0) {
+			for (var i = 0; i < container.pageItems.length; i++) {
+				setFillOverprintOnContainer(container.pageItems[i]);
+			}
+		}
+	} catch (e) {
+		$.writeln("[SEPARATION] setFillOverprintOnContainer error: " + e.message);
+	}
+}
+
+// Set fill overprint on all paths in SEPARATED_ART layer (including all sublayers)
+function setOverprintOnSeparatedArt(doc) {
+	try {
+		var separatedArtLayer = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SEPARATED_ART);
+		// Process direct pageItems on SEPARATED_ART (if any)
+		setFillOverprintOnContainer(separatedArtLayer);
+		// Process every sublayer (each color plate: PANTONE, White UB, Choke, etc.)
+		if (separatedArtLayer.layers && separatedArtLayer.layers.length > 0) {
+			for (var s = 0; s < separatedArtLayer.layers.length; s++) {
+				setFillOverprintOnContainer(separatedArtLayer.layers[s]);
+			}
+		}
+	} catch (e) {
+		$.writeln("[SEPARATION] setOverprintOnSeparatedArt error: " + e.message);
+	}
+}
+
 function placeAndEmbedGraphicAI(sepDoc, graphicAIPath, graphicName) {
 	try {
 		var aiFile = new File(graphicAIPath);
@@ -358,6 +421,8 @@ function placeAndEmbedGraphicAI(sepDoc, graphicAIPath, graphicName) {
 			var moveX = targetCenterX - currentCenterX;
 			var moveY = targetTop - currentBounds[1];
 			pastedGroup.translate(moveX, moveY);
+			// Graphic placed per SEP_ART bounds: set overprint on all paths
+			setFillOverprintOnContainer(pastedGroup);
 		}
 
 		app.activeDocument.selection = null;
@@ -419,6 +484,13 @@ function placeGraphicInDocument(doc, graphicPNGPath) {
 		var targetTop = sepArtBounds[1];
 		placedItem.left = targetCenterX - (newWidth / 2);
 		placedItem.top = targetTop;
+		// Graphics placed per SEP_ART bounds should have overprint=true
+		try {
+			if (typeof placedItem.overprint !== "undefined") {
+				placedItem.overprint = true;
+			}
+		} catch (opErr) {
+		}
 
 		return true;
 	} catch (e) {
@@ -646,6 +718,7 @@ function handlePerformSeparation(params_string) {
 		sepDoc.save();
 		splitColors(graphicName);
 		generateUnderbase(graphicName);
+		setOverprintOnSeparatedArt(sepDoc);
 
 		try {
 			var layerNames = getSeparatedArtLayerNames(sepDoc);
