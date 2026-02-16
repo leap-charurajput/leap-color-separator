@@ -4,12 +4,12 @@ import {
  ChangeDetectorRef,
  Component,
  Input,
+ NgZone,
  OnChanges,
  OnDestroy,
  OnInit,
  SimpleChanges
 } from '@angular/core';
-import { NgZone } from '@angular/core';
 import { ControllerService } from '../../services/controller.service';
 
 interface ColorRow {
@@ -74,7 +74,11 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  visibilityMode: 'allVisible' | 'singleVisible' | 'noneVisible' | 'other' = 'allVisible';
  activeSingleInk: string | null = null;
 
- constructor(private controller: ControllerService, private cdr: ChangeDetectorRef, private ngZone: NgZone) {
+ constructor(
+  private controller: ControllerService,
+  private cdr: ChangeDetectorRef,
+  private ngZone: NgZone
+ ) {
   this.isRunningInBrowser = !(window as any).__adobe_cep__ && !(window as any).leap;
   // Don't initialize with default rows - wait for actual data from document
   this.colorRows = [];
@@ -249,118 +253,136 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
      if (data.isSeparatedDoc) {
       this.isSeparatedDoc = true;
       const bodyColorData = data.bodyColor;
-      this.bodyColorFromDocument = (bodyColorData && (bodyColorData as any).bodyColor) ? (bodyColorData as any).bodyColor : null;
-      this.bodyColorNameFromDocument = (bodyColorData && (bodyColorData as any).colorName) ? (bodyColorData as any).colorName : '';
-     if (data.profileMetaData) {
-      console.log('[SEPARATION] Setting profile metadata from XMP:', data.profileMetaData);
-      const profileMetaData = data.profileMetaData;
-      const existingStyleInfo = profileMetaData.styleInfo;
-      const styleCodes = profileMetaData.styleCodes;
+      this.bodyColorFromDocument =
+       bodyColorData && (bodyColorData as any).bodyColor ? (bodyColorData as any).bodyColor : null;
+      this.bodyColorNameFromDocument =
+       bodyColorData && (bodyColorData as any).colorName ? (bodyColorData as any).colorName : '';
+      if (data.profileMetaData) {
+       console.log('[SEPARATION] Setting profile metadata from XMP:', data.profileMetaData);
+       const profileMetaData = data.profileMetaData;
+       const existingStyleInfo = profileMetaData.styleInfo;
+       const styleCodes = profileMetaData.styleCodes;
 
-      if (existingStyleInfo) {
-       console.log('[SEPARATION] Using existing styleInfo from XMP');
-       this.documentProfileMetadata = profileMetaData;
-      } else if (styleCodes && Array.isArray(styleCodes) && styleCodes.length > 0 && this.controller.getStyleInformation) {
-       console.log('[SEPARATION] Fetching styleInfo for styleCodes:', styleCodes);
-       this.documentProfileMetadata = profileMetaData;
-       this.controller.getStyleInformation(styleCodes)
-        .then((styleInfoResult: any) => {
-         console.log('[SEPARATION] getStyleInformation result:', styleInfoResult);
-         this.ngZone.run(() => {
-          if (styleInfoResult && styleInfoResult.success && styleInfoResult.styleInfoMap) {
-           const firstStyleCode = styleCodes[0];
-           const styleInfo = styleInfoResult.styleInfoMap[firstStyleCode] || null;
-           console.log('[SEPARATION] Merged styleInfo for', firstStyleCode, ':', styleInfo);
-           this.documentProfileMetadata = styleInfo
-            ? { ...profileMetaData, styleInfo }
-            : profileMetaData;
-          } else {
-           console.warn('[SEPARATION] getStyleInformation: no success or styleInfoMap', styleInfoResult);
-          }
-          this.cdr.detectChanges();
+       if (existingStyleInfo) {
+        console.log('[SEPARATION] Using existing styleInfo from XMP');
+        this.documentProfileMetadata = profileMetaData;
+       } else if (
+        styleCodes &&
+        Array.isArray(styleCodes) &&
+        styleCodes.length > 0 &&
+        this.controller.getStyleInformation
+       ) {
+        console.log('[SEPARATION] Fetching styleInfo for styleCodes:', styleCodes);
+        this.documentProfileMetadata = profileMetaData;
+        this.controller
+         .getStyleInformation(styleCodes)
+         .then((styleInfoResult: any) => {
+          console.log('[SEPARATION] getStyleInformation result:', styleInfoResult);
+          this.ngZone.run(() => {
+           if (styleInfoResult && styleInfoResult.success && styleInfoResult.styleInfoMap) {
+            const firstStyleCode = styleCodes[0];
+            const styleInfo = styleInfoResult.styleInfoMap[firstStyleCode] || null;
+            console.log('[SEPARATION] Merged styleInfo for', firstStyleCode, ':', styleInfo);
+            this.documentProfileMetadata = styleInfo
+             ? { ...profileMetaData, styleInfo }
+             : profileMetaData;
+           } else {
+            console.warn(
+             '[SEPARATION] getStyleInformation: no success or styleInfoMap',
+             styleInfoResult
+            );
+           }
+           this.cdr.detectChanges();
+          });
+         })
+         .catch((err: any) => {
+          console.error('[SEPARATION] getStyleInformation failed:', err);
+          this.ngZone.run(() => this.cdr.detectChanges());
          });
-        })
-        .catch((err: any) => {
-         console.error('[SEPARATION] getStyleInformation failed:', err);
-         this.ngZone.run(() => this.cdr.detectChanges());
-        });
+       } else {
+        console.log(
+         '[SEPARATION] Skip getStyleInformation: styleCodes=',
+         styleCodes,
+         'hasGetStyleInfo=',
+         !!this.controller.getStyleInformation
+        );
+        this.documentProfileMetadata = profileMetaData;
+       }
+
+       this.selectedGraphic = profileMetaData.graphicName || '';
+       this.graphicNameFromPath = profileMetaData.graphicName || '';
+
+       setTimeout(() => {
+        this.handleRefreshList();
+        this.hasUIChanges = false;
+       }, 500);
       } else {
-       console.log('[SEPARATION] Skip getStyleInformation: styleCodes=', styleCodes, 'hasGetStyleInfo=', !!this.controller.getStyleInformation);
-       this.documentProfileMetadata = profileMetaData;
+       console.log('[SEPARATION] No profile metadata found in XMP');
+       this.documentProfileMetadata = null;
+       this.selectedGraphic = data.graphicName || '';
+       this.graphicNameFromPath = data.graphicName || '';
       }
 
-      this.selectedGraphic = profileMetaData.graphicName || '';
-      this.graphicNameFromPath = profileMetaData.graphicName || '';
-
-      setTimeout(() => {
-       this.handleRefreshList();
-       this.hasUIChanges = false;
-      }, 500);
-     } else {
-      console.log('[SEPARATION] No profile metadata found in XMP');
-      this.documentProfileMetadata = null;
-      this.selectedGraphic = data.graphicName || '';
-      this.graphicNameFromPath = data.graphicName || '';
-     }
-
-     // Load color rows from XMP if available (priority 1)
-     if (
-      data.leapSeparationColorsData &&
-      Array.isArray(data.leapSeparationColorsData) &&
-      data.leapSeparationColorsData.length > 0
-     ) {
-      console.log(
-       '[SEPARATION] Found LEAPSeparationColorsData in XMP:',
-       data.leapSeparationColorsData.length,
-       'rows'
-      );
-      this.isLoadingSwatches = true;
-      // Clear existing rows before loading new data
-      this.colorRows = [];
-      const colorRowsFromXMP = this.convertXMPDataToColorRows(data.leapSeparationColorsData);
-      if (colorRowsFromXMP && colorRowsFromXMP.length > 0) {
-       this.colorRows = colorRowsFromXMP;
-       this.nextId = colorRowsFromXMP.length + 1;
-       this.hasUIChanges = false;
-       this.isLoadingSwatches = false;
-       this.cdr.detectChanges(); // Force change detection after loading color rows
+      // Load color rows from XMP if available (priority 1)
+      if (
+       data.leapSeparationColorsData &&
+       Array.isArray(data.leapSeparationColorsData) &&
+       data.leapSeparationColorsData.length > 0
+      ) {
        console.log(
-        '[SEPARATION] Loaded color rows from XMP data on document check:',
-        colorRowsFromXMP.length,
+        '[SEPARATION] Found LEAPSeparationColorsData in XMP:',
+        data.leapSeparationColorsData.length,
         'rows'
        );
-       console.log('[SEPARATION] Color rows array:', this.colorRows);
-       console.log('[SEPARATION] isLoadingSwatches:', this.isLoadingSwatches);
-       console.log('[SEPARATION] isSeparatedDoc:', this.isSeparatedDoc);
-       console.log('[SEPARATION] isLoadingGraphics:', this.isLoadingGraphics);
-       console.log('[SEPARATION] graphicOptions.length:', this.graphicOptions.length);
-       console.log(
-        '[SEPARATION] Should show table?',
-        !this.isLoadingSwatches &&
-         (this.isSeparatedDoc || (!this.isLoadingGraphics && this.graphicOptions.length > 0))
-       );
-      } else {
-       console.log('[SEPARATION] Failed to convert XMP data, will use SeparatedLayerNames + Excel');
-       this.colorRows = [];
-       this.isLoadingSwatches = false;
-      }
-     } else {
-      console.log(
-       '[SEPARATION] No LEAPSeparationColorsData found in XMP, will use SeparatedLayerNames + Excel'
-      );
-      const separatedLayerNames = data.separatedLayerNames;
-      if (
-       separatedLayerNames &&
-       Array.isArray(separatedLayerNames) &&
-       separatedLayerNames.length > 0
-      ) {
        this.isLoadingSwatches = true;
-       this.loadColorRowsFromSeparatedLayerNames();
+       // Clear existing rows before loading new data
+       this.colorRows = [];
+       const colorRowsFromXMP = this.convertXMPDataToColorRows(data.leapSeparationColorsData);
+       if (colorRowsFromXMP && colorRowsFromXMP.length > 0) {
+        this.colorRows = colorRowsFromXMP;
+        this.nextId = colorRowsFromXMP.length + 1;
+        this.hasUIChanges = false;
+        this.isLoadingSwatches = false;
+        this.cdr.detectChanges(); // Force change detection after loading color rows
+        console.log(
+         '[SEPARATION] Loaded color rows from XMP data on document check:',
+         colorRowsFromXMP.length,
+         'rows'
+        );
+        console.log('[SEPARATION] Color rows array:', this.colorRows);
+        console.log('[SEPARATION] isLoadingSwatches:', this.isLoadingSwatches);
+        console.log('[SEPARATION] isSeparatedDoc:', this.isSeparatedDoc);
+        console.log('[SEPARATION] isLoadingGraphics:', this.isLoadingGraphics);
+        console.log('[SEPARATION] graphicOptions.length:', this.graphicOptions.length);
+        console.log(
+         '[SEPARATION] Should show table?',
+         !this.isLoadingSwatches &&
+          (this.isSeparatedDoc || (!this.isLoadingGraphics && this.graphicOptions.length > 0))
+        );
+       } else {
+        console.log(
+         '[SEPARATION] Failed to convert XMP data, will use SeparatedLayerNames + Excel'
+        );
+        this.colorRows = [];
+        this.isLoadingSwatches = false;
+       }
       } else {
-       console.log('[SEPARATION] No SeparatedLayerNames found either, cannot load color data');
-       this.isLoadingSwatches = false;
+       console.log(
+        '[SEPARATION] No LEAPSeparationColorsData found in XMP, will use SeparatedLayerNames + Excel'
+       );
+       const separatedLayerNames = data.separatedLayerNames;
+       if (
+        separatedLayerNames &&
+        Array.isArray(separatedLayerNames) &&
+        separatedLayerNames.length > 0
+       ) {
+        this.isLoadingSwatches = true;
+        this.loadColorRowsFromSeparatedLayerNames();
+       } else {
+        console.log('[SEPARATION] No SeparatedLayerNames found either, cannot load color data');
+        this.isLoadingSwatches = false;
+       }
       }
-     }
      } else {
       this.isSeparatedDoc = false;
       this.cdr.detectChanges();
@@ -705,7 +727,18 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  }
 
  handleExportProcess(): void {
-  this.isExportModalOpen = true;
+  this.ngZone.run(() => {
+   this.isExportModalOpen = true;
+   this.cdr.detectChanges();
+  });
+ }
+
+ handleExportModalClose(): void {
+  // ← Add this new method
+  this.ngZone.run(() => {
+   this.isExportModalOpen = false;
+   this.cdr.detectChanges();
+  });
  }
 
  handleExportSeparations(exportOptions: any): void {
@@ -755,6 +788,11 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
     },
     exportOptions.exportPrintGuide ? 500 : 0
    );
+
+   this.ngZone.run(() => {
+    this.isExportModalOpen = false;
+    this.cdr.detectChanges();
+   });
   }
 
   // Export Separations Preview PDF (requires PostScript to be exported first)
@@ -1281,6 +1319,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
    row.id === rowId ? { ...row, flashEnabled: !row.flashEnabled } : row
   );
   this.hasUIChanges = true;
+  this.cdr.detectChanges();
  }
 
  handleToggleCool(rowId: number): void {
@@ -1288,6 +1327,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
    row.id === rowId ? { ...row, coolEnabled: !row.coolEnabled } : row
   );
   this.hasUIChanges = true;
+  this.cdr.detectChanges();
  }
 
  handleToggleWb(rowId: number): void {
@@ -1295,6 +1335,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
    row.id === rowId ? { ...row, wbEnabled: !row.wbEnabled } : row
   );
   this.hasUIChanges = true;
+  this.cdr.detectChanges();
  }
 
  isMeshEditing(rowId: number): boolean {

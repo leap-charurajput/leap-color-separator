@@ -304,7 +304,7 @@
 
   <app-export-separations-modal
    [isOpen]="isExportModalOpen"
-   (close)="isExportModalOpen = false"
+   (close)="handleExportModalClose()"
    (export)="handleExportSeparations($event)"
   >
   </app-export-separations-modal>
