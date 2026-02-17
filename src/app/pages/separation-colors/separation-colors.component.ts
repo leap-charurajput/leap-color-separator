@@ -10,6 +10,7 @@ import {
  OnInit,
  SimpleChanges
 } from '@angular/core';
+import { checkForJSXUpdates } from '../../../libs/helper';
 import { ControllerService } from '../../services/controller.service';
 
 interface ColorRow {
@@ -96,6 +97,9 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  ngOnChanges(changes: SimpleChanges): void {
   if (changes['documentRefreshKey'] && !changes['documentRefreshKey'].firstChange) {
    console.log('[SEPARATION] Refresh triggered by App (refreshKey changed)');
+   checkForJSXUpdates((window as any).location.href).then((res) => {
+    console.log('check update status ref', res);
+   });
    // Reset state when document changes
    this.colorRows = [];
    this.graphicSwatches = [];

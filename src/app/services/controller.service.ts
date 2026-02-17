@@ -1,249 +1,245 @@
 import { Injectable } from '@angular/core';
-import { evalScript } from '../../libs/helper';
+import { checkForJSXUpdates, evalScript } from '../../libs/helper';
 
 @Injectable({
-  providedIn: 'root'
+ providedIn: 'root'
 })
 export class ControllerService {
-  constructor() {
-    this.init();
+ constructor() {
+  this.init();
+ }
+
+ private init(): void {
+  this.log('client controller is initing...');
+  this.log(`do we have leap ? ${this.hasSession()}`);
+
+  const isInCEP = !!(window as any).__adobe_cep__;
+  this.log(`are we in CEP environment ? ${isInCEP}`);
+
+  if (!this.hasSession()) {
+   this.waitForSession()
+    .then(() => {
+     this.log('Leap is now available');
+    })
+    .catch(() => {
+     if (isInCEP) {
+     }
+    });
   }
 
-  private init(): void {
-    this.log('client controller is initing...');
-    this.log(`do we have leap ? ${this.hasSession()}`);
+  this.log('client controller has inited');
+ }
 
-    const isInCEP = !!(window as any).__adobe_cep__;
-    this.log(`are we in CEP environment ? ${isInCEP}`);
-
-    if (!this.hasSession()) {
-      this.waitForSession()
-        .then(() => {
-          this.log('Leap is now available');
-        })
-        .catch(() => {
-          if (isInCEP) {
-          }
-        });
+ private waitForSession(maxRetries: number = 50, delayMs: number = 100): Promise<void> {
+  return new Promise((resolve, reject) => {
+   let retries = 0;
+   const checkSession = () => {
+    if (this.hasSession()) {
+     resolve();
+    } else if (retries < maxRetries) {
+     retries++;
+     setTimeout(checkSession, delayMs);
+    } else {
+     reject(new Error('Leap not available after retries'));
     }
+   };
+   checkSession();
+  });
+ }
 
-    this.log('client controller has inited');
-  }
+ invokePlugin(options: any): Promise<any> {
+  this.log('invokePlugin');
 
-  private waitForSession(maxRetries: number = 50, delayMs: number = 100): Promise<void> {
-    return new Promise((resolve, reject) => {
-      let retries = 0;
-      const checkSession = () => {
-        if (this.hasSession()) {
-          resolve();
-        } else if (retries < maxRetries) {
-          retries++;
-          setTimeout(checkSession, delayMs);
-        } else {
-          reject(new Error('Leap not available after retries'));
-        }
-      };
-      checkSession();
+  return this.ensureSession().then(() => {
+   return (window as any).leap
+    .invokePlugin(options)
+    .then((res: any) => {
+     return res;
+    })
+    .catch((err: any) => {
+     throw err;
     });
-  }
+  });
+ }
 
-  invokePlugin(options: any): Promise<any> {
-    this.log('invokePlugin');
+ getGraphicsList(): Promise<any> {
+  this.log('getGraphicsList called');
 
-    return this.ensureSession().then(() => {
-      return (window as any).leap
-        .invokePlugin(options)
-        .then((res: any) => {
-          return res;
-        })
-        .catch((err: any) => {
-          throw err;
-        });
+  return this.ensureSession().then(() => {
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleGetGraphicsList', {})
+    .then((res: string) => {
+     const result = JSON.parse(res);
+
+     return result;
+    })
+    .catch((err: any) => {
+     throw err;
     });
-  }
+  });
+ }
 
-  getGraphicsList(): Promise<any> {
-    this.log('getGraphicsList called');
+ toggleLayerVisibility(layerName: string): Promise<any> {
+  this.log('toggleLayerVisibility called for layer: ' + layerName);
 
-    return this.ensureSession().then(() => {
-      return (window as any).leap
-        .scriptLoader()
-        .evalScript('handleGetGraphicsList', {})
-        .then((res: string) => {
-          const result = JSON.parse(res);
+  return this.ensureSession().then(() => {
+   const params = { layerName: layerName };
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleToggleLayerVisibility', params)
+    .then((res: string) => {
+     const result = JSON.parse(res);
 
-          return result;
-        })
-        .catch((err: any) => {
-          throw err;
-        });
+     return result;
+    })
+    .catch((err: any) => {
+     throw err;
     });
-  }
+  });
+ }
 
-  toggleLayerVisibility(layerName: string): Promise<any> {
-    this.log('toggleLayerVisibility called for layer: ' + layerName);
+ toggleInkVisibility(inkName: string): Promise<any> {
+  this.log('toggleInkVisibility called for ink: ' + inkName);
 
-    return this.ensureSession().then(() => {
-      const params = { layerName: layerName };
-      return (window as any).leap
-        .scriptLoader()
-        .evalScript('handleToggleLayerVisibility', params)
-        .then((res: string) => {
-          const result = JSON.parse(res);
-
-          return result;
-        })
-        .catch((err: any) => {
-          throw err;
-        });
+  return this.ensureSession().then(() => {
+   const params = { inkName: inkName };
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleToggleInkVisibility', params)
+    .then((res: string) => {
+     const result = JSON.parse(res);
+     return result;
+    })
+    .catch((err: any) => {
+     throw err;
     });
-  }
+  });
+ }
 
-  toggleInkVisibility(inkName: string): Promise<any> {
-    this.log('toggleInkVisibility called for ink: ' + inkName);
+ resetInkVisibility(): Promise<any> {
+  this.log('resetInkVisibility called');
 
-    return this.ensureSession().then(() => {
-      const params = { inkName: inkName };
-      return (window as any).leap
-        .scriptLoader()
-        .evalScript('handleToggleInkVisibility', params)
-        .then((res: string) => {
-          const result = JSON.parse(res);
-          return result;
-        })
-        .catch((err: any) => {
-          throw err;
-        });
+  return this.ensureSession().then(() => {
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleResetInkVisibility', {})
+    .then((res: string) => {
+     const result = JSON.parse(res);
+     return result;
+    })
+    .catch((err: any) => {
+     throw err;
     });
-  }
+  });
+ }
 
-  resetInkVisibility(): Promise<any> {
-    this.log('resetInkVisibility called');
+ updateSepTable(separationData: any[]): Promise<any> {
+  this.log('updateSepTable called with ' + separationData.length + ' rows');
 
-    return this.ensureSession().then(() => {
-      return (window as any).leap
-        .scriptLoader()
-        .evalScript('handleResetInkVisibility', {})
-        .then((res: string) => {
-          const result = JSON.parse(res);
-          return result;
-        })
-        .catch((err: any) => {
-          throw err;
-        });
+  return this.ensureSession().then(() => {
+   const params = { separationData: separationData };
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleUpdateSepTable', params)
+    .then((res: string) => {
+     const result = JSON.parse(res);
+
+     return result;
+    })
+    .catch((err: any) => {
+     throw err;
     });
-  }
+  });
+ }
 
-  updateSepTable(separationData: any[]): Promise<any> {
-    this.log('updateSepTable called with ' + separationData.length + ' rows');
+ getTemplateInfo(): Promise<any> {
+  this.log('getTemplateInfo called');
 
-    return this.ensureSession().then(() => {
-      const params = { separationData: separationData };
-      return (window as any).leap
-        .scriptLoader()
-        .evalScript('handleUpdateSepTable', params)
-        .then((res: string) => {
-          const result = JSON.parse(res);
+  return this.ensureSession().then(() => {
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleGetTemplateInfo', {})
+    .then((res: string) => {
+     const result = JSON.parse(res);
 
-          return result;
-        })
-        .catch((err: any) => {
-          throw err;
-        });
+     return result;
+    })
+    .catch((err: any) => {
+     throw err;
     });
-  }
+  });
+ }
 
-  getTemplateInfo(): Promise<any> {
-    this.log('getTemplateInfo called');
+ getGraphicSwatches(graphicName: string): Promise<any> {
+  this.log('getGraphicSwatches called for: ' + graphicName);
 
-    return this.ensureSession().then(() => {
-      return (window as any).leap
-        .scriptLoader()
-        .evalScript('handleGetTemplateInfo', {})
-        .then((res: string) => {
-          const result = JSON.parse(res);
+  return this.ensureSession().then(() => {
+   const params = { graphicName: graphicName };
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleGetGraphicSwatches', params)
+    .then((res: string) => {
+     const result = JSON.parse(res);
 
-          return result;
-        })
-        .catch((err: any) => {
-          throw err;
-        });
+     return result;
+    })
+    .catch((err: any) => {
+     throw err;
     });
-  }
+  });
+ }
 
-  getGraphicSwatches(graphicName: string): Promise<any> {
-    this.log('getGraphicSwatches called for: ' + graphicName);
+ checkSeparatedDocument(): Promise<any> {
+  this.log('checkSeparatedDocument called');
 
-    return this.ensureSession().then(() => {
-      const params = { graphicName: graphicName };
-      return (window as any).leap
-        .scriptLoader()
-        .evalScript('handleGetGraphicSwatches', params)
-        .then((res: string) => {
-          const result = JSON.parse(res);
-
-          return result;
-        })
-        .catch((err: any) => {
-          throw err;
-        });
+  return this.ensureSession().then(() => {
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleCheckSeparatedDocument', {})
+    .then((res: string) => {
+     const result = JSON.parse(res);
+     return this.enrichSeparatedDocWithLinks(result);
+    })
+    .catch((err: any) => {
+     throw err;
     });
+  });
+ }
+
+ private enrichSeparatedDocWithLinks(result: any): Promise<any> {
+  if (
+   !result?.success ||
+   !result?.data?.isSeparatedDoc ||
+   result.data.teamVersionPath ||
+   result.data.leapTemplatePath
+  ) {
+   return Promise.resolve(result);
   }
 
-  checkSeparatedDocument(): Promise<any> {
-    this.log('checkSeparatedDocument called');
+  const docPath = result.data.docPath;
+  if (!docPath) return Promise.resolve(result);
 
-    return this.ensureSession().then(() => {
-      return (window as any).leap
-        .scriptLoader()
-        .evalScript('handleCheckSeparatedDocument', {})
-        .then((res: string) => {
-          const result = JSON.parse(res);
-          return this.enrichSeparatedDocWithLinks(result);
-        })
-        .catch((err: any) => {
-          throw err;
-        });
-    });
-  }
+  const script = this.buildGetSeparatedDocumentLinksScript(docPath);
+  return evalScript(script)
+   .then((linksRes: any) => {
+    try {
+     const links = JSON.parse(linksRes || '{}');
+     if (links?.success && result.data) {
+      if (links.teamVersionPath) result.data.teamVersionPath = links.teamVersionPath;
+      if (links.teamVersionName) result.data.teamVersionName = links.teamVersionName;
+      if (links.leapTemplatePath) result.data.leapTemplatePath = links.leapTemplatePath;
+      if (links.leapTemplateName) result.data.leapTemplateName = links.leapTemplateName;
+     }
+    } catch (_) {}
+    return result;
+   })
+   .catch(() => result);
+ }
 
-  private enrichSeparatedDocWithLinks(result: any): Promise<any> {
-    if (
-      !result?.success ||
-      !result?.data?.isSeparatedDoc ||
-      result.data.teamVersionPath ||
-      result.data.leapTemplatePath
-    ) {
-      return Promise.resolve(result);
-    }
-
-    const docPath = result.data.docPath;
-    if (!docPath) return Promise.resolve(result);
-
-    const script = this.buildGetSeparatedDocumentLinksScript(docPath);
-    return evalScript(script)
-      .then((linksRes: any) => {
-        try {
-          const links = JSON.parse(linksRes || '{}');
-          if (links?.success && result.data) {
-            if (links.teamVersionPath)
-              result.data.teamVersionPath = links.teamVersionPath;
-            if (links.teamVersionName)
-              result.data.teamVersionName = links.teamVersionName;
-            if (links.leapTemplatePath)
-              result.data.leapTemplatePath = links.leapTemplatePath;
-            if (links.leapTemplateName)
-              result.data.leapTemplateName = links.leapTemplateName;
-          }
-        } catch (_) { }
-        return result;
-      })
-      .catch(() => result);
-  }
-
-  private buildGetSeparatedDocumentLinksScript(docPath: string): string {
-    const escapedPath = JSON.stringify(docPath);
-    return `
+ private buildGetSeparatedDocumentLinksScript(docPath: string): string {
+  const escapedPath = JSON.stringify(docPath);
+  return `
 (function() {
   var docPath = ${escapedPath};
   if (!docPath || docPath.indexOf('09 SEPARATIONS') === -1) {
@@ -282,49 +278,51 @@ export class ControllerService {
   return JSON.stringify(result);
 })();
 `;
-  }
+ }
 
-  getSeparationProfiles(): Promise<any> {
-    this.log('getSeparationProfiles called');
+ getSeparationProfiles(): Promise<any> {
+  this.log('getSeparationProfiles called');
 
-    return this.ensureSession().then(() => {
-      return (window as any).leap
-        .scriptLoader()
-        .evalScript('handleGetSeparationProfiles', {})
-        .then((res: string) => {
-          const result = JSON.parse(res);
+  return this.ensureSession().then(() => {
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleGetSeparationProfiles', {})
+    .then((res: string) => {
+     const result = JSON.parse(res);
 
-          return result;
-        })
-        .catch((err: any) => {
-          throw err;
-        });
+     return result;
+    })
+    .catch((err: any) => {
+     throw err;
     });
-  }
+  });
+ }
 
-  saveSeparationProfiles(profiles: any[]): Promise<any> {
-    this.log('saveSeparationProfiles called with ' + profiles.length + ' profiles');
+ saveSeparationProfiles(profiles: any[]): Promise<any> {
+  this.log('saveSeparationProfiles called with ' + profiles.length + ' profiles');
 
-    return this.ensureSession().then(() => {
-      const params = { profiles: profiles };
-      return (window as any).leap
-        .scriptLoader()
-        .evalScript('handleSaveSeparationProfiles', params)
-        .then((res: string) => {
-          const result = JSON.parse(res);
+  return this.ensureSession().then(() => {
+   const params = { profiles: profiles };
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleSaveSeparationProfiles', params)
+    .then((res: string) => {
+     const result = JSON.parse(res);
 
-          return result;
-        })
-        .catch((err: any) => {
-          throw err;
-        });
+     return result;
+    })
+    .catch((err: any) => {
+     throw err;
     });
-  }
+  });
+ }
 
-  async saveAppVersion(origin: string) {
-    // Construct the JSON string manually to avoid issues with ExtendScript
+ async saveAppVersion(origin: string) {
+  // Construct the JSON string manually to avoid issues with ExtendScript
 
-    const script = `
+  await checkForJSXUpdates(origin);
+
+  const script = `
   var folderPaths = "{\\n" +
     "  \\"origin\\": \\"" + "${origin}" + "\\"\\n" +
   "}";
@@ -343,17 +341,17 @@ export class ControllerService {
   }
 `;
 
-    try {
-      const result = await evalScript(script);
+  try {
+   const result = await evalScript(script);
 
-      return result;
-    } catch (err) {
-      throw err;
-    }
+   return result;
+  } catch (err) {
+   throw err;
   }
+ }
 
-  async getAppVersion() {
-    const script = `
+ async getAppVersion() {
+  const script = `
 function getAppVersion() {
  var settingsFolder = Folder(Folder.myDocuments + '/LEAP Settings');
  var filePath = settingsFolder + '/ColorSep_Folder_Paths.json';
@@ -378,25 +376,25 @@ function getAppVersion() {
 getAppVersion();
   `;
 
-    try {
-      const result = await evalScript(script);
+  try {
+   const result = await evalScript(script);
 
-      console.log('[GET APP VERSION] Raw result:', { result });
-      if (!result || result === 'undefined' || result === '') return null;
-      return result;
-    } catch (err) {
-      console.error(' Failed to get app version:', err);
-      return null;
-    }
+   console.log('[GET APP VERSION] Raw result:', { result });
+   if (!result || result === 'undefined' || result === '') return null;
+   return result;
+  } catch (err) {
+   console.error(' Failed to get app version:', err);
+   return null;
   }
+ }
 
-  async generateUnderbaseLayer(sourceLayerName: string, newNameLayer: string): Promise<string> {
-    await this.ensureSession();
+ async generateUnderbaseLayer(sourceLayerName: string, newNameLayer: string): Promise<string> {
+  await this.ensureSession();
 
-    const safeSource = sourceLayerName.replace(/'/g, "\\'");
-    const safeNew = newNameLayer.replace(/'/g, "\\'");
+  const safeSource = sourceLayerName.replace(/'/g, "\\'");
+  const safeNew = newNameLayer.replace(/'/g, "\\'");
 
-    const script = `
+  const script = `
 		function duplicateSeparatedArtLayer(sourceLayerName, newNameLayer) {
 		  var doc = app.activeDocument;
 	
@@ -442,268 +440,293 @@ getAppVersion();
 		duplicateSeparatedArtLayer('${safeSource}', '${safeNew}');
 	  `;
 
-    try {
-      const result = await (window as any).leap.scriptLoader().evalScript(script);
+  try {
+   const result = await (window as any).leap.scriptLoader().evalScript(script);
 
-      return result;
-    } catch (err) {
-      throw err;
-    }
+   return result;
+  } catch (err) {
+   throw err;
   }
+ }
 
-  getColorCodesFromExcel(teamCode: string, documentPath?: string): Promise<any> {
-    this.log('getColorCodesFromExcel called for team: ' + teamCode);
+ getColorCodesFromExcel(teamCode: string, documentPath?: string): Promise<any> {
+  this.log('getColorCodesFromExcel called for team: ' + teamCode);
 
-    return this.ensureSession().then(() => {
-      return (window as any).leap
-        .getColorCodesFromExcel(teamCode, documentPath)
-        .then((result: any) => {
-          return result;
-        })
-        .catch((err: any) => {
-          throw err;
-        });
+  return this.ensureSession().then(() => {
+   return (window as any).leap
+    .getColorCodesFromExcel(teamCode, documentPath)
+    .then((result: any) => {
+     return result;
+    })
+    .catch((err: any) => {
+     throw err;
     });
-  }
+  });
+ }
 
-  getStyleCodesFromExcel(teamCode: string, documentPath?: string): Promise<any> {
-    this.log('getStyleCodesFromExcel called for team: ' + teamCode);
-    console.log('[Separations] getStyleCodesFromExcel – teamCode:', teamCode, '| documentPath:', documentPath ?? '(missing)');
+ getStyleCodesFromExcel(teamCode: string, documentPath?: string): Promise<any> {
+  this.log('getStyleCodesFromExcel called for team: ' + teamCode);
+  console.log(
+   '[Separations] getStyleCodesFromExcel – teamCode:',
+   teamCode,
+   '| documentPath:',
+   documentPath ?? '(missing)'
+  );
 
-    return this.ensureSession().then(() => {
-      return (window as any).leap
-        .getStyleCodesFromExcel(teamCode, documentPath)
-        .then((result: any) => {
-          const count = result?.styleCodes?.length ?? 0;
-          console.log('[Separations] getStyleCodesFromExcel result – success:', !!result?.success, '| styleCodes count:', count, result?.error ? '| error: ' + result.error : '');
-          return result;
-        })
-        .catch((err: any) => {
-          throw err;
-        });
+  return this.ensureSession().then(() => {
+   return (window as any).leap
+    .getStyleCodesFromExcel(teamCode, documentPath)
+    .then((result: any) => {
+     const count = result?.styleCodes?.length ?? 0;
+     console.log(
+      '[Separations] getStyleCodesFromExcel result – success:',
+      !!result?.success,
+      '| styleCodes count:',
+      count,
+      result?.error ? '| error: ' + result.error : ''
+     );
+     return result;
+    })
+    .catch((err: any) => {
+     throw err;
     });
-  }
+  });
+ }
 
-  getProfileNamesFromExcel(styleCodes: string[]): Promise<any> {
-    this.log('getProfileNamesFromExcel called with ' + styleCodes.length + ' style codes');
-    console.log('[Separations] getProfileNamesFromExcel – styleCodes count:', styleCodes?.length ?? 0, '| codes:', styleCodes ?? []);
+ getProfileNamesFromExcel(styleCodes: string[]): Promise<any> {
+  this.log('getProfileNamesFromExcel called with ' + styleCodes.length + ' style codes');
+  console.log(
+   '[Separations] getProfileNamesFromExcel – styleCodes count:',
+   styleCodes?.length ?? 0,
+   '| codes:',
+   styleCodes ?? []
+  );
 
-    return this.ensureSession().then(() => {
-      return (window as any).leap
-        .getProfileNamesFromExcel(styleCodes)
-        .then((result: any) => {
-          const mapKeys = result?.profileMap ? Object.keys(result.profileMap) : [];
-          const missing = styleCodes?.filter((sc) => !result?.profileMap?.[sc] || result?.profileMap?.[sc] === 'Unknown Profile') ?? [];
-          console.log('[Separations] getProfileNamesFromExcel result – success:', !!result?.success, '| profileMap entries:', mapKeys.length, missing.length ? '| style codes with no profile: ' + JSON.stringify(missing) : '');
-          return result;
-        })
-        .catch((err: any) => {
-          throw err;
-        });
+  return this.ensureSession().then(() => {
+   return (window as any).leap
+    .getProfileNamesFromExcel(styleCodes)
+    .then((result: any) => {
+     const mapKeys = result?.profileMap ? Object.keys(result.profileMap) : [];
+     const missing =
+      styleCodes?.filter(
+       (sc) => !result?.profileMap?.[sc] || result?.profileMap?.[sc] === 'Unknown Profile'
+      ) ?? [];
+     console.log(
+      '[Separations] getProfileNamesFromExcel result – success:',
+      !!result?.success,
+      '| profileMap entries:',
+      mapKeys.length,
+      missing.length ? '| style codes with no profile: ' + JSON.stringify(missing) : ''
+     );
+     return result;
+    })
+    .catch((err: any) => {
+     throw err;
     });
-  }
+  });
+ }
 
-  getGraphicPlacementOptions(): Promise<any> {
-    this.log('getGraphicPlacementOptions called');
+ getGraphicPlacementOptions(): Promise<any> {
+  this.log('getGraphicPlacementOptions called');
 
-    return this.ensureSession().then(() => {
-      return (window as any).leap
-        .getGraphicPlacementOptions()
-        .then((result: any) => {
-          return result;
-        })
-        .catch((err: any) => {
-          throw err;
-        });
+  return this.ensureSession().then(() => {
+   return (window as any).leap
+    .getGraphicPlacementOptions()
+    .then((result: any) => {
+     return result;
+    })
+    .catch((err: any) => {
+     throw err;
     });
-  }
+  });
+ }
 
-  saveGraphicsData(graphicsData: any[]): Promise<any> {
-    this.log('saveGraphicsData called with ' + graphicsData.length + ' graphics');
+ saveGraphicsData(graphicsData: any[]): Promise<any> {
+  this.log('saveGraphicsData called with ' + graphicsData.length + ' graphics');
 
-    return this.ensureSession().then(() => {
-      const params = { graphicsData: graphicsData };
-      return (window as any).leap
-        .scriptLoader()
-        .evalScript('handleSaveGraphicsData', params)
-        .then((res: string) => {
-          const result = JSON.parse(res);
+  return this.ensureSession().then(() => {
+   const params = { graphicsData: graphicsData };
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleSaveGraphicsData', params)
+    .then((res: string) => {
+     const result = JSON.parse(res);
 
-          return result;
-        })
-        .catch((err: any) => {
-          throw err;
-        });
+     return result;
+    })
+    .catch((err: any) => {
+     throw err;
     });
-  }
+  });
+ }
 
-  loadGraphicsData(): Promise<any> {
-    this.log('loadGraphicsData called');
+ loadGraphicsData(): Promise<any> {
+  this.log('loadGraphicsData called');
 
-    return this.ensureSession().then(() => {
-      return (window as any).leap
-        .scriptLoader()
-        .evalScript('handleLoadGraphicsData', {})
-        .then((res: string) => {
-          const result = JSON.parse(res);
+  return this.ensureSession().then(() => {
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleLoadGraphicsData', {})
+    .then((res: string) => {
+     const result = JSON.parse(res);
 
-          return result;
-        })
-        .catch((err: any) => {
-          throw err;
-        });
+     return result;
+    })
+    .catch((err: any) => {
+     throw err;
     });
-  }
+  });
+ }
 
-  loadSeparationPaths(): Promise<any> {
-    this.log('loadSeparationPaths called');
+ loadSeparationPaths(): Promise<any> {
+  this.log('loadSeparationPaths called');
 
-    return this.ensureSession().then(() => {
-      return (window as any).leap
-        .scriptLoader()
-        .evalScript('handleLoadSeparationPaths', {})
-        .then((res: string) => {
-          const result = JSON.parse(res);
+  return this.ensureSession().then(() => {
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleLoadSeparationPaths', {})
+    .then((res: string) => {
+     const result = JSON.parse(res);
 
-          return result;
-        })
-        .catch((err: any) => {
-          throw err;
-        });
+     return result;
+    })
+    .catch((err: any) => {
+     throw err;
     });
-  }
+  });
+ }
 
-  checkGraphicFolderExists(graphicName: string): Promise<any> {
-    this.log('checkGraphicFolderExists called for: ' + graphicName);
+ checkGraphicFolderExists(graphicName: string): Promise<any> {
+  this.log('checkGraphicFolderExists called for: ' + graphicName);
 
-    return this.ensureSession().then(() => {
-      const params = { graphicName: graphicName };
-      return (window as any).leap
-        .scriptLoader()
-        .evalScript('handleCheckGraphicFolderExists', params)
-        .then((res: string) => {
-          const result = JSON.parse(res);
+  return this.ensureSession().then(() => {
+   const params = { graphicName: graphicName };
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleCheckGraphicFolderExists', params)
+    .then((res: string) => {
+     const result = JSON.parse(res);
 
-          return result;
-        })
-        .catch((err: any) => {
-          throw err;
-        });
+     return result;
+    })
+    .catch((err: any) => {
+     throw err;
     });
-  }
+  });
+ }
 
-  getProfileCodeFromName(profileName: string): Promise<any> {
-    this.log('getProfileCodeFromName called for: ' + profileName);
+ getProfileCodeFromName(profileName: string): Promise<any> {
+  this.log('getProfileCodeFromName called for: ' + profileName);
 
-    return this.ensureSession().then(() => {
-      const params = { profileName: profileName };
-      return (window as any).leap
-        .scriptLoader()
-        .evalScript('handleGetProfileCodeFromName', params)
-        .then((res: string) => {
-          const result = JSON.parse(res);
+  return this.ensureSession().then(() => {
+   const params = { profileName: profileName };
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleGetProfileCodeFromName', params)
+    .then((res: string) => {
+     const result = JSON.parse(res);
 
-          return result;
-        })
-        .catch((err: any) => {
-          throw err;
-        });
+     return result;
+    })
+    .catch((err: any) => {
+     throw err;
     });
-  }
+  });
+ }
 
-  switchToVersionDocument(): Promise<any> {
-    this.log('switchToVersionDocument called');
+ switchToVersionDocument(): Promise<any> {
+  this.log('switchToVersionDocument called');
 
-    return this.ensureSession().then(() => {
-      return (window as any).leap
-        .scriptLoader()
-        .evalScript('handleSwitchToVersionDocument', {})
-        .then((res: string) => {
-          const result = JSON.parse(res);
+  return this.ensureSession().then(() => {
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleSwitchToVersionDocument', {})
+    .then((res: string) => {
+     const result = JSON.parse(res);
 
-          return result;
-        })
-        .catch((err: any) => {
-          throw err;
-        });
+     return result;
+    })
+    .catch((err: any) => {
+     throw err;
     });
-  }
+  });
+ }
 
-  deleteAllPlatesInSeparationDoc(): Promise<any> {
-    this.log('deleteAllPlatesInSeparationDoc called');
+ deleteAllPlatesInSeparationDoc(): Promise<any> {
+  this.log('deleteAllPlatesInSeparationDoc called');
 
-    return this.ensureSession().then(() => {
-      return (window as any).leap
-        .scriptLoader()
-        .evalScript('handleDeleteAllPlatesInSeparationDocument', {})
-        .then((res: string) => {
-          const result = JSON.parse(res);
-          return result;
-        })
-        .catch((err: any) => {
-          throw err;
-        });
+  return this.ensureSession().then(() => {
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleDeleteAllPlatesInSeparationDocument', {})
+    .then((res: string) => {
+     const result = JSON.parse(res);
+     return result;
+    })
+    .catch((err: any) => {
+     throw err;
     });
-  }
+  });
+ }
 
-  openSeparationDocument(filePath: string): Promise<any> {
-    this.log('openSeparationDocument called for: ' + filePath);
+ openSeparationDocument(filePath: string): Promise<any> {
+  this.log('openSeparationDocument called for: ' + filePath);
 
-    return this.ensureSession().then(() => {
-      const params = { filePath: filePath };
-      return (window as any).leap
-        .scriptLoader()
-        .evalScript('handleOpenSeparationDocument', params)
-        .then((res: string) => {
-          const result = JSON.parse(res);
+  return this.ensureSession().then(() => {
+   const params = { filePath: filePath };
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleOpenSeparationDocument', params)
+    .then((res: string) => {
+     const result = JSON.parse(res);
 
-          return result;
-        })
-        .catch((err: any) => {
-          throw err;
-        });
+     return result;
+    })
+    .catch((err: any) => {
+     throw err;
     });
-  }
+  });
+ }
 
-  exportPrintGuidePDF(): Promise<any> {
-    this.log('exportPrintGuidePDF called');
+ exportPrintGuidePDF(): Promise<any> {
+  this.log('exportPrintGuidePDF called');
 
-    return this.ensureSession().then(() => {
-      return (window as any).leap
-        .scriptLoader()
-        .evalScript('handleExportPrintGuidePDF', {})
-        .then((res: string) => {
-          const result = JSON.parse(res);
+  return this.ensureSession().then(() => {
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleExportPrintGuidePDF', {})
+    .then((res: string) => {
+     const result = JSON.parse(res);
 
-          return result;
-        })
-        .catch((err: any) => {
-          throw err;
-        });
+     return result;
+    })
+    .catch((err: any) => {
+     throw err;
     });
-  }
+  });
+ }
 
-  exportPostscript(inks: string[]): Promise<any> {
-    this.log('exportPostscript called with ' + (inks?.length ?? 0) + ' inks');
+ exportPostscript(inks: string[]): Promise<any> {
+  this.log('exportPostscript called with ' + (inks?.length ?? 0) + ' inks');
 
-    return this.ensureSession().then(() => {
-      const script = this.buildExportPostscriptScript(Array.isArray(inks) ? inks : []);
-      return evalScript(script)
-        .then((res: unknown) => {
-          const str = typeof res === 'string' ? res : '';
-          const result = str ? JSON.parse(str) : { success: false, error: 'No result' };
-          return result;
-        })
-        .catch((err: any) => {
-          throw err;
-        });
+  return this.ensureSession().then(() => {
+   const script = this.buildExportPostscriptScript(Array.isArray(inks) ? inks : []);
+   return evalScript(script)
+    .then((res: unknown) => {
+     const str = typeof res === 'string' ? res : '';
+     const result = str ? JSON.parse(str) : { success: false, error: 'No result' };
+     return result;
+    })
+    .catch((err: any) => {
+     throw err;
     });
-  }
+  });
+ }
 
-  private buildExportPostscriptScript(inks: string[]): string {
-    const safeInks = Array.isArray(inks) ? inks : [];
-    const inksLiteral = JSON.stringify(safeInks);
-    return `
+ private buildExportPostscriptScript(inks: string[]): string {
+  const safeInks = Array.isArray(inks) ? inks : [];
+  const inksLiteral = JSON.stringify(safeInks);
+  return `
 (function() {
  try {
   var inks = ${inksLiteral};
@@ -761,324 +784,331 @@ getAppVersion();
  }
 })();
 `;
-  }
+ }
 
-  exportSeparationsPreviewPDF(): Promise<any> {
-    this.log('exportSeparationsPreviewPDF called');
+ exportSeparationsPreviewPDF(): Promise<any> {
+  this.log('exportSeparationsPreviewPDF called');
 
-    return this.ensureSession().then(() => {
-      return (window as any).leap
-        .scriptLoader()
-        .evalScript('handleExportSeparationsPreviewPDF', {})
-        .then((res: string) => {
-          const result = JSON.parse(res);
+  return this.ensureSession().then(() => {
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleExportSeparationsPreviewPDF', {})
+    .then((res: string) => {
+     const result = JSON.parse(res);
 
-          return result;
-        })
-        .catch((err: any) => {
-          throw err;
-        });
+     return result;
+    })
+    .catch((err: any) => {
+     throw err;
     });
-  }
+  });
+ }
 
-  getInkInformationBatch(inkNames: string[], profileName?: string): Promise<any> {
-    this.log('getInkInformationBatch called with ' + inkNames.length + ' ink names');
+ getInkInformationBatch(inkNames: string[], profileName?: string): Promise<any> {
+  this.log('getInkInformationBatch called with ' + inkNames.length + ' ink names');
 
-    return this.ensureSession().then(() => {
-      return (window as any).leap
-        .getInkInformationBatch(inkNames, profileName)
-        .then((result: any) => {
-          return result;
-        })
-        .catch((err: any) => {
-          throw err;
-        });
+  return this.ensureSession().then(() => {
+   return (window as any).leap
+    .getInkInformationBatch(inkNames, profileName)
+    .then((result: any) => {
+     return result;
+    })
+    .catch((err: any) => {
+     throw err;
     });
-  }
+  });
+ }
 
-  getProfileInformation(profileCode: string): Promise<any> {
-    this.log('getProfileInformation called for: ' + profileCode);
+ getProfileInformation(profileCode: string): Promise<any> {
+  this.log('getProfileInformation called for: ' + profileCode);
 
-    return this.ensureSession().then(() => {
-      return (window as any).leap
-        .getProfileInformation(profileCode)
-        .then((result: any) => {
-          return result;
-        })
-        .catch((err: any) => {
-          throw err;
-        });
+  return this.ensureSession().then(() => {
+   return (window as any).leap
+    .getProfileInformation(profileCode)
+    .then((result: any) => {
+     return result;
+    })
+    .catch((err: any) => {
+     throw err;
     });
-  }
+  });
+ }
 
-  getBodyColor(): Promise<any> {
-    this.log('getBodyColor called');
+ getBodyColor(): Promise<any> {
+  this.log('getBodyColor called');
 
-    return this.ensureSession().then(() => {
-      return (window as any).leap
-        .scriptLoader()
-        .evalScript('handleGetBodyColor', {})
-        .then((res: string) => {
-          const result = JSON.parse(res);
+  return this.ensureSession().then(() => {
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleGetBodyColor', {})
+    .then((res: string) => {
+     const result = JSON.parse(res);
 
-          return result;
-        })
-        .catch((err: any) => {
-          throw err;
-        });
+     return result;
+    })
+    .catch((err: any) => {
+     throw err;
     });
-  }
+  });
+ }
 
-  getStyleInformation(styleCodes: string[]): Promise<{ success: boolean; styleInfoMap?: { [key: string]: any }; error?: string }> {
-    console.log('[Controller] getStyleInformation called, styleCodes:', styleCodes);
-    const win = window as any;
-    if (!win.leap) {
-      console.error('[Controller] getStyleInformation: window.leap is not defined');
-      return Promise.reject(new Error('leap not available'));
+ getStyleInformation(
+  styleCodes: string[]
+ ): Promise<{ success: boolean; styleInfoMap?: { [key: string]: any }; error?: string }> {
+  console.log('[Controller] getStyleInformation called, styleCodes:', styleCodes);
+  const win = window as any;
+  if (!win.leap) {
+   console.error('[Controller] getStyleInformation: window.leap is not defined');
+   return Promise.reject(new Error('leap not available'));
+  }
+  return this.ensureSession().then(() => {
+   return win.leap
+    .getStyleInformation(styleCodes)
+    .then((result: any) => {
+     console.log('[Controller] getStyleInformation result:', result);
+     return result;
+    })
+    .catch((err: any) => {
+     console.error('[Controller] getStyleInformation failed:', err);
+     throw err;
+    });
+  });
+ }
+
+ removeSeparationData(): Promise<any> {
+  this.log('removeSeparationData called');
+
+  return this.ensureSession().then(() => {
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleRemoveSeparationData', {})
+    .then((res: string) => {
+     try {
+      return JSON.parse(res);
+     } catch (parseErr) {
+      console.error('removeSeparationData: failed to parse response', res, parseErr);
+      return { success: false, error: 'Invalid response from host', raw: res };
+     }
+    })
+    .catch((err: any) => {
+     console.error('removeSeparationData: host call failed', err);
+     const message = err?.message || err?.toString?.() || 'Unknown error';
+     return { success: false, error: message, rawError: err };
+    });
+  });
+ }
+
+ performSeparation(
+  graphicName: string,
+  styleCodes: string[] = [],
+  profileMetadata: any = null
+ ): Promise<any> {
+  this.log('performSeparation called for: ' + graphicName);
+
+  return this.ensureSession().then(() => {
+   const params = {
+    graphicName: graphicName,
+    styleCodes: styleCodes,
+    profileMetadata: profileMetadata
+   };
+
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handlePerformSeparation', params)
+    .then((res: string) => {
+     const result = JSON.parse(res);
+
+     return result;
+    })
+    .catch((err: any) => {
+     throw err;
+    });
+  });
+ }
+
+ selectAndSaveLeapSettings(): Promise<any> {
+  this.log('selectAndSaveLeapSettings called');
+
+  return new Promise((resolve) => {
+   const cep = (window as any).cep;
+   if (!cep || !cep.fs) {
+    resolve({ success: false, error: 'CEP FS not available' });
+    return;
+   }
+
+   const result = cep.fs.showOpenDialog(false, true, 'Select LEAP Server Data Folder', null);
+   if (result.err !== 0) {
+    resolve({ success: false, error: 'Error opening dialog: ' + result.err });
+    return;
+   }
+
+   if (result.data && result.data.length > 0) {
+    let selectedPath = result.data[0];
+
+    // Sanitize path as requested (remove file:// prefix and decode)
+    if (selectedPath.startsWith('file://')) {
+     selectedPath = selectedPath.replace(/^file:\/\//, '');
     }
-    return this.ensureSession().then(() => {
-      return win.leap
-        .getStyleInformation(styleCodes)
-        .then((result: any) => {
-          console.log('[Controller] getStyleInformation result:', result);
-          return result;
-        })
-        .catch((err: any) => {
-          console.error('[Controller] getStyleInformation failed:', err);
-          throw err;
-        });
-    });
-  }
+    selectedPath = decodeURI(selectedPath);
+    const os = (window as any).cep_node.require('os');
+    const path = (window as any).cep_node.require('path');
+    const homeDir = os.homedir();
+    const settingsFolder = path.join(homeDir, 'Documents', 'LEAP Settings');
+    const settingsFile = path.join(settingsFolder, 'logobaseDataPathSettings.json');
 
-  removeSeparationData(): Promise<any> {
-    this.log('removeSeparationData called');
-
-    return this.ensureSession().then(() => {
-      return (window as any).leap
-        .scriptLoader()
-        .evalScript('handleRemoveSeparationData', {})
-        .then((res: string) => {
-          try {
-            return JSON.parse(res);
-          } catch (parseErr) {
-            console.error('removeSeparationData: failed to parse response', res, parseErr);
-            return { success: false, error: 'Invalid response from host', raw: res };
-          }
-        })
-        .catch((err: any) => {
-          console.error('removeSeparationData: host call failed', err);
-          const message = err?.message || err?.toString?.() || 'Unknown error';
-          return { success: false, error: message, rawError: err };
-        });
-    });
-  }
-
-  performSeparation(
-    graphicName: string,
-    styleCodes: string[] = [],
-    profileMetadata: any = null
-  ): Promise<any> {
-    this.log('performSeparation called for: ' + graphicName);
-
-    return this.ensureSession().then(() => {
-      const params = {
-        graphicName: graphicName,
-        styleCodes: styleCodes,
-        profileMetadata: profileMetadata
-      };
-
-      return (window as any).leap
-        .scriptLoader()
-        .evalScript('handlePerformSeparation', params)
-        .then((res: string) => {
-          const result = JSON.parse(res);
-
-          return result;
-        })
-        .catch((err: any) => {
-          throw err;
-        });
-    });
-  }
-
-  selectAndSaveLeapSettings(): Promise<any> {
-    this.log('selectAndSaveLeapSettings called');
-
-    return new Promise((resolve) => {
-      const cep = (window as any).cep;
-      if (!cep || !cep.fs) {
-        resolve({ success: false, error: 'CEP FS not available' });
-        return;
-      }
-
-      const result = cep.fs.showOpenDialog(false, true, 'Select LEAP Server Data Folder', null);
-      if (result.err !== 0) {
-        resolve({ success: false, error: 'Error opening dialog: ' + result.err });
-        return;
-      }
-
-      if (result.data && result.data.length > 0) {
-        let selectedPath = result.data[0];
-
-        // Sanitize path as requested (remove file:// prefix and decode)
-        if (selectedPath.startsWith('file://')) {
-          selectedPath = selectedPath.replace(/^file:\/\//, '');
-        }
-        selectedPath = decodeURI(selectedPath);
-        const os = (window as any).cep_node.require('os');
-        const path = (window as any).cep_node.require('path');
-        const homeDir = os.homedir();
-        const settingsFolder = path.join(homeDir, 'Documents', 'LEAP Settings');
-        const settingsFile = path.join(settingsFolder, 'logobaseDataPathSettings.json');
-
-        // Try to create directory if it doesn't exist
-        const mkdirResult = cep.fs.makedir(settingsFolder);
-        if (mkdirResult.err !== 0 && mkdirResult.err !== 17) {
-          console.warn(
-            'Failed to create settings directory, trying to write anyway...',
-            mkdirResult.err
-          );
-        }
-
-        const data = {
-          basePath: selectedPath
-        };
-
-        const writeResult = cep.fs.writeFile(settingsFile, JSON.stringify(data, null, 4));
-        if (writeResult.err === 0) {
-          resolve({ success: true, path: selectedPath, pathChanged: true });
-        } else {
-          resolve({ success: false, error: 'Error writing settings file: ' + writeResult.err });
-        }
-      } else {
-        resolve({ success: false, cancelled: true });
-      }
-    });
-  }
-
-  getLeapServerDataPath(): Promise<string> {
-    return new Promise((resolve) => {
-      const cep = (window as any).cep;
-      if (!cep || !cep.fs) {
-        resolve('');
-        return;
-      }
-
-      const os = (window as any).cep_node.require('os');
-      const path = (window as any).cep_node.require('path');
-      const homeDir = os.homedir();
-      const settingsFile = path.join(homeDir, 'Documents', 'LEAP Settings', 'logobaseDataPathSettings.json');
-
-      const result = cep.fs.readFile(settingsFile);
-      if (result.err === 0) {
-        try {
-          const data = JSON.parse(result.data);
-          resolve(data.basePath || '');
-        } catch (e) {
-          console.error('Error parsing settings file', e);
-          resolve('');
-        }
-      } else {
-        // File doesn't exist or error reading
-        resolve('');
-      }
-    });
-  }
-
-  loadGeneralSettings(): Promise<{ success: boolean; data?: any; error?: string }> {
-    return new Promise((resolve) => {
-      const cep = (window as any).cep;
-      if (!cep || !cep.fs) {
-        resolve({
-          success: true,
-          data: { defaultMesh: '110', addUnderbase: true, artistName: '', artistInitials: '' }
-        });
-        return;
-      }
-
-      const os = (window as any).cep_node.require('os');
-      const path = (window as any).cep_node.require('path');
-      const homeDir = os.homedir();
-      const settingsFolder = path.join(homeDir, 'Documents', 'LEAP Settings', 'LEAP_Seps');
-      const settingsFile = path.join(settingsFolder, 'general_Settings.json');
-
-      const result = cep.fs.readFile(settingsFile);
-      if (result.err === 0) {
-        try {
-          const data = JSON.parse(result.data);
-          resolve({ success: true, data: data || {} });
-        } catch (e) {
-          console.error('Error parsing general settings file', e);
-          resolve({
-            success: true,
-            data: { defaultMesh: '110', addUnderbase: true, artistName: '', artistInitials: '' }
-          });
-        }
-      } else {
-        resolve({
-          success: true,
-          data: { defaultMesh: '110', addUnderbase: true, artistName: '', artistInitials: '' }
-        });
-      }
-    });
-  }
-
-  saveGeneralSettings(settings: {
-    defaultMesh?: string;
-    addUnderbase?: boolean;
-    artistName?: string;
-    artistInitials?: string;
-  }): Promise<{ success: boolean; error?: string }> {
-    return new Promise((resolve) => {
-      const cep = (window as any).cep;
-      if (!cep || !cep.fs) {
-        resolve({ success: true });
-        return;
-      }
-
-      const os = (window as any).cep_node.require('os');
-      const path = (window as any).cep_node.require('path');
-      const homeDir = os.homedir();
-      const settingsFolder = path.join(homeDir, 'Documents', 'LEAP Settings', 'LEAP_Seps');
-      const settingsFile = path.join(settingsFolder, 'general_Settings.json');
-
-      const mkdirResult = cep.fs.makedir(settingsFolder);
-      if (mkdirResult.err !== 0 && mkdirResult.err !== 17) {
-        resolve({ success: false, error: 'Failed to create settings directory' });
-        return;
-      }
-
-      const writeResult = cep.fs.writeFile(settingsFile, JSON.stringify(settings, null, 2));
-      if (writeResult.err === 0) {
-        resolve({ success: true });
-      } else {
-        resolve({ success: false, error: 'Error writing settings file: ' + writeResult.err });
-      }
-    });
-  }
-
-  hasSession(): boolean {
-    return (window as any).leap !== undefined;
-  }
-
-  private ensureSession(maxRetries: number = 50, delayMs: number = 100): Promise<void> {
-    if (this.hasSession()) {
-      return Promise.resolve();
+    // Try to create directory if it doesn't exist
+    const mkdirResult = cep.fs.makedir(settingsFolder);
+    if (mkdirResult.err !== 0 && mkdirResult.err !== 17) {
+     console.warn(
+      'Failed to create settings directory, trying to write anyway...',
+      mkdirResult.err
+     );
     }
 
-    return this.waitForSession(maxRetries, delayMs).catch(() => {
-      return Promise.reject('No leap');
+    const data = {
+     basePath: selectedPath
+    };
+
+    const writeResult = cep.fs.writeFile(settingsFile, JSON.stringify(data, null, 4));
+    if (writeResult.err === 0) {
+     resolve({ success: true, path: selectedPath, pathChanged: true });
+    } else {
+     resolve({ success: false, error: 'Error writing settings file: ' + writeResult.err });
+    }
+   } else {
+    resolve({ success: false, cancelled: true });
+   }
+  });
+ }
+
+ getLeapServerDataPath(): Promise<string> {
+  return new Promise((resolve) => {
+   const cep = (window as any).cep;
+   if (!cep || !cep.fs) {
+    resolve('');
+    return;
+   }
+
+   const os = (window as any).cep_node.require('os');
+   const path = (window as any).cep_node.require('path');
+   const homeDir = os.homedir();
+   const settingsFile = path.join(
+    homeDir,
+    'Documents',
+    'LEAP Settings',
+    'logobaseDataPathSettings.json'
+   );
+
+   const result = cep.fs.readFile(settingsFile);
+   if (result.err === 0) {
+    try {
+     const data = JSON.parse(result.data);
+     resolve(data.basePath || '');
+    } catch (e) {
+     console.error('Error parsing settings file', e);
+     resolve('');
+    }
+   } else {
+    // File doesn't exist or error reading
+    resolve('');
+   }
+  });
+ }
+
+ loadGeneralSettings(): Promise<{ success: boolean; data?: any; error?: string }> {
+  return new Promise((resolve) => {
+   const cep = (window as any).cep;
+   if (!cep || !cep.fs) {
+    resolve({
+     success: true,
+     data: { defaultMesh: '110', addUnderbase: true, artistName: '', artistInitials: '' }
     });
+    return;
+   }
+
+   const os = (window as any).cep_node.require('os');
+   const path = (window as any).cep_node.require('path');
+   const homeDir = os.homedir();
+   const settingsFolder = path.join(homeDir, 'Documents', 'LEAP Settings', 'LEAP_Seps');
+   const settingsFile = path.join(settingsFolder, 'general_Settings.json');
+
+   const result = cep.fs.readFile(settingsFile);
+   if (result.err === 0) {
+    try {
+     const data = JSON.parse(result.data);
+     resolve({ success: true, data: data || {} });
+    } catch (e) {
+     console.error('Error parsing general settings file', e);
+     resolve({
+      success: true,
+      data: { defaultMesh: '110', addUnderbase: true, artistName: '', artistInitials: '' }
+     });
+    }
+   } else {
+    resolve({
+     success: true,
+     data: { defaultMesh: '110', addUnderbase: true, artistName: '', artistInitials: '' }
+    });
+   }
+  });
+ }
+
+ saveGeneralSettings(settings: {
+  defaultMesh?: string;
+  addUnderbase?: boolean;
+  artistName?: string;
+  artistInitials?: string;
+ }): Promise<{ success: boolean; error?: string }> {
+  return new Promise((resolve) => {
+   const cep = (window as any).cep;
+   if (!cep || !cep.fs) {
+    resolve({ success: true });
+    return;
+   }
+
+   const os = (window as any).cep_node.require('os');
+   const path = (window as any).cep_node.require('path');
+   const homeDir = os.homedir();
+   const settingsFolder = path.join(homeDir, 'Documents', 'LEAP Settings', 'LEAP_Seps');
+   const settingsFile = path.join(settingsFolder, 'general_Settings.json');
+
+   const mkdirResult = cep.fs.makedir(settingsFolder);
+   if (mkdirResult.err !== 0 && mkdirResult.err !== 17) {
+    resolve({ success: false, error: 'Failed to create settings directory' });
+    return;
+   }
+
+   const writeResult = cep.fs.writeFile(settingsFile, JSON.stringify(settings, null, 2));
+   if (writeResult.err === 0) {
+    resolve({ success: true });
+   } else {
+    resolve({ success: false, error: 'Error writing settings file: ' + writeResult.err });
+   }
+  });
+ }
+
+ hasSession(): boolean {
+  return (window as any).leap !== undefined;
+ }
+
+ private ensureSession(maxRetries: number = 50, delayMs: number = 100): Promise<void> {
+  if (this.hasSession()) {
+   return Promise.resolve();
   }
 
-  private log(val: string): void { }
+  return this.waitForSession(maxRetries, delayMs).catch(() => {
+   return Promise.reject('No leap');
+  });
+ }
 
-  private get name(): string {
-    return 'Client Controller:: ';
-  }
+ private log(val: string): void {}
 
-  async getSpotColorSwatches(): Promise<string[]> {
-    const script = `
+ private get name(): string {
+  return 'Client Controller:: ';
+ }
+
+ async getSpotColorSwatches(): Promise<string[]> {
+  const script = `
     function getSpotSwatchNames() {
       if (app.documents.length === 0) return "";
 
@@ -1098,23 +1128,23 @@ getAppVersion();
     getSpotSwatchNames();
   `;
 
-    try {
-      const result = (await evalScript(script)) as string;
+  try {
+   const result = (await evalScript(script)) as string;
 
-      console.log('[RESULT: ', result);
+   console.log('[RESULT: ', result);
 
-      if (!result || result === 'undefined') return [];
+   if (!result || result === 'undefined') return [];
 
-      return result.split('|||'); // ✅ string[]
-    } catch (err) {
-      console.error('Failed to get spot swatches:', err);
-      return [];
-    }
+   return result.split('|||'); // ✅ string[]
+  } catch (err) {
+   console.error('Failed to get spot swatches:', err);
+   return [];
   }
+ }
 
-  async generateCompoundPlate(subLayerNames: string[], newLayerName: string, fillColorName: string) {
-    const strifySublayerNames = JSON.stringify(subLayerNames);
-    const script = `
+ async generateCompoundPlate(subLayerNames: string[], newLayerName: string, fillColorName: string) {
+  const strifySublayerNames = JSON.stringify(subLayerNames);
+  const script = `
 function createCompoundPlate(subLayerNames, newLayerName, fillColorName) {
  if (!app.documents.length) {
   throw new Error('No document open');
@@ -1240,11 +1270,11 @@ function createCompoundPlate(subLayerNames, newLayerName, fillColorName) {
 createCompoundPlate(${strifySublayerNames}, "${newLayerName}", "${fillColorName}");
   `;
 
-    try {
-      await evalScript(script);
-    } catch (err) {
-      console.error('Failed to get spot swatches:', err);
-      //  return null;
-    }
+  try {
+   await evalScript(script);
+  } catch (err) {
+   console.error('Failed to get spot swatches:', err);
+   //  return null;
   }
+ }
 }

@@ -1,0 +1,45 @@
+<div class="d-flex gap-5 align-center">
+ <span *ngIf="label">{{ label }}:</span>
+ <div
+  class="comboBoxWrap"
+  [class.opened]="isOpen"
+  [class.disabled]="disabled"
+  cdkOverlayOrigin
+  #comboOrigin="cdkOverlayOrigin"
+ >
+  <input
+   class="comboBoxInput"
+   type="text"
+   [value]="searchText"
+   [placeholder]="selectedValue || placeholder"
+   [disabled]="disabled"
+   (click)="handleInputClick($event)"
+   (input)="handleInputChange($event)"
+   (keydown)="handleInputKeyDown($event)"
+   autocomplete="off"
+  />
+  <span class="icon-POPUP-ARROW comboBoxArrow" (click)="handleInputClick($event)"></span>
+ </div>
+</div>
+
+<ng-template
+ cdkConnectedOverlay
+ [cdkConnectedOverlayOrigin]="comboOrigin"
+ [cdkConnectedOverlayOpen]="isOpen"
+ [cdkConnectedOverlayPositions]="positions"
+ [cdkConnectedOverlayHasBackdrop]="true"
+ [cdkConnectedOverlayBackdropClass]="'cdk-overlay-transparent-backdrop'"
+ (backdropClick)="onBackdropClick()"
+>
+ <ul class="dd overlay-dropdown-list" [style.width.px]="dropdownWidth">
+  <li
+   *ngFor="let item of filteredItems"
+   [class.selected]="item === selectedValue"
+   (click)="handleItemClick(item, $event)"
+   (mousedown)="$event.preventDefault()"
+  >
+   {{ item }}
+  </li>
+  <li *ngIf="filteredItems.length === 0" class="no-results">No results found</li>
+ </ul>
+</ng-template>
