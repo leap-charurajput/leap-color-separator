@@ -242,28 +242,135 @@ function createSeparationsFolders(rootFolder, league, teamCode, graphicName) {
 	}
 	return graphicNameFolder;
 }
+function findPageItemByName(container, itemName) {
+	if (!container || !itemName) {
+		return null;
+	}
+
+	try {
+		if (container.pageItems) {
+			var directMatch = container.pageItems.getByName(itemName);
+			if (directMatch) {
+				return directMatch;
+			}
+		}
+	} catch (fastLookupError) {
+	}
+
+	try {
+		if (container.pageItems) {
+			for (var i = 0; i < container.pageItems.length; i++) {
+				var pageItem = container.pageItems[i];
+				if (pageItem.name === itemName) {
+					return pageItem;
+				}
+				if (pageItem.typename === "GroupItem" || pageItem.typename === "CompoundPathItem") {
+					var nestedMatch = findPageItemByName(pageItem, itemName);
+					if (nestedMatch) {
+						return nestedMatch;
+					}
+				}
+			}
+		}
+	} catch (pageItemsError) {
+	}
+
+	if (container.layers && container.layers.length > 0) {
+		for (var j = 0; j < container.layers.length; j++) {
+			var layerMatch = findPageItemByName(container.layers[j], itemName);
+			if (layerMatch) {
+				return layerMatch;
+			}
+		}
+	}
+
+	if (container.pathItems && container.pathItems.length > 0) {
+		for (var k = 0; k < container.pathItems.length; k++) {
+			var pathItem = container.pathItems[k];
+			if (pathItem.name === itemName) {
+				return pathItem;
+			}
+		}
+	}
+
+	return null;
+}
+
+// Set fill overprint only (not stroke) on a single path item
+function setOverprintOnPathItem(pathItem) {
+	try {
+		if (pathItem.filled) {
+			pathItem.fillOverprint = true;
+		}
+	} catch (e) {
+	}
+}
+
+// Recursively set fill overprint on all paths in a container (group, layer, etc.)
+function setFillOverprintOnContainer(container) {
+	if (!container) return;
+	try {
+		if (container.typename === "PathItem") {
+			setOverprintOnPathItem(container);
+			return;
+		}
+		if (container.typename === "CompoundPathItem") {
+			if (container.pathItems && container.pathItems.length > 0) {
+				for (var p = 0; p < container.pathItems.length; p++) {
+					setOverprintOnPathItem(container.pathItems[p]);
+				}
+			}
+			return;
+		}
+		if (container.typename === "PlacedItem") {
+			try {
+				if (typeof container.overprint !== "undefined") {
+					container.overprint = true;
+				}
+			} catch (opErr) {
+			}
+			return;
+		}
+		if (container.pageItems && container.pageItems.length > 0) {
+			for (var i = 0; i < container.pageItems.length; i++) {
+				setFillOverprintOnContainer(container.pageItems[i]);
+			}
+		}
+	} catch (e) {
+		$.writeln("[SEPARATION] setFillOverprintOnContainer error: " + e.message);
+	}
+}
+
+// Set fill overprint on all paths in SEPARATED_ART layer (including all sublayers)
+function setOverprintOnSeparatedArt(doc) {
+	try {
+		var separatedArtLayer = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SEPARATED_ART);
+		// Process direct pageItems on SEPARATED_ART (if any)
+		setFillOverprintOnContainer(separatedArtLayer);
+		// Process every sublayer (each color plate: PANTONE, White UB, Choke, etc.)
+		if (separatedArtLayer.layers && separatedArtLayer.layers.length > 0) {
+			for (var s = 0; s < separatedArtLayer.layers.length; s++) {
+				setFillOverprintOnContainer(separatedArtLayer.layers[s]);
+			}
+		}
+	} catch (e) {
+		$.writeln("[SEPARATION] setOverprintOnSeparatedArt error: " + e.message);
+	}
+}
+
 function placeAndEmbedGraphicAI(sepDoc, graphicAIPath, graphicName) {
 	try {
 		var aiFile = new File(graphicAIPath);
-		if (!aiFile.exists) return false;
+		if (!aiFile.exists) {
+			$.writeln("AI file not found: " + graphicAIPath);
+			return false;
+		}
 
-		// ---- find garment bounds ----
-		var gridLayer = findLayerByName(sepDoc.layers, "GRID");
-		if (!gridLayer) return false;
-
-		var garmentLayer = findLayerByName(gridLayer.layers, "GARMENT");
-		if (!garmentLayer) return false;
-
-		if (garmentLayer.pathItems.length === 0) return false;
-
-		var garmentRect = garmentLayer.pathItems[0];
-		var targetBounds = garmentRect.geometricBounds; // [L, T, R, B]
-
-		// ---- find / create target layer ----
 		var sizedArtLayer;
 		try {
 			sizedArtLayer = sepDoc.layers.getByName("SIZED_ART");
 		} catch (e) {
+			$.writeln("SIZED_ART layer not found");
 			return false;
 		}
 
@@ -275,55 +382,53 @@ function placeAndEmbedGraphicAI(sepDoc, graphicAIPath, graphicName) {
 			sizedGraphicsLayer.name = "SIZED_GRAPHICS";
 		}
 
-		// ---- open graphic file ----
+		var sepArtGuide = findPageItemByName(sizedArtLayer, "SEP_ART");
+		if (!sepArtGuide) {
+			sepArtGuide = findPageItemByName(sepDoc, "SEP_ART");
+		}
+		if (!sepArtGuide) {
+			$.writeln("SEP_ART guide not found in SEP document");
+			return false;
+		}
+		var sepArtBounds = sepArtGuide.geometricBounds;
+
 		var graphicDoc = app.open(aiFile);
 		graphicDoc.selectObjectsOnActiveArtboard();
 
 		if (graphicDoc.selection.length === 0) {
+			$.writeln("No artwork found in graphics file");
 			graphicDoc.close(SaveOptions.DONOTSAVECHANGES);
 			return false;
 		}
 
-		// ---- copy artwork ----
 		app.copy();
 		graphicDoc.close(SaveOptions.DONOTSAVECHANGES);
-
-		// ---- paste into separation doc ----
 		app.activeDocument = sepDoc;
 		app.preferences.setBooleanPreference('layers/pastePreserve', false);
-		sepDoc.activeLayer = sizedGraphicsLayer;
+		app.activeDocument.activeLayer = sizedGraphicsLayer;
 		app.paste();
 
-		if (sepDoc.selection.length === 0) return false;
+		if (app.activeDocument.selection.length > 0) {
+			app.executeMenuCommand("group");
+			var pastedGroup = app.activeDocument.selection[0];
+			pastedGroup.name = graphicName;
+			var currentBounds = pastedGroup.geometricBounds;
+			// Center in SEP_ART horizontally, align top to SEP_ART (match React)
+			var currentCenterX = currentBounds[0] + ((currentBounds[2] - currentBounds[0]) / 2);
+			var sepArtWidth = sepArtBounds[2] - sepArtBounds[0];
+			var targetCenterX = sepArtBounds[0] + (sepArtWidth / 2);
+			var targetTop = sepArtBounds[1];
+			var moveX = targetCenterX - currentCenterX;
+			var moveY = targetTop - currentBounds[1];
+			pastedGroup.translate(moveX, moveY);
+			// Graphic placed per SEP_ART bounds: set overprint on all paths
+			setFillOverprintOnContainer(pastedGroup);
+		}
 
-		// ---- group pasted items ----
-		app.executeMenuCommand("group");
-		var pastedGroup = sepDoc.selection[0];
-		pastedGroup.name = graphicName.toUpperCase();
-
-		// ---- KEEP ORIGINAL SIZE, ONLY CENTER ----
-		var currentBounds = pastedGroup.geometricBounds;
-
-		var targetWidth = targetBounds[2] - targetBounds[0];
-		var targetHeight = targetBounds[1] - targetBounds[3];
-		var targetCenterX = targetBounds[0] + (targetWidth / 2);
-		var targetCenterY = targetBounds[3] + (targetHeight / 2);
-
-		var currentCenterX =
-			currentBounds[0] + ((currentBounds[2] - currentBounds[0]) / 2);
-		var currentCenterY =
-			currentBounds[3] + ((currentBounds[1] - currentBounds[3]) / 2);
-
-		var moveX = targetCenterX - currentCenterX;
-		var moveY = targetCenterY - currentCenterY;
-
-		pastedGroup.translate(moveX, moveY);
-
-		// ---- cleanup ----
-		sepDoc.selection = null;
+		app.activeDocument.selection = null;
 		return true;
-
 	} catch (e) {
+		$.writeln("Error copying AI graphic: " + e.message);
 		return false;
 	}
 }
@@ -331,8 +436,10 @@ function placeGraphicInDocument(doc, graphicPNGPath) {
 	try {
 		var pngFile = new File(graphicPNGPath);
 		if (!pngFile.exists) {
+			$.writeln("PNG file not found: " + graphicPNGPath);
 			return false;
 		}
+
 		var sizedArtLayer = null;
 		for (var i = 0; i < doc.layers.length; i++) {
 			if (doc.layers[i].name === "SIZED_ART") {
@@ -341,46 +448,53 @@ function placeGraphicInDocument(doc, graphicPNGPath) {
 			}
 		}
 		if (!sizedArtLayer) {
+			$.writeln("SIZED_ART layer not found");
 			return false;
 		}
-		var graphicItems = [];
-		for (var i = 0; i < sizedArtLayer.pathItems.length; i++) {
-			var item = sizedArtLayer.pathItems[i];
-			if (item.name === "[GRAPHIC]") {
-				graphicItems.push(item);
-			}
+
+		var sepArtGuide = findPageItemByName(sizedArtLayer, "SEP_ART");
+		if (!sepArtGuide) {
+			sepArtGuide = findPageItemByName(doc, "SEP_ART");
 		}
-		if (graphicItems.length === 0) {
+		if (!sepArtGuide) {
 			return false;
 		}
-		for (var i = 0; i < graphicItems.length; i++) {
-			var pathItem = graphicItems[i];
-			var bounds = pathItem.geometricBounds;
-			var placedItem = sizedArtLayer.placedItems.add();
-			placedItem.file = pngFile;
-			var boundsWidth = bounds[2] - bounds[0];
-			var boundsHeight = bounds[1] - bounds[3];
-			var originalWidth = placedItem.width;
-			var originalHeight = placedItem.height;
-			var imageAspectRatio = originalWidth / originalHeight;
-			var boundsAspectRatio = boundsWidth / boundsHeight;
-			var newWidth, newHeight;
-			if (imageAspectRatio > boundsAspectRatio) {
-				newWidth = boundsWidth;
-				newHeight = boundsWidth / imageAspectRatio;
-			} else {
-				newHeight = boundsHeight;
-				newWidth = boundsHeight * imageAspectRatio;
-			}
-			placedItem.width = newWidth;
-			placedItem.height = newHeight;
-			var centerX = bounds[0] + (boundsWidth / 2);
-			var centerY = bounds[3] + (boundsHeight / 2);
-			placedItem.left = centerX - (newWidth / 2);
-			placedItem.top = centerY + (newHeight / 2);
+		var sepArtBounds = sepArtGuide.geometricBounds;
+
+		// Place PNG in SEP_ART: fit within bounds, center horizontally, align top (match React)
+		var boundsWidth = sepArtBounds[2] - sepArtBounds[0];
+		var boundsHeight = sepArtBounds[1] - sepArtBounds[3];
+		var placedItem = sizedArtLayer.placedItems.add();
+		placedItem.file = pngFile;
+		var originalWidth = placedItem.width;
+		var originalHeight = placedItem.height;
+		var imageAspectRatio = originalWidth / originalHeight;
+		var boundsAspectRatio = boundsWidth / boundsHeight;
+		var newWidth, newHeight;
+		if (imageAspectRatio > boundsAspectRatio) {
+			newWidth = boundsWidth;
+			newHeight = boundsWidth / imageAspectRatio;
+		} else {
+			newHeight = boundsHeight;
+			newWidth = boundsHeight * imageAspectRatio;
 		}
+		placedItem.width = newWidth;
+		placedItem.height = newHeight;
+		var targetCenterX = sepArtBounds[0] + (boundsWidth / 2);
+		var targetTop = sepArtBounds[1];
+		placedItem.left = targetCenterX - (newWidth / 2);
+		placedItem.top = targetTop;
+		// Graphics placed per SEP_ART bounds should have overprint=true
+		try {
+			if (typeof placedItem.overprint !== "undefined") {
+				placedItem.overprint = true;
+			}
+		} catch (opErr) {
+		}
+
 		return true;
 	} catch (e) {
+		$.writeln("Error placing graphic: " + e.message);
 		return false;
 	}
 }
@@ -395,7 +509,7 @@ function getSeparatedArtLayerNames(doc) {
 	} catch (e) { }
 	return layerNames;
 }
-function copyAndPrepareSEPDocument(templateFile, destinationFolder, docName, jsonData, styleCodes, profileMetadata) {
+function copyAndPrepareSEPDocument(templateFile, destinationFolder, docName, jsonData, styleCodes, profileMetadata, bodyColorFromXMP) {
 	var profileCode = null;
 	if (profileMetadata && profileMetadata.profileCode) {
 		profileCode = profileMetadata.profileCode;
@@ -411,7 +525,7 @@ function copyAndPrepareSEPDocument(templateFile, destinationFolder, docName, jso
 		return null;
 	}
 	var sepDoc = app.open(destinationFile);
-	updateVariablesInDocument(sepDoc, jsonData, styleCodes);
+	updateVariablesInDocument(sepDoc, jsonData, styleCodes, profileMetadata);
 	try {
 		var sepXmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", sepDoc);
 		if (sepXmp.isXmpCreated) {
@@ -420,32 +534,89 @@ function copyAndPrepareSEPDocument(templateFile, destinationFolder, docName, jso
 				sepXmp.setStructField("SeparationProfileMetadata", profileMetadata, true, false);
 			}
 			try {
-				var colorsInfo = jsonData.colors_info || [];
-				var bodyColorInfo = null;
-				for (var i = 0; i < colorsInfo.length; i++) {
-					if (colorsInfo[i].name && colorsInfo[i].name.toLowerCase() === "body") {
-						bodyColorInfo = colorsInfo[i];
-						break;
+				var bodyNameForSwatch = "Body (Default)";
+				var bodyC = 0, bodyM = 0, bodyY = 0, bodyK = 0;
+				var bodyColorData = null;
+
+				// Prefer BodyColor from active document XMP (match React getBodyColor flow)
+				if (bodyColorFromXMP && (bodyColorFromXMP.cmyk || bodyColorFromXMP.bodyColor)) {
+					bodyNameForSwatch = bodyColorFromXMP.colorName || "Body";
+					if (bodyColorFromXMP.cmyk) {
+						bodyC = Number(bodyColorFromXMP.cmyk.c) || 0;
+						bodyM = Number(bodyColorFromXMP.cmyk.m) || 0;
+						bodyY = Number(bodyColorFromXMP.cmyk.y) || 0;
+						bodyK = Number(bodyColorFromXMP.cmyk.k) || 0;
+					} else {
+						bodyC = 0;
+						bodyM = 100;
+						bodyY = 9;
+						bodyK = 0;
 					}
-				}
-				if (bodyColorInfo && bodyColorInfo.colorInfo) {
-					var cmyk = bodyColorInfo.colorInfo;
-					var rgb = cmykToRgb(cmyk.C || 0, cmyk.M || 0, cmyk.Y || 0, cmyk.K || 0);
-					var hexColor = rgbToHex(rgb.r, rgb.g, rgb.b);
-					var bodyColorData = {
-						bodyColor: hexColor,
-						colorName: bodyColorInfo.ColorName || bodyColorInfo.name || "Body",
-						cmyk: {
-							c: cmyk.C || 0,
-							m: cmyk.M || 0,
-							y: cmyk.Y || 0,
-							k: cmyk.K || 0
-						},
-						rgb: rgb
+					bodyColorData = {
+						bodyColor: bodyColorFromXMP.bodyColor || "#ec008c",
+						colorName: bodyNameForSwatch,
+						cmyk: { c: bodyC, m: bodyM, y: bodyY, k: bodyK },
+						rgb: bodyColorFromXMP.rgb || { r: 236, g: 0, b: 140 }
 					};
 					sepXmp.setStructField("BodyColor", bodyColorData, true, false);
+				} else {
+					// Fall back to jsonData.colors_info
+					var colorsInfo = jsonData.colors_info || [];
+					var bodyColorInfo = null;
+					for (var i = 0; i < colorsInfo.length; i++) {
+						if (colorsInfo[i].name && colorsInfo[i].name.toLowerCase() === "body") {
+							bodyColorInfo = colorsInfo[i];
+							break;
+						}
+					}
+					if (bodyColorInfo && bodyColorInfo.colorInfo) {
+						var cmyk = bodyColorInfo.colorInfo;
+						bodyC = cmyk.C || 0;
+						bodyM = cmyk.M || 0;
+						bodyY = cmyk.Y || 0;
+						bodyK = cmyk.K || 0;
+						var rgb = cmykToRgb(bodyC, bodyM, bodyY, bodyK);
+						var hexColor = rgbToHex(rgb.r, rgb.g, rgb.b);
+						bodyNameForSwatch = bodyColorInfo.ColorName || bodyColorInfo.name || "Body";
+						bodyColorData = {
+							bodyColor: hexColor,
+							colorName: bodyNameForSwatch,
+							cmyk: { c: bodyC, m: bodyM, y: bodyY, k: bodyK },
+							rgb: rgb
+						};
+						sepXmp.setStructField("BodyColor", bodyColorData, true, false);
+					} else {
+						bodyC = 0;
+						bodyM = 100;
+						bodyY = 9;
+						bodyK = 0;
+						var defaultBodyColorData = {
+							bodyColor: "#ec008c",
+							colorName: bodyNameForSwatch,
+							cmyk: null,
+							rgb: { r: 236, g: 0, b: 140 }
+						};
+						sepXmp.setStructField("BodyColor", defaultBodyColorData, true, false);
+					}
+				}
+				// Update $BODY swatch in SEP document so garment and backgrounds update (match React)
+				try {
+					var bodySwatch = sepDoc.swatches.getByName("$BODY");
+					if (bodySwatch && bodySwatch.color && bodySwatch.color.typename === "SpotColor" && bodySwatch.color.spot) {
+						var spot = bodySwatch.color.spot;
+						spot.name = bodyNameForSwatch;
+						if (spot.color && spot.color.typename === "CMYKColor") {
+							spot.color.cyan = Math.max(0, Math.min(100, bodyC));
+							spot.color.magenta = Math.max(0, Math.min(100, bodyM));
+							spot.color.yellow = Math.max(0, Math.min(100, bodyY));
+							spot.color.black = Math.max(0, Math.min(100, bodyK));
+						}
+					}
+				} catch (swatchErr) {
+					$.writeln("[SEPARATION] Error updating $BODY swatch: " + swatchErr.message);
 				}
 			} catch (bodyColorError) {
+				$.writeln("[SEPARATION] Error extracting/storing body color: " + bodyColorError.message);
 			}
 			sepXmp.commit();
 		}
@@ -511,8 +682,16 @@ function handlePerformSeparation(params_string) {
 		}
 		var originalDoc = activeDoc;
 		var originalDocFile = docFile;
+		// Try BodyColor from active document XMP first (match React getBodyColor)
+		var bodyColorFromXMP = null;
+		try {
+			var origXmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", originalDoc);
+			if (origXmp.isXmpCreated && origXmp.doesStructFieldExist("BodyColor")) {
+				bodyColorFromXMP = origXmp.getStructField("BodyColor", true);
+			}
+		} catch (e) { }
 		var graphicNameFolder = createSeparationsFolders(rootFolder, league, teamCode, graphicName);
-		var sepDoc = copyAndPrepareSEPDocument(templateFile, graphicNameFolder, docName, jsonData, styleCodes, profileMetadata);
+		var sepDoc = copyAndPrepareSEPDocument(templateFile, graphicNameFolder, docName, jsonData, styleCodes, profileMetadata, bodyColorFromXMP);
 		if (!sepDoc) {
 			return JSON.stringify({
 				success: false,
@@ -539,6 +718,7 @@ function handlePerformSeparation(params_string) {
 		sepDoc.save();
 		splitColors(graphicName);
 		generateUnderbase(graphicName);
+		setOverprintOnSeparatedArt(sepDoc);
 
 		try {
 			var layerNames = getSeparatedArtLayerNames(sepDoc);
@@ -2383,6 +2563,48 @@ function handleSwitchToVersionDocument(params_string) {
 		return JSON.stringify({
 			success: false,
 			error: "Error switching to version document: " + e.message
+		});
+	}
+}
+
+function handleDeleteAllPlatesInSeparationDocument(params_string) {
+	try {
+		if (!app.documents.length) {
+			return JSON.stringify({ success: false, error: "No documents open" });
+		}
+		var doc = app.activeDocument;
+		var docPath = doc.fullName && doc.fullName.fsName ? doc.fullName.fsName : "";
+		if (docPath.indexOf("09 SEPARATIONS") === -1) {
+			return JSON.stringify({
+				success: false,
+				error: "Active document is not a separation document. Open a document from 09 SEPARATIONS."
+			});
+		}
+		var sepLayer;
+		try {
+			sepLayer = doc.layers.getByName("SEPARATED_ART");
+		} catch (e) {
+			return JSON.stringify({
+				success: false,
+				error: "SEPARATED_ART layer not found"
+			});
+		}
+		var count = 0;
+		var n = sepLayer.layers.length;
+		for (var i = n - 1; i >= 0; i--) {
+			sepLayer.layers[i].remove();
+			count++;
+		}
+		try { doc.save(); } catch (e) {}
+		return JSON.stringify({
+			success: true,
+			message: "Deleted " + count + " plate(s)",
+			deletedCount: count
+		});
+	} catch (e) {
+		return JSON.stringify({
+			success: false,
+			error: e.message || e.toString()
 		});
 	}
 }

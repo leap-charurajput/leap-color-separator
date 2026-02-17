@@ -7,8 +7,8 @@
 }
 
 .separation-colors-table-container {
-	height: 200px;
-	max-height: 200px;
+	height: 350px;
+	max-height: 350px;
 	min-height: 150px;
 	overflow-y: auto;
 	overflow-x: hidden;

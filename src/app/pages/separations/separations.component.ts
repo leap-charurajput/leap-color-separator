@@ -42,6 +42,9 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 	isCheckingDocument = false;
 	hasGraphicsPositions = false;
 	isSeparatedDoc = false;
+	/** Profile names from Profiles.json (Separation Profile Settings); used to disable Generate when profile file missing. */
+	profileNamesFromSettings: string[] = [];
+	profileNamesLoaded = false;
 	/** Current version document path; used to resolve project Batch Excel for style/color codes. */
 	versionDocumentPath: string | null = null;
 	separatedDocInfo: {
@@ -49,6 +52,12 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 		teamVersionPath?: string;
 		leapTemplateName?: string;
 		leapTemplatePath?: string;
+		profileMetaData?: {
+			graphicName?: string;
+			createdDate?: string;
+			artistInitials?: string;
+			styleCodes?: string[];
+		};
 	} = {};
 	private documentActivateHandler: (() => void) | null = null;
 
@@ -146,6 +155,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 					this.hasVersionDocument = false;
 					this.versionDocumentPath = null;
 					this.isCheckingDocument = false;
+					this.loadProfileNamesFromSettings();
 					this.cdr.detectChanges();
 					return;
 				}
@@ -161,6 +171,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
      this.versionDocumentPath = result.documentPath || null;
 
      if (this.hasVersionDocument) {
+      this.loadProfileNamesFromSettings();
       this.loadGraphicsList();
       this.loadTeamCode();
       this.loadGraphicsData();
@@ -176,6 +187,38 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
    })
    .finally(() => {
     this.isCheckingDocument = false;
+    this.cdr.detectChanges();
+   });
+ }
+
+ loadProfileNamesFromSettings(): void {
+  if (this.isRunningInBrowser || !this.controller.getSeparationProfiles) {
+   return;
+  }
+  if (!this.hasVersionDocument && !this.isSeparatedDoc) {
+   return;
+  }
+  this.controller
+   .getSeparationProfiles()
+   .then((result: any) => {
+    if (result && result.success && Array.isArray(result.profiles)) {
+     this.profileNamesFromSettings = (result.profiles as any[])
+      .map((p: any) => {
+       const name = p && (p['Profile Name'] ?? p.profileName ?? p.name) != null
+        ? String(p['Profile Name'] ?? p.profileName ?? p.name).trim()
+        : '';
+       return name;
+      })
+      .filter(Boolean);
+    } else {
+     this.profileNamesFromSettings = [];
+    }
+    this.profileNamesLoaded = true;
+    this.cdr.detectChanges();
+   })
+   .catch((err) => {
+    this.profileNamesFromSettings = [];
+    this.profileNamesLoaded = true;
     this.cdr.detectChanges();
    });
  }
@@ -479,7 +522,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
   const profileName = separation.profile || '';
   const graphicColors = this.getGraphicColors(graphicName);
 
-  const getProfileCodeAndCreateSeparation = async () => {
+   const getProfileCodeAndCreateSeparation = async () => {
    let profileCode = null;
 
    if (profileName && !this.isRunningInBrowser) {
@@ -493,13 +536,33 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
     } catch (err) {}
    }
 
+   let artistName = '';
+   let artistInitials = '';
+   if (!this.isRunningInBrowser) {
+    try {
+     const gs = await this.controller.loadGeneralSettings();
+     if (gs?.success && gs?.data) {
+      artistName = gs.data.artistName != null ? String(gs.data.artistName) : '';
+      artistInitials = gs.data.artistInitials != null ? String(gs.data.artistInitials) : '';
+     }
+    } catch (err) {}
+   }
+
+   const graphicData = this.graphicsData.find((g: any) => g && g.name === graphicName);
+   const position = (graphicData && graphicData.position && String(graphicData.position).trim())
+    ? String(graphicData.position).trim()
+    : '';
+
    const profileMetadata = {
     profileName: profileName,
     profileCode: profileCode,
     styleCodes: styleCodes,
     colorCodes: graphicColors,
     graphicName: graphicName,
-    createdDate: new Date().toISOString()
+    createdDate: new Date().toISOString(),
+    artistName: artistName,
+    artistInitials: artistInitials,
+    position: position
    };
 
    return this.controller.performSeparation(graphicName, styleCodes, profileMetadata);
@@ -636,9 +699,82 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
   return [];
  }
 
+ /** True when the separation's profile is not in Profiles.json (profile file missing or profile not added). */
+ isProfileMissingInSettings(separation: Separation): boolean {
+  if (!this.profileNamesLoaded || this.isRunningInBrowser) {
+   return false;
+  }
+  const profileNameTrim = (separation.profile || '').trim();
+  if (!profileNameTrim || profileNameTrim === 'Unknown Profile') {
+   return false;
+  }
+  return !this.profileNamesFromSettings.some((n) => n === profileNameTrim);
+ }
+
 	openDocument(filePath: string): void {
 		if (this.isRunningInBrowser) return;
 		this.controller.openSeparationDocument(filePath);
+	}
+
+	handleDeleteAllPlates(): void {
+		if (this.isRunningInBrowser) return;
+		this.controller.deleteAllPlatesInSeparationDoc?.()
+			?.then((res) => {
+				if (res?.success && (window as any).__LEAP_SEPARATION_COLORS_REFRESH__) {
+					(window as any).__LEAP_SEPARATION_COLORS_REFRESH__();
+				}
+			})
+			?.catch(() => {});
+	}
+
+	handleRecreateAllPlates(): void {
+		if (this.isRunningInBrowser) return;
+		const meta = this.separatedDocInfo?.profileMetaData;
+		const graphicName = meta?.graphicName ? String(meta.graphicName).trim() : '';
+		const styleCodes = Array.isArray(meta?.styleCodes) ? meta?.styleCodes || [] : [];
+		this.controller.deleteAllPlatesInSeparationDoc?.()
+			?.then((delRes) => {
+				if (delRes && !delRes.success) return undefined;
+				return this.controller.switchToVersionDocument?.();
+			})
+			?.then((switchRes) => {
+				if (switchRes && !switchRes.success) return undefined;
+				if (graphicName && styleCodes.length > 0) {
+					return this.controller.performSeparation(graphicName, styleCodes, meta);
+				}
+				return undefined;
+			})
+			?.then((sepRes) => {
+				if (sepRes?.success && (window as any).__LEAP_TAB_NAVIGATION__?.navigateToTab) {
+					(window as any).__LEAP_TAB_NAVIGATION__.navigateToTab(2);
+					if ((window as any).__LEAP_SEPARATION_COLORS_REFRESH__) {
+						(window as any).__LEAP_SEPARATION_COLORS_REFRESH__();
+					}
+				}
+			})
+			?.catch(() => {});
+	}
+
+	getCurrentSepGraphicName(): string {
+		const name = this.separatedDocInfo?.profileMetaData?.graphicName;
+		return name && name.trim() ? name.trim() : '';
+	}
+
+	getCurrentSepGeneratedLine(): string {
+		const meta = this.separatedDocInfo?.profileMetaData;
+		if (!meta) return '';
+		const created = meta.createdDate;
+		if (!created) return '';
+		try {
+			const d = new Date(created);
+			if (isNaN(d.getTime())) return '';
+			const dateStr = d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '/');
+			const timeStr = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+			const by = meta.artistInitials && meta.artistInitials.trim() ? meta.artistInitials.trim() : '';
+			return by ? `${dateStr} at ${timeStr} by ${by}` : `${dateStr} at ${timeStr}`;
+		} catch {
+			return '';
+		}
 	}
 
 	getSeparationPath(separation: Separation, graphicName: string): string | null {

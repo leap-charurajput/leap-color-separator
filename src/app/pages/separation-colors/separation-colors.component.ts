@@ -769,10 +769,11 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 
   // Export Postscript
   if (exportOptions.exportPostscript) {
+   const postscriptInks = this.getAvailableColors();
    setTimeout(
     () => {
      this.controller
-      .exportPostscript()
+      .exportPostscript(postscriptInks)
       .then((result) => {
        if (result && result.success) {
         exportResults.push('PostScript');

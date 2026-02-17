@@ -219,17 +219,22 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
 			.then(result => {
 				if (result.success && result.placements && Array.isArray(result.placements)) {
 					this.positionOptions = result.placements;
+					const validOpts = this.positionOptions.filter((o: string) => o !== 'Choose');
+					console.log('[Graphics] positionOptions:', this.positionOptions, 'validOpts:', validOpts, 'isSinglePosition (dropdown disabled):', this.isSinglePosition);
+					this.cdr.detectChanges();
 					setTimeout(() => {
 						this.autoSelectSinglePosition();
 					}, 100);
 				} else {
 
 					this.positionOptions = ['Choose'];
+					this.cdr.detectChanges();
 				}
 			})
 			.catch(err => {
 
 				this.positionOptions = ['Choose'];
+				this.cdr.detectChanges();
 			});
 	}
 
@@ -344,18 +349,12 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
 			if (validOptions.length === 1) {
 				setTimeout(() => {
 					const singlePosition = validOptions[0];
-					const individualGraphics = this.graphics.filter(g => g.id !== 'all');
-					const needsUpdate = individualGraphics.some(g => g.position !== singlePosition);
+					const needsUpdate = this.graphics.some(g => g.position !== singlePosition);
 					if (needsUpdate) {
-						this.graphics = this.graphics.map(g => {
-							if (g.id === 'all') {
-								return g;
-							}
-							return {
-								...g,
-								position: singlePosition
-							};
-						});
+						this.graphics = this.graphics.map(g => ({
+							...g,
+							position: singlePosition
+						}));
 						this.saveToLocalStorage();
 						this.cdr.detectChanges();
 					}

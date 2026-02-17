@@ -402,8 +402,29 @@ function findValueInJSON(obj, key) {
 	return null;
 }
 
-function updateVariablesInDocument(doc, jsonData, styleCodes) {
+// Format ISO date for [DATE] (e.g. "11/02/2026"). Parse ISO string manually for ExtendScript.
+function formatSeparationDate(isoStr) {
+	if (!isoStr || typeof isoStr !== 'string') return '';
 	try {
+		var s = isoStr.trim();
+		var datePart = s.indexOf('T') >= 0 ? s.substring(0, s.indexOf('T')) : s.substring(0, 10);
+		if (datePart.length < 10) return '';
+		var parts = datePart.split('-');
+		if (parts.length !== 3) return '';
+		var year = parts[0];
+		var month = parts[1];
+		var day = parts[2];
+		if (!year || !month || !day) return '';
+		return day + '/' + month + '/' + year;
+	} catch (e) {
+		return '';
+	}
+}
+
+// Update variables in document ([ARTIST], [Artist Initials], [POS], [DATE], [STYLE_CODE], and jsonData keys)
+function updateVariablesInDocument(doc, jsonData, styleCodes, profileMetadata) {
+	try {
+		var meta = profileMetadata || {};
 		var textFrames = doc.textFrames;
 
 		for (var i = 0; i < textFrames.length; i++) {
@@ -417,20 +438,30 @@ function updateVariablesInDocument(doc, jsonData, styleCodes) {
 			while ((match = regex.exec(content)) !== null) {
 				var variableName = match[1];
 				var fullMatch = match[0];
+				var key = variableName.toLowerCase().replace(/\s/g, '_');
 				var value = null;
 
-				if (variableName.toLowerCase() === 'style_code') {
+				if (key === 'style_code') {
 					if (styleCodes && styleCodes.length > 0) {
 						value = styleCodes.join(', ');
 					} else {
 						value = findValueInJSON(jsonData, variableName);
 					}
+				} else if (key === 'artist') {
+					value = (meta.artistName != null && meta.artistName !== '') ? String(meta.artistName).trim() : '';
+				} else if (key === 'artist_initials' || key === 'artistinitials') {
+					value = (meta.artistInitials != null && meta.artistInitials !== '') ? String(meta.artistInitials).trim() : '';
+				} else if (key === 'pos') {
+					value = (meta.position != null && meta.position !== '') ? String(meta.position).trim() : (findValueInJSON(jsonData, 'Position') || findValueInJSON(jsonData, 'position') || '');
+				} else if (key === 'date') {
+					value = formatSeparationDate(meta.createdDate || '');
 				} else {
 					value = findValueInJSON(jsonData, variableName);
 				}
 
-				if (value !== null) {
-					updatedContent = updatedContent.replace(fullMatch, value.toString());
+				if (value !== null && value !== undefined) {
+					var strVal = value.toString();
+					updatedContent = updatedContent.split(fullMatch).join(strVal);
 				}
 			}
 
@@ -439,7 +470,8 @@ function updateVariablesInDocument(doc, jsonData, styleCodes) {
 			}
 		}
 	} catch (e) {
-		}
+		$.writeln('Error updating variables: ' + e.message);
+	}
 }
 
 function findAndReadJSONFile(docName, leagueFolder) {

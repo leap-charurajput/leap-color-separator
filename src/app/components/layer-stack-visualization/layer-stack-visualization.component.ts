@@ -62,7 +62,7 @@ export class LayerStackVisualizationComponent implements OnInit, OnDestroy, OnCh
 	private readonly LAYER_SPACING = 14;
 	private readonly LAYER_BASE_OFFSET = 28;
 	private readonly BASE_HEIGHT = 80;
-	private readonly TOP_PADDING = 30;
+	private readonly TOP_PADDING = 12;
 	private readonly SVG_VIEWBOX_WIDTH = 59.99;
 	private readonly SVG_VIEWBOX_HEIGHT = 14.72;
 	private readonly LAYER_RENDERED_WIDTH = 110;
@@ -196,10 +196,14 @@ export class LayerStackVisualizationComponent implements OnInit, OnDestroy, OnCh
 
 	get containerHeight(): number {
 		const layerCount = this.activeColors.length;
-		if (layerCount === 0) return this.BASE_HEIGHT;
-
-		const requiredHeight = this.BASE_HEIGHT + (layerCount * this.layerSpacing) + this.layerBaseOffset + this.TOP_PADDING;
-		return Math.max(requiredHeight, 200);
+		// Content is bottom-aligned: garment at bottom, layers stack upward. Height = from bottom to top of top layer + line space.
+		if (layerCount === 0) return this.BASE_HEIGHT + this.TOP_PADDING;
+		const contentHeight = this.layerBaseOffset
+			+ (layerCount - 1) * this.layerSpacing
+			+ this.layerHeight
+			+ this.LINE_OFFSET_ABOVE_TOP
+			+ this.TOP_PADDING;
+		return Math.max(this.BASE_HEIGHT, contentHeight);
 	}
 
 	get linePositions(): { top: number; height: number } {
