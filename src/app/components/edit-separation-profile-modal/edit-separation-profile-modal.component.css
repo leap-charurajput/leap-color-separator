@@ -1,90 +1,142 @@
 .modal-overlay {
-	position: fixed;
-	inset: 0;
-	background: rgba(0, 0, 0, 0.65);
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	z-index: 90;
+ position: fixed;
+ inset: 0;
+ background: rgba(0, 0, 0, 0.65);
+ display: flex;
+ align-items: center;
+ justify-content: center;
+ z-index: 90;
 }
 
 .profile-modal-container {
-	width: 320px;
-	background: rgba(28, 28, 30, 0.97);
-	border-radius: 8px;
-	box-shadow: 0 18px 40px rgba(0, 0, 0, 0.4);
-	border: 1px solid rgba(255, 255, 255, 0.08);
-	font-family: 'Adobe Clean', sans-serif;
-	color: #f5f5f5;
+ width: 360px;
+ max-width: 95vw;
+ max-height: 90vh;
+ display: flex;
+ flex-direction: column;
+ background: rgba(28, 28, 30, 0.97);
+ border-radius: 8px;
+ box-shadow: 0 18px 40px rgba(0, 0, 0, 0.4);
+ border: 1px solid rgba(255, 255, 255, 0.08);
+ font-family: 'Adobe Clean', sans-serif;
+ color: #f5f5f5;
 }
 
 .modal-header {
-	padding: 8px;
-	border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+ padding: 8px 16px;
+ border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .modal-title {
-	margin: 0;
-	font-size: 12px;
-	font-weight: 600;
-	color: #f5f5f5;
-	font-family: 'Adobe Clean', sans-serif;
+ margin: 0;
+ font-size: 12px;
+ font-weight: 600;
+ color: #f5f5f5;
+ font-family: 'Adobe Clean', sans-serif;
 }
 
 .modal-body {
-	display: flex;
-	flex-direction: column;
-	gap: 10px;
-	padding: 16px 20px;
+ display: flex;
+ flex-direction: column;
+ gap: 10px;
+ padding: 16px 20px;
+ overflow-y: auto;
 }
 
-.form-field {
-	display: flex;
-	flex-direction: row;
-	align-items: center;
-	gap: 10px;
-	font-size: 11px;
+.modal-body.settings-style {
+ gap: 12px;
 }
 
-.form-field .field-label {
-	width: 100px;
-	flex-shrink: 0;
+/* Settings-style fields (aligned with settings.component.css) */
+.settings-style .settings-field {
+ display: flex;
+ justify-content: space-between;
+ align-items: center;
+ gap: 15px;
 }
 
-.form-field input[type="text"] {
-	flex: 1;
-	height: 28px;
-	padding: 0 8px;
-	border-radius: 4px;
-	border: 1px solid rgba(255, 255, 255, 0.16);
-	background: rgba(0, 0, 0, 0.25);
-	color: #f5f5f5;
-	font-size: 11px;
-	font-family: 'Adobe Clean', sans-serif;
+.settings-style .settings-field-label {
+ font-size: 12px;
+ color: rgba(255, 255, 255, 0.9);
+ flex-shrink: 0;
+ font-family: 'Adobe Clean', sans-serif;
 }
 
-.form-field input[type="text"]:focus {
-	outline: none;
-	border-color: #7bb4ff;
-	box-shadow: 0 0 0 2px rgba(123, 180, 255, 0.24);
+.settings-style .settings-field-input {
+ flex: 0 0 auto;
+ min-width: 0;
+ width: 80px;
+ padding: 4px 8px;
+ border: 1px solid rgba(255, 255, 255, 0.1);
+ border-radius: 4px;
+ background-color: #2a2a2a;
+ color: rgba(255, 255, 255, 0.9);
+ font-size: 12px;
+ font-family: 'Adobe Clean', sans-serif;
+ text-align: right;
 }
 
-.checkbox-field {
-	flex-direction: row;
-	align-items: center;
-	gap: 8px;
+.settings-style .settings-field-input-wide {
+ width: 200px;
+ text-align: left;
+}
+
+.settings-style .settings-field-input:focus {
+ outline: none;
+ border-color: #5e9eee;
+ box-shadow: 0 0 0 2px rgba(94, 158, 238, 0.2);
+}
+
+.settings-style .settings-field-input-mesh {
+ width: 56px;
+}
+
+.settings-style .settings-field-input-format {
+ width: 160px;
+ text-align: left;
+}
+
+.settings-style .settings-field-label-inline {
+ font-size: 12px;
+ color: rgba(255, 255, 255, 0.9);
+ flex-shrink: 0;
+ font-family: 'Adobe Clean', sans-serif;
+ margin-left: 0;
+}
+
+.settings-style .settings-field-inline {
+ flex-wrap: wrap;
+ gap: 6px;
+}
+
+.settings-style .settings-field-inline app-checkbox:first-child {
+ margin-right: 0;
+}
+
+.profile-modal-compact-rows {
+ display: flex;
+ flex-direction: column;
+ gap: 4px;
+}
+
+.settings-style .settings-field-vertical {
+ flex-direction: column;
+ align-items: flex-start;
+ gap: 6px;
+}
+
+.settings-style .settings-field-readonly {
+ font-size: 11px;
+ color: rgba(255, 255, 255, 0.7);
+ font-family: 'Adobe Clean', sans-serif;
+ width: 100%;
+ word-break: break-word;
 }
 
 .modal-footer {
-	display: flex;
-	justify-content: flex-end;
-	gap: 12px;
-	padding: 12px 20px 20px;
-	border-top: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.field-label {
-	font-size: 11px;
-	color: rgba(245, 245, 245, 0.9);
-	font-family: 'Adobe Clean', sans-serif;
+ display: flex;
+ justify-content: flex-end;
+ gap: 12px;
+ padding: 12px 20px 20px;
+ border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
