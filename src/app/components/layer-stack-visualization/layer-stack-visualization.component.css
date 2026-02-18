@@ -2,16 +2,14 @@
 
 .layer-stack-container {
  position: relative;
- width: fit-content;
+ width: 100%;
  max-width: 100%;
  padding: 12px;
  background: rgba(255, 255, 255, 0.03);
  border: 1px solid rgba(255, 255, 255, 0.05);
  border-radius: 8px;
- margin-top: 10px;
  display: flex;
  flex-direction: column;
- gap: 8px;
  align-items: stretch;
  min-width: 0;
  box-sizing: border-box;

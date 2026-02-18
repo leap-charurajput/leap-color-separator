@@ -6,10 +6,16 @@
  border: 1px solid #ffffff;
 }
 
+.separation-colors-content {
+ display: flex;
+ flex-direction: column;
+ height: calc(100vh - 100px);
+ min-height: 0;
+}
+
 .separation-colors-table-container {
- height: 270px;
- max-height: 270px;
- min-height: 150px;
+ flex: 1;
+ min-height: 0;
  overflow-y: auto;
  overflow-x: hidden;
  margin-bottom: 10px;
