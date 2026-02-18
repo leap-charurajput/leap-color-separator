@@ -40,6 +40,20 @@
   >
    {{ item }}
   </li>
-  <li *ngIf="filteredItems.length === 0" class="no-results">No results found</li>
+  <li *ngIf="filteredItems.length === 0 && !allowCustomValue" class="no-results">
+   No results found
+  </li>
+  <li
+   *ngIf="filteredItems.length === 0 && allowCustomValue && searchText.trim()"
+   class="custom-value-hint"
+  >
+   Press Enter to use "{{ searchText }}"
+  </li>
+  <li
+   *ngIf="filteredItems.length === 0 && allowCustomValue && !searchText.trim()"
+   class="no-results"
+  >
+   Type to search or enter custom value
+  </li>
  </ul>
 </ng-template>

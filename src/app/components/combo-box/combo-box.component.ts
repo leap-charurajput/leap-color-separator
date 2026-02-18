@@ -22,6 +22,7 @@ export class ComboBoxComponent implements OnChanges {
  @Input() items: string[] = [];
  @Input() placeholder = 'Search or choose...';
  @Input() disabled = false;
+ @Input() allowCustomValue = true; // New input to enable/disable custom values
  @Output() onChange = new EventEmitter<string>();
 
  @ViewChild('comboOrigin', { read: ElementRef }) comboOrigin!: ElementRef;
@@ -88,9 +89,14 @@ export class ComboBoxComponent implements OnChanges {
   if (event.key === 'Escape') {
    this.closeDropdown();
   } else if (event.key === 'Enter') {
-   // Select first filtered item on Enter
+   event.preventDefault();
+
    if (this.filteredItems.length > 0) {
+    // If there are filtered matches, select the first one
     this.handleItemClick(this.filteredItems[0]);
+   } else if (this.allowCustomValue && this.searchText.trim()) {
+    // If no matches but custom values allowed, use the typed value
+    this.selectCustomValue(this.searchText.trim());
    }
   }
  }
@@ -104,6 +110,14 @@ export class ComboBoxComponent implements OnChanges {
   this.searchText = item;
   this.isOpen = false;
   this.onChange.emit(item);
+  this.cdr.detectChanges();
+ }
+
+ selectCustomValue(customValue: string): void {
+  this.selectedValue = customValue;
+  this.searchText = customValue;
+  this.isOpen = false;
+  this.onChange.emit(customValue);
   this.cdr.detectChanges();
  }
 

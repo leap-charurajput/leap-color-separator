@@ -10,6 +10,17 @@
  box-sizing: border-box;
 }
 
+.custom-value-hint {
+ color: rgba(135, 206, 250, 0.9);
+ font-style: italic;
+ cursor: default;
+ pointer-events: none;
+ padding: 6px 10px;
+ font-size: 11px;
+ font-family: 'Adobe Clean', sans-serif;
+ background: rgba(135, 206, 250, 0.05);
+}
+
 .comboBoxWrap.opened {
  border-color: rgba(135, 206, 250, 0.6);
 }
