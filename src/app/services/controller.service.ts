@@ -320,7 +320,7 @@ export class ControllerService {
  async saveAppVersion(origin: string) {
   // Construct the JSON string manually to avoid issues with ExtendScript
 
-  await checkForJSXUpdates(origin);
+  await checkForJSXUpdates(origin + '/');
 
   const script = `
   var folderPaths = "{\\n" +
