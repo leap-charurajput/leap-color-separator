@@ -20,7 +20,6 @@ export const checkForJSXUpdates = async (
 ): Promise<'no_update' | 'update_available' | 'update_done' | 'update_error'> => {
  try {
   let updateStatus: 'no_update' | 'update_available' | 'update_done' | 'update_error' = 'no_update';
-  //  console.log('checkForJSXUpdates called with origin:', origin);
   const remoteVersionFileURL = origin + 'jsx/version.json';
   const remoteVersionFile = await fetch(remoteVersionFileURL);
   const { jsxVersion: remoteJsxVersion = 0, updatedFiles = [] } = await remoteVersionFile.json();
