@@ -151,10 +151,20 @@ function findExcelFileInBatchFolder(documentPath) {
    return null;
   }
 
-  console.log('[Separations] findExcelFileInBatchFolder – documentPath:', documentPath, '| excelFilePath:', excelFilePath);
+  console.log(
+   '[Separations] findExcelFileInBatchFolder – documentPath:',
+   documentPath,
+   '| excelFilePath:',
+   excelFilePath
+  );
   return excelFilePath;
  } catch (error) {
-  console.log('[Separations] findExcelFileInBatchFolder – no Excel found for documentPath:', documentPath, '| error:', error?.message ?? error);
+  console.log(
+   '[Separations] findExcelFileInBatchFolder – no Excel found for documentPath:',
+   documentPath,
+   '| error:',
+   error?.message ?? error
+  );
   return null;
  }
 }
@@ -296,7 +306,10 @@ async function getStyleCodesFromExcel(teamCode, documentPath) {
   const styleCodeColIndex = headerRow.findIndex((col) => col === 'Lineup Style Code');
 
   if (teamCodeColIndex === -1 || styleCodeColIndex === -1) {
-   console.log('[Separations] getStyleCodesFromExcel – required columns missing. headerRow:', headerRow);
+   console.log(
+    '[Separations] getStyleCodesFromExcel – required columns missing. headerRow:',
+    headerRow
+   );
    throw new Error('Required columns not found in Excel file');
   }
 
@@ -318,7 +331,14 @@ async function getStyleCodesFromExcel(teamCode, documentPath) {
   }
 
   const styleCodes = Array.from(styleSet).sort();
-  console.log('[Separations] getStyleCodesFromExcel – teamCode:', teamCode, '| styleCodes count:', styleCodes.length, '| styleCodes:', styleCodes);
+  console.log(
+   '[Separations] getStyleCodesFromExcel – teamCode:',
+   teamCode,
+   '| styleCodes count:',
+   styleCodes.length,
+   '| styleCodes:',
+   styleCodes
+  );
   return styleCodes;
  } catch (error) {
   throw new Error(`Failed to read Excel file: ${error.message}`);
@@ -408,9 +428,19 @@ async function getProfileNamesFromExcel(styleCodes) {
 
   const withProfile = Object.keys(profileMap);
   const missing = styleCodes.filter((sc) => !profileMap[sc]);
-  console.log('[Separations] getProfileNamesFromExcel – styleCodes requested:', styleCodes.length, '| found in Styles.xlsx:', withProfile.length, '| profileMap:', profileMap);
+  console.log(
+   '[Separations] getProfileNamesFromExcel – styleCodes requested:',
+   styleCodes.length,
+   '| found in Styles.xlsx:',
+   withProfile.length,
+   '| profileMap:',
+   profileMap
+  );
   if (missing.length) {
-   console.log('[Separations] getProfileNamesFromExcel – style codes NOT in Styles.xlsx (will show as Unknown Profile):', missing);
+   console.log(
+    '[Separations] getProfileNamesFromExcel – style codes NOT in Styles.xlsx (will show as Unknown Profile):',
+    missing
+   );
   }
   return profileMap;
  } catch (error) {
@@ -494,7 +524,11 @@ async function getStyleInformation(styleCodes) {
    }
   }
 
-  console.log('[getStyleInformation] Found styleInfoMap for:', Object.keys(styleInfoMap), styleInfoMap);
+  console.log(
+   '[getStyleInformation] Found styleInfoMap for:',
+   Object.keys(styleInfoMap),
+   styleInfoMap
+  );
   return { success: true, styleInfoMap };
  } catch (error) {
   console.error('[getStyleInformation] Error:', error.message, error);
@@ -563,7 +597,7 @@ async function getGraphicPlacementOptions(documentPath) {
   const graphicPlacementColIndex = headerRow.findIndex((col) => col === 'Graphic Placement');
 
   if (graphicPlacementColIndex === -1) {
-   return ['Choose'];
+   return [];
   }
 
   const placementSet = new Set();
@@ -584,9 +618,9 @@ async function getGraphicPlacementOptions(documentPath) {
   }
 
   const placements = Array.from(placementSet).sort();
-  return ['Choose', ...placements];
+  return [...placements];
  } catch (error) {
-  return ['Choose'];
+  return [];
  }
 }
 

@@ -58,7 +58,7 @@ export const checkForJSXUpdates = async (
   }
   return updateStatus;
  } catch (err) {
-  console.error('check update status ref', err);
+  console.error('check update status ref', { err });
   return 'update_error';
  }
 };

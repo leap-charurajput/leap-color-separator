@@ -28,6 +28,16 @@ interface ModalState {
  isLoadingColors: boolean;
 }
 
+const DEFAULT_GRAPHIC_POSITIONS = [
+ 'Front',
+ 'Back',
+ 'Left Chest',
+ 'Left Sleeve',
+ 'Right Sleeve',
+ 'Left Shoulder',
+ 'Right Shoulder'
+];
+
 @Component({
  selector: 'app-graphics',
  templateUrl: './graphics.component.html',
@@ -51,7 +61,7 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
   isLoadingColors: false
  };
  availableColors: string[] = [];
- positionOptions: string[] = ['Choose'];
+ positionOptions: string[] = [];
  isSaving = false;
  hasVersionDocument = false;
  isCheckingDocument = false;
@@ -233,27 +243,20 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
    .getGraphicPlacementOptions()
    .then((result) => {
     if (result.success && result.placements && Array.isArray(result.placements)) {
-     this.positionOptions = result.placements;
-     const validOpts = this.positionOptions.filter((o: string) => o !== 'Choose');
-     console.log(
-      '[Graphics] positionOptions:',
-      this.positionOptions,
-      'validOpts:',
-      validOpts,
-      'isSinglePosition (dropdown disabled):',
-      this.isSinglePosition
-     );
+     this.positionOptions =
+      result.placements.length > 0 ? result.placements : [...DEFAULT_GRAPHIC_POSITIONS];
+
      this.cdr.detectChanges();
      setTimeout(() => {
       this.autoSelectSinglePosition();
      }, 100);
     } else {
-     this.positionOptions = ['Choose'];
+     this.positionOptions = [...DEFAULT_GRAPHIC_POSITIONS];
      this.cdr.detectChanges();
     }
    })
    .catch((err) => {
-    this.positionOptions = ['Choose'];
+    this.positionOptions = [...DEFAULT_GRAPHIC_POSITIONS];
     this.cdr.detectChanges();
    });
  }
@@ -395,10 +398,9 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
 
  autoSelectSinglePosition(): void {
   if (this.positionOptions.length > 0 && this.graphics.length > 0 && !this.isLoadingGraphics) {
-   const validOptions = this.positionOptions.filter((opt) => opt !== 'Choose');
-   if (validOptions.length === 1) {
+   if (this.positionOptions.length === 1) {
     setTimeout(() => {
-     const singlePosition = validOptions[0];
+     const singlePosition = this.positionOptions[0];
      const needsUpdate = this.graphics.some((g) => g.position !== singlePosition);
      if (needsUpdate) {
       this.graphics = this.graphics.map((g) => ({
@@ -522,14 +524,11 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
 
  handlePositionChange(graphicId: string, position: string): void {
   console.log('position changes: ', { graphicId, position });
-  const actualPosition = position === 'Choose' ? '' : position;
 
   if (graphicId === 'all') {
-   this.graphics = this.graphics.map((g) => ({ ...g, position: actualPosition }));
+   this.graphics = this.graphics.map((g) => ({ ...g, position }));
   } else {
-   this.graphics = this.graphics.map((g) =>
-    g.id === graphicId ? { ...g, position: actualPosition } : g
-   );
+   this.graphics = this.graphics.map((g) => (g.id === graphicId ? { ...g, position } : g));
   }
   this.saveToLocalStorage();
   this.cdr.detectChanges();
@@ -624,8 +623,7 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
  }
 
  get isSinglePosition(): boolean {
-  const validPositionOptions = this.positionOptions.filter((opt) => opt !== 'Choose');
-  return validPositionOptions.length === 1;
+  return this.positionOptions.length === 1;
  }
 
  openDocument(filePath: string): void {
