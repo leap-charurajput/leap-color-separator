@@ -37,29 +37,30 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
  availableColors: string[] = [];
  separationPaths: { [key: string]: string } = {};
  graphicFolderStatus: { [key: string]: boolean } = {};
+ graphicFileStatus: { [key: string]: boolean } = {};
  isCheckingFolderMap: { [key: string]: boolean } = {};
-	hasVersionDocument = false;
-	isCheckingDocument = false;
-	hasGraphicsPositions = false;
-	isSeparatedDoc = false;
-	/** Profile names from Profiles.json (Separation Profile Settings); used to disable Generate when profile file missing. */
-	profileNamesFromSettings: string[] = [];
-	profileNamesLoaded = false;
-	/** Current version document path; used to resolve project Batch Excel for style/color codes. */
-	versionDocumentPath: string | null = null;
-	separatedDocInfo: {
-		teamVersionName?: string;
-		teamVersionPath?: string;
-		leapTemplateName?: string;
-		leapTemplatePath?: string;
-		profileMetaData?: {
-			graphicName?: string;
-			createdDate?: string;
-			artistInitials?: string;
-			styleCodes?: string[];
-		};
-	} = {};
-	private documentActivateHandler: (() => void) | null = null;
+ hasVersionDocument = false;
+ isCheckingDocument = false;
+ hasGraphicsPositions = false;
+ isSeparatedDoc = false;
+ /** Profile names from Profiles.json (Separation Profile Settings); used to disable Generate when profile file missing. */
+ profileNamesFromSettings: string[] = [];
+ profileNamesLoaded = false;
+ /** Current version document path; used to resolve project Batch Excel for style/color codes. */
+ versionDocumentPath: string | null = null;
+ separatedDocInfo: {
+  teamVersionName?: string;
+  teamVersionPath?: string;
+  leapTemplateName?: string;
+  leapTemplatePath?: string;
+  profileMetaData?: {
+   graphicName?: string;
+   createdDate?: string;
+   artistInitials?: string;
+   styleCodes?: string[];
+  };
+ } = {};
+ private documentActivateHandler: (() => void) | null = null;
 
  constructor(private controller: ControllerService, private cdr: ChangeDetectorRef) {
   this.isRunningInBrowser = !(window as any).__adobe_cep__ && !(window as any).leap;
@@ -127,7 +128,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
    };
 
    csInterface.addEventListener(EVENT_DOCUMENT_ACTIVATE, this.documentActivateHandler);
-  } catch (err) {}
+  } catch (err) { }
  }
 
  removeDocumentEventListener(): void {
@@ -141,31 +142,31 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 
    csInterface.removeEventListener(EVENT_DOCUMENT_ACTIVATE, this.documentActivateHandler);
    this.documentActivateHandler = null;
-  } catch (err) {}
+  } catch (err) { }
  }
 
-	checkVersionDocument(): void {
-		this.isCheckingDocument = true;
-		this.controller
-			.checkSeparatedDocument()
-			.then((separatedResult) => {
-				if (separatedResult.success && separatedResult.data && separatedResult.data.isSeparatedDoc) {
-					this.isSeparatedDoc = true;
-					this.separatedDocInfo = separatedResult.data || {};
-					this.hasVersionDocument = false;
-					this.versionDocumentPath = null;
-					this.isCheckingDocument = false;
-					this.loadProfileNamesFromSettings();
-					this.cdr.detectChanges();
-					return;
-				}
-				this.isSeparatedDoc = false;
-				this.separatedDocInfo = {};
-				return this.controller.getTemplateInfo();
-			})
-			.then((result) => {
-				if (this.isSeparatedDoc || !result) return;
-				if (result.success && result.hasDocument) {
+ checkVersionDocument(): void {
+  this.isCheckingDocument = true;
+  this.controller
+   .checkSeparatedDocument()
+   .then((separatedResult) => {
+    if (separatedResult.success && separatedResult.data && separatedResult.data.isSeparatedDoc) {
+     this.isSeparatedDoc = true;
+     this.separatedDocInfo = separatedResult.data || {};
+     this.hasVersionDocument = false;
+     this.versionDocumentPath = null;
+     this.isCheckingDocument = false;
+     this.loadProfileNamesFromSettings();
+     this.cdr.detectChanges();
+     return;
+    }
+    this.isSeparatedDoc = false;
+    this.separatedDocInfo = {};
+    return this.controller.getTemplateInfo();
+   })
+   .then((result) => {
+    if (this.isSeparatedDoc || !result) return;
+    if (result.success && result.hasDocument) {
      const isVersionFile = result.hasDocument && result.data && result.data.teamCode;
      this.hasVersionDocument = isVersionFile || false;
      this.versionDocumentPath = result.documentPath || null;
@@ -238,7 +239,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
      }
     }
    })
-   .catch((err) => {});
+   .catch((err) => { });
  }
 
  loadAvailableColors(): void {
@@ -280,14 +281,14 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
      this.expandedGraphics.clear();
      this.graphicOptions.forEach((g) => this.expandedGraphics.add(g));
 
-    this.checkAllGraphicFolders();
-    this.loadSeparationPaths();
+     this.checkAllGraphicFolders();
+     this.loadSeparationPaths();
 
-    if (this.teamCode && this.teamCode !== '' && this.versionDocumentPath) {
+     if (this.teamCode && this.teamCode !== '' && this.versionDocumentPath) {
       this.loadSeparations();
-    }
+     }
 
-    this.checkGraphicsPositions();
+     this.checkGraphicsPositions();
      this.cdr.detectChanges();
     } else {
      this.graphicOptions = [];
@@ -402,7 +403,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
      this.separationPaths = {};
     }
    })
-   .catch((err) => {});
+   .catch((err) => { });
  }
 
  loadSeparations(): void {
@@ -522,7 +523,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
   const profileName = separation.profile || '';
   const graphicColors = this.getGraphicColors(graphicName);
 
-   const getProfileCodeAndCreateSeparation = async () => {
+  const getProfileCodeAndCreateSeparation = async () => {
    let profileCode = null;
 
    if (profileName && !this.isRunningInBrowser) {
@@ -533,7 +534,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
       profileCode = result.profileCode;
      } else {
      }
-    } catch (err) {}
+    } catch (err) { }
    }
 
    let artistName = '';
@@ -545,7 +546,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
       artistName = gs.data.artistName != null ? String(gs.data.artistName) : '';
       artistInitials = gs.data.artistInitials != null ? String(gs.data.artistInitials) : '';
      }
-    } catch (err) {}
+    } catch (err) { }
    }
 
    const graphicData = this.graphicsData.find((g: any) => g && g.name === graphicName);
@@ -600,7 +601,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
     } else {
     }
    })
-   .catch((err) => {});
+   .catch((err) => { });
  }
 
  handleOpenSeparation(filePath: string): void {
@@ -623,7 +624,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
     } else {
     }
    })
-   .catch((err) => {});
+   .catch((err) => { });
  }
 
  handleSeparationMenuClick(item: string, separationId: number): void {
@@ -652,6 +653,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
  checkGraphicFolderExists(graphic: string): void {
   if (!graphic || graphic.trim() === '') {
    this.graphicFolderStatus[graphic] = false;
+   this.graphicFileStatus[graphic] = false;
    return;
   }
 
@@ -661,12 +663,15 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
    .then((result) => {
     if (result.success) {
      this.graphicFolderStatus[graphic] = result.folderExists || false;
+     this.graphicFileStatus[graphic] = result.graphicsFileExists || false;
     } else {
      this.graphicFolderStatus[graphic] = false;
+     this.graphicFileStatus[graphic] = false;
     }
    })
    .catch((err) => {
     this.graphicFolderStatus[graphic] = false;
+    this.graphicFileStatus[graphic] = false;
    })
    .finally(() => {
     this.isCheckingFolderMap[graphic] = false;
@@ -680,6 +685,10 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 
  getGraphicFolderStatus(graphic: string): boolean {
   return !!this.graphicFolderStatus[graphic];
+ }
+
+ getGraphicFileStatus(graphic: string): boolean {
+  return !!this.graphicFileStatus[graphic];
  }
 
  getFileNameFromPath(path: string): string {
@@ -711,73 +720,73 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
   return !this.profileNamesFromSettings.some((n) => n === profileNameTrim);
  }
 
-	openDocument(filePath: string): void {
-		if (this.isRunningInBrowser) return;
-		this.controller.openSeparationDocument(filePath);
-	}
+ openDocument(filePath: string): void {
+  if (this.isRunningInBrowser) return;
+  this.controller.openSeparationDocument(filePath);
+ }
 
-	handleDeleteAllPlates(): void {
-		if (this.isRunningInBrowser) return;
-		this.controller.deleteAllPlatesInSeparationDoc?.()
-			?.then((res) => {
-				if (res?.success && (window as any).__LEAP_SEPARATION_COLORS_REFRESH__) {
-					(window as any).__LEAP_SEPARATION_COLORS_REFRESH__();
-				}
-			})
-			?.catch(() => {});
-	}
+ handleDeleteAllPlates(): void {
+  if (this.isRunningInBrowser) return;
+  this.controller.deleteAllPlatesInSeparationDoc?.()
+   ?.then((res) => {
+    if (res?.success && (window as any).__LEAP_SEPARATION_COLORS_REFRESH__) {
+     (window as any).__LEAP_SEPARATION_COLORS_REFRESH__();
+    }
+   })
+   ?.catch(() => { });
+ }
 
-	handleRecreateAllPlates(): void {
-		if (this.isRunningInBrowser) return;
-		const meta = this.separatedDocInfo?.profileMetaData;
-		const graphicName = meta?.graphicName ? String(meta.graphicName).trim() : '';
-		const styleCodes = Array.isArray(meta?.styleCodes) ? meta?.styleCodes || [] : [];
-		this.controller.deleteAllPlatesInSeparationDoc?.()
-			?.then((delRes) => {
-				if (delRes && !delRes.success) return undefined;
-				return this.controller.switchToVersionDocument?.();
-			})
-			?.then((switchRes) => {
-				if (switchRes && !switchRes.success) return undefined;
-				if (graphicName && styleCodes.length > 0) {
-					return this.controller.performSeparation(graphicName, styleCodes, meta);
-				}
-				return undefined;
-			})
-			?.then((sepRes) => {
-				if (sepRes?.success && (window as any).__LEAP_TAB_NAVIGATION__?.navigateToTab) {
-					(window as any).__LEAP_TAB_NAVIGATION__.navigateToTab(2);
-					if ((window as any).__LEAP_SEPARATION_COLORS_REFRESH__) {
-						(window as any).__LEAP_SEPARATION_COLORS_REFRESH__();
-					}
-				}
-			})
-			?.catch(() => {});
-	}
+ handleRecreateAllPlates(): void {
+  if (this.isRunningInBrowser) return;
+  const meta = this.separatedDocInfo?.profileMetaData;
+  const graphicName = meta?.graphicName ? String(meta.graphicName).trim() : '';
+  const styleCodes = Array.isArray(meta?.styleCodes) ? meta?.styleCodes || [] : [];
+  this.controller.deleteAllPlatesInSeparationDoc?.()
+   ?.then((delRes) => {
+    if (delRes && !delRes.success) return undefined;
+    return this.controller.switchToVersionDocument?.();
+   })
+   ?.then((switchRes) => {
+    if (switchRes && !switchRes.success) return undefined;
+    if (graphicName && styleCodes.length > 0) {
+     return this.controller.performSeparation(graphicName, styleCodes, meta);
+    }
+    return undefined;
+   })
+   ?.then((sepRes) => {
+    if (sepRes?.success && (window as any).__LEAP_TAB_NAVIGATION__?.navigateToTab) {
+     (window as any).__LEAP_TAB_NAVIGATION__.navigateToTab(2);
+     if ((window as any).__LEAP_SEPARATION_COLORS_REFRESH__) {
+      (window as any).__LEAP_SEPARATION_COLORS_REFRESH__();
+     }
+    }
+   })
+   ?.catch(() => { });
+ }
 
-	getCurrentSepGraphicName(): string {
-		const name = this.separatedDocInfo?.profileMetaData?.graphicName;
-		return name && name.trim() ? name.trim() : '';
-	}
+ getCurrentSepGraphicName(): string {
+  const name = this.separatedDocInfo?.profileMetaData?.graphicName;
+  return name && name.trim() ? name.trim() : '';
+ }
 
-	getCurrentSepGeneratedLine(): string {
-		const meta = this.separatedDocInfo?.profileMetaData;
-		if (!meta) return '';
-		const created = meta.createdDate;
-		if (!created) return '';
-		try {
-			const d = new Date(created);
-			if (isNaN(d.getTime())) return '';
-			const dateStr = d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '/');
-			const timeStr = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
-			const by = meta.artistInitials && meta.artistInitials.trim() ? meta.artistInitials.trim() : '';
-			return by ? `${dateStr} at ${timeStr} by ${by}` : `${dateStr} at ${timeStr}`;
-		} catch {
-			return '';
-		}
-	}
+ getCurrentSepGeneratedLine(): string {
+  const meta = this.separatedDocInfo?.profileMetaData;
+  if (!meta) return '';
+  const created = meta.createdDate;
+  if (!created) return '';
+  try {
+   const d = new Date(created);
+   if (isNaN(d.getTime())) return '';
+   const dateStr = d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '/');
+   const timeStr = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+   const by = meta.artistInitials && meta.artistInitials.trim() ? meta.artistInitials.trim() : '';
+   return by ? `${dateStr} at ${timeStr} by ${by}` : `${dateStr} at ${timeStr}`;
+  } catch {
+   return '';
+  }
+ }
 
-	getSeparationPath(separation: Separation, graphicName: string): string | null {
+ getSeparationPath(separation: Separation, graphicName: string): string | null {
   if (!graphicName || !separation.profile) {
    return null;
   }
