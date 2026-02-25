@@ -384,7 +384,9 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
         this.loadColorRowsFromSeparatedLayerNames();
        } else {
         console.log('[SEPARATION] No SeparatedLayerNames found either, cannot load color data');
+        this.colorRows = [];
         this.isLoadingSwatches = false;
+        this.cdr.detectChanges();
        }
       }
      } else {

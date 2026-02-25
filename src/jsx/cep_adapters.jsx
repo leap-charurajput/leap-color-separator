@@ -2617,6 +2617,17 @@ function handleDeleteAllPlatesInSeparationDocument(params_string) {
    sepLayer.layers[i].remove();
    count++;
   }
+
+  // Clear XMP plate/color data so the UI refreshes to show no plates
+  try {
+   var sepXmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
+   if (sepXmp.isXmpCreated) {
+    sepXmp.setStructField("SeparatedLayerNames", [], true, false);
+    sepXmp.setStructField("LEAPSeparationColorsData", [], true, false);
+    sepXmp.commit();
+   }
+  } catch (xmpErr) { }
+
   try { doc.save(); } catch (e) { }
   return JSON.stringify({
    success: true,
