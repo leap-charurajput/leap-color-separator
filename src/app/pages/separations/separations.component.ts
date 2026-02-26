@@ -7,7 +7,9 @@ import {
  OnInit,
  SimpleChanges
 } from '@angular/core';
+import { Subscription } from 'rxjs';
 import { ControllerService } from '../../services/controller.service';
+import { GraphicsDataService } from '../../services/graphics-data.service';
 
 interface Separation {
  id: number;
@@ -63,52 +65,67 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
  /** Show confirmation dialog before deleting all plates */
  showDeleteAllConfirm = false;
  private documentActivateHandler: (() => void) | null = null;
+ private graphicsSubscription: Subscription | null = null;
 
- constructor(private controller: ControllerService, private cdr: ChangeDetectorRef) {
+ constructor(private controller: ControllerService, private cdr: ChangeDetectorRef, private graphicsDataService: GraphicsDataService) {
   this.isRunningInBrowser = !(window as any).__adobe_cep__ && !(window as any).leap;
  }
 
  ngOnInit(): void {
   this.setupDocumentEventListener();
-  this.setupGraphicsPositionsListener();
   this.checkVersionDocument();
+  this.subscribeToGraphicsData();
+ }
+
+ private subscribeToGraphicsData(): void {
+  this.graphicsSubscription = this.graphicsDataService.graphicsData$.subscribe((data) => {
+   this.graphicsData = data;
+   this.hasGraphicsPositions = data.some((g: any) => g.position && g.position.trim() !== '');
+   this.cdr.detectChanges();
+  });
  }
 
  ngOnDestroy(): void {
   this.removeDocumentEventListener();
-  this.removeGraphicsPositionsListener();
- }
-
- setupGraphicsPositionsListener(): void {
-  const handleGraphicsPositionsUpdate = () => {
-   this.checkGraphicsPositions();
-   this.loadGraphicsData();
-  };
-
-  window.addEventListener('graphicsPositionsUpdated', handleGraphicsPositionsUpdate);
-  window.addEventListener('storage', handleGraphicsPositionsUpdate);
-
-  (window as any).__SEPARATIONS_GRAPHICS_LISTENER__ = handleGraphicsPositionsUpdate;
- }
-
- removeGraphicsPositionsListener(): void {
-  const handler = (window as any).__SEPARATIONS_GRAPHICS_LISTENER__;
-  if (handler) {
-   window.removeEventListener('graphicsPositionsUpdated', handler);
-   window.removeEventListener('storage', handler);
-   delete (window as any).__SEPARATIONS_GRAPHICS_LISTENER__;
+  if (this.graphicsSubscription) {
+   this.graphicsSubscription.unsubscribe();
   }
  }
 
+
  ngOnChanges(changes: SimpleChanges): void {
   if (changes['documentRefreshKey']) {
-   this.checkVersionDocument();
+   this.refreshData();
+  }
+ }
+
+ async refreshData(): Promise<void> {
+  this.isCheckingDocument = true;
+  this.cdr.detectChanges();
+  try {
+   await this.checkVersionDocument();
    if (this.hasVersionDocument) {
-    this.loadGraphicsList();
-    this.loadTeamCode();
-    this.loadGraphicsData();
-    this.loadSeparationPaths();
+    await Promise.all([
+     this.loadGraphicsList(),
+     this.loadTeamCode(),
+     this.loadGraphicsData(),
+     this.loadSeparationPaths()
+    ]);
+   } else {
+    this.graphicOptions = [];
+    this.teamCode = '';
+    this.separations = [];
+    this.graphicsData = [];
+    this.separationPaths = {};
+    this.hasGraphicsPositions = false;
+    this.isSeparatedDoc = false;
+    this.cdr.detectChanges();
    }
+  } catch (err) {
+   console.error('[Separations] refreshData error:', err);
+  } finally {
+   this.isCheckingDocument = false;
+   this.cdr.detectChanges();
   }
  }
 
@@ -147,61 +164,63 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
   } catch (err) { }
  }
 
- checkVersionDocument(): void {
+ async checkVersionDocument(): Promise<void> {
   this.isCheckingDocument = true;
-  this.controller
-   .checkSeparatedDocument()
-   .then((separatedResult) => {
-    if (separatedResult.success && separatedResult.data && separatedResult.data.isSeparatedDoc) {
-     this.isSeparatedDoc = true;
-     this.separatedDocInfo = separatedResult.data || {};
-     this.hasVersionDocument = false;
-     this.versionDocumentPath = null;
-     this.isCheckingDocument = false;
-     this.loadProfileNamesFromSettings();
-     this.cdr.detectChanges();
-     return;
-    }
-    this.isSeparatedDoc = false;
-    this.separatedDocInfo = {};
-    return this.controller.getTemplateInfo();
-   })
-   .then((result) => {
-    if (this.isSeparatedDoc || !result) return;
-    if (result.success && result.hasDocument) {
-     const isVersionFile = result.hasDocument && result.data && result.data.teamCode;
-     this.hasVersionDocument = isVersionFile || false;
-     this.versionDocumentPath = result.documentPath || null;
-
-     if (this.hasVersionDocument) {
-      this.loadProfileNamesFromSettings();
-      this.loadGraphicsList();
-      this.loadTeamCode();
-      this.loadGraphicsData();
-      this.loadSeparationPaths();
-     }
-    } else {
-     this.hasVersionDocument = false;
-     this.versionDocumentPath = null;
-    }
-   })
-   .catch((err) => {
+  try {
+   const separatedResult = await this.controller.checkSeparatedDocument();
+   if (separatedResult.success && separatedResult.data && separatedResult.data.isSeparatedDoc) {
+    this.isSeparatedDoc = true;
+    this.separatedDocInfo = separatedResult.data || {};
     this.hasVersionDocument = false;
-   })
-   .finally(() => {
-    this.isCheckingDocument = false;
-    this.cdr.detectChanges();
-   });
+    this.versionDocumentPath = null;
+    await this.loadProfileNamesFromSettings();
+    return;
+   }
+   this.isSeparatedDoc = false;
+   this.separatedDocInfo = {};
+   const result = await this.controller.getTemplateInfo();
+   if (this.isSeparatedDoc || !result) return;
+   if (result.success && result.hasDocument) {
+    const isVersionFile = result.hasDocument && result.data && result.data.teamCode;
+    this.hasVersionDocument = !!isVersionFile;
+    this.versionDocumentPath = result.documentPath || null;
+
+    if (this.hasVersionDocument) {
+     await Promise.all([
+      this.loadProfileNamesFromSettings(),
+      this.loadGraphicsList(),
+      this.loadTeamCode(),
+      this.loadGraphicsData(),
+      this.loadSeparationPaths()
+     ]);
+    }
+   } else {
+    this.hasVersionDocument = false;
+    this.versionDocumentPath = null;
+    this.graphicOptions = [];
+    this.teamCode = '';
+    this.separations = [];
+    this.graphicsData = [];
+    this.separationPaths = {};
+    this.hasGraphicsPositions = false;
+   }
+  } catch (err) {
+   console.error('[Separations] checkVersionDocument error:', err);
+   this.hasVersionDocument = false;
+  } finally {
+   this.isCheckingDocument = false;
+   this.cdr.detectChanges();
+  }
  }
 
- loadProfileNamesFromSettings(): void {
+ loadProfileNamesFromSettings(): Promise<void> {
   if (this.isRunningInBrowser || !this.controller.getSeparationProfiles) {
-   return;
+   return Promise.resolve();
   }
   if (!this.hasVersionDocument && !this.isSeparatedDoc) {
-   return;
+   return Promise.resolve();
   }
-  this.controller
+  return this.controller
    .getSeparationProfiles()
    .then((result: any) => {
     if (result && result.success && Array.isArray(result.profiles)) {
@@ -226,25 +245,29 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
    });
  }
 
- loadTeamCode(): void {
-  this.controller
-   .getTemplateInfo()
-   .then((result) => {
-    if (result.success && result.data && result.data.teamCode) {
-     this.teamCode = result.data.teamCode;
-     if (result.documentPath) {
-      this.versionDocumentPath = result.documentPath;
-     }
-     if (this.teamCode && this.teamCode !== '') {
-      this.loadAvailableColors();
-      this.loadSeparations();
-     }
+ async loadTeamCode(): Promise<void> {
+  try {
+   const result = await this.controller.getTemplateInfo();
+   if (result.success && result.data && result.data.teamCode) {
+    this.teamCode = result.data.teamCode;
+    if (result.documentPath) {
+     this.versionDocumentPath = result.documentPath;
     }
-   })
-   .catch((err) => { });
+    if (this.teamCode && this.teamCode !== '') {
+     await this.loadAvailableColors();
+     await this.loadSeparations();
+    }
+   } else {
+    this.teamCode = '';
+    this.separations = [];
+    this.cdr.detectChanges();
+   }
+  } catch (err) {
+   console.error('[Separations] loadTeamCode error:', err);
+  }
  }
 
- loadAvailableColors(): void {
+ async loadAvailableColors(): Promise<void> {
   if (!this.teamCode || this.teamCode === '') {
    return;
   }
@@ -253,159 +276,144 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
    return;
   }
 
-  this.controller
-   .getColorCodesFromExcel(this.teamCode, this.versionDocumentPath || undefined)
-   .then((result) => {
-    if (result.success && result.colors && Array.isArray(result.colors)) {
-     this.availableColors = result.colors;
-    } else {
-     this.availableColors = [];
-    }
-   })
-   .catch((err) => {
+  try {
+   const result = await this.controller.getColorCodesFromExcel(this.teamCode, this.versionDocumentPath || undefined);
+   if (result.success && result.colors && Array.isArray(result.colors)) {
+    this.availableColors = result.colors;
+   } else {
     this.availableColors = [];
-   });
+   }
+  } catch (err) {
+   console.error('[Separations] loadAvailableColors error:', err);
+   this.availableColors = [];
+  }
  }
 
- loadGraphicsList(): void {
+ async loadGraphicsList(): Promise<void> {
   if (this.isRunningInBrowser) {
    return;
   }
 
   this.isLoadingGraphics = true;
-  this.controller
-   .getGraphicsList()
-   .then((result) => {
-    if (result.success && result.graphics && Array.isArray(result.graphics)) {
-     this.graphicOptions = [...result.graphics];
+  try {
+   const result = await this.controller.getGraphicsList();
+   if (result.success && result.graphics && Array.isArray(result.graphics)) {
+    this.graphicOptions = [...result.graphics];
 
-     // Initialize expanded state for all graphics
-     this.expandedGraphics.clear();
-     this.graphicOptions.forEach((g) => this.expandedGraphics.add(g));
+    // Initialize expanded state for all graphics
+    this.expandedGraphics.clear();
+    this.graphicOptions.forEach((g) => this.expandedGraphics.add(g));
 
-     this.checkAllGraphicFolders();
-     this.loadSeparationPaths();
+    await this.checkAllGraphicFolders();
+    await this.loadSeparationPaths();
 
-     if (this.teamCode && this.teamCode !== '' && this.versionDocumentPath) {
-      this.loadSeparations();
-     }
-
-     this.checkGraphicsPositions();
-     this.cdr.detectChanges();
-    } else {
-     this.graphicOptions = [];
-     this.hasGraphicsPositions = false;
+    if (this.teamCode && this.teamCode !== '' && this.versionDocumentPath) {
+     await this.loadSeparations();
     }
-   })
-   .catch((err) => {
+
+    await this.checkGraphicsPositions();
+    this.cdr.detectChanges();
+   } else {
     this.graphicOptions = [];
     this.hasGraphicsPositions = false;
-   })
-   .finally(() => {
-    this.isLoadingGraphics = false;
-
-    this.cdr.detectChanges();
-   });
+   }
+  } catch (err) {
+   console.error('[Separations] loadGraphicsList error:', err);
+   this.graphicOptions = [];
+   this.hasGraphicsPositions = false;
+  } finally {
+   this.isLoadingGraphics = false;
+   this.cdr.detectChanges();
+  }
  }
 
- loadGraphicsData(): void {
-  this.controller
-   .loadGraphicsData()
-   .then((result) => {
-    if (
-     result.success &&
-     result.graphicsData &&
-     Array.isArray(result.graphicsData) &&
-     result.graphicsData.length > 0
-    ) {
-     this.graphicsData = result.graphicsData;
-    } else {
-     try {
-      const savedGraphics = localStorage.getItem('graphicsPositions');
-      if (savedGraphics) {
-       this.graphicsData = JSON.parse(savedGraphics);
-      } else {
-       this.graphicsData = [];
-      }
-     } catch (err) {
-      this.graphicsData = [];
-     }
-    }
-   })
-   .catch((err) => {
-    try {
-     const savedGraphics = localStorage.getItem('graphicsPositions');
-     if (savedGraphics) {
-      this.graphicsData = JSON.parse(savedGraphics);
-     } else {
-      this.graphicsData = [];
-     }
-    } catch (localErr) {
-     this.graphicsData = [];
-    }
-   });
+ async loadSeparationPaths(): Promise<void> {
+  try {
+   const result = await this.controller.loadSeparationPaths();
+   if (!result) {
+    this.separationPaths = {};
+    return;
+   }
+
+   if (result.success && result.separationPaths) {
+    this.separationPaths = result.separationPaths;
+   } else {
+    this.separationPaths = {};
+   }
+  } catch (err) {
+   console.error('[Separations] loadSeparationPaths error:', err);
+   this.separationPaths = {};
+  } finally {
+   this.cdr.detectChanges();
+  }
  }
 
- checkGraphicsPositions(): void {
-  this.controller
-   .loadGraphicsData()
-   .then((result) => {
-    if (
-     result.success &&
-     result.graphicsData &&
-     Array.isArray(result.graphicsData) &&
-     result.graphicsData.length > 0
-    ) {
-     const graphicsData = result.graphicsData;
-     const hasPositions = graphicsData.some((g: any) => g.position && g.position.trim() !== '');
-     this.hasGraphicsPositions = hasPositions;
-    } else {
-     try {
-      const savedGraphics = localStorage.getItem('graphicsPositions');
-      if (savedGraphics) {
-       const graphicsData = JSON.parse(savedGraphics);
-       const hasPositions = graphicsData.some((g: any) => g.position && g.position.trim() !== '');
-       this.hasGraphicsPositions = hasPositions;
-      } else {
-       this.hasGraphicsPositions = false;
-      }
-     } catch (err) {
-      this.hasGraphicsPositions = false;
-     }
-    }
-   })
-   .catch((err) => {
+ async loadGraphicsData(): Promise<void> {
+  try {
+   const result = await this.controller.loadGraphicsData();
+   if (
+    result.success &&
+    result.graphicsData &&
+    Array.isArray(result.graphicsData) &&
+    result.graphicsData.length > 0
+   ) {
+    this.graphicsData = result.graphicsData;
+   } else {
+    this.loadGraphicsDataFromLocalStorage();
+   }
+  } catch (err) {
+   this.loadGraphicsDataFromLocalStorage();
+  } finally {
+   this.cdr.detectChanges();
+  }
+ }
+
+ private loadGraphicsDataFromLocalStorage(): void {
+  try {
+   const savedGraphics = localStorage.getItem('graphicsPositions');
+   if (savedGraphics) {
+    this.graphicsData = JSON.parse(savedGraphics);
+   } else {
+    this.graphicsData = [];
+   }
+  } catch (err) {
+   this.graphicsData = [];
+  }
+ }
+
+ async checkGraphicsPositions(): Promise<void> {
+  try {
+   const result = await this.controller.loadGraphicsData();
+   if (
+    result.success &&
+    result.graphicsData &&
+    Array.isArray(result.graphicsData) &&
+    result.graphicsData.length > 0
+   ) {
+    const graphicsData = result.graphicsData;
+    this.hasGraphicsPositions = graphicsData.some((g: any) => g.position && g.position.trim() !== '');
+   } else {
+    this.checkGraphicsPositionsFromLocalStorage();
+   }
+  } catch (err) {
+   this.checkGraphicsPositionsFromLocalStorage();
+  } finally {
+   this.cdr.detectChanges();
+  }
+ }
+
+ private checkGraphicsPositionsFromLocalStorage(): void {
+  try {
+   const savedGraphics = localStorage.getItem('graphicsPositions');
+   if (savedGraphics) {
+    const graphicsData = JSON.parse(savedGraphics);
+    this.hasGraphicsPositions = graphicsData.some((g: any) => g.position && g.position.trim() !== '');
+   } else {
     this.hasGraphicsPositions = false;
-   });
- }
-
- loadSeparationPaths(): void {
-  this.controller
-   .loadSeparationPaths()
-   .then((result) => {
-    try {
-     if (!result) {
-      this.separationPaths = {};
-      return;
-     }
-
-     if (result.debug) {
-      if (result.debug.loadPathsDebug && result.debug.loadPathsDebug.length > 0) {
-      }
-     }
-
-     if (result.success && result.separationPaths) {
-      const paths = result.separationPaths;
-      const keys = Object.keys(paths);
-      this.separationPaths = paths;
-     } else {
-      this.separationPaths = {};
-     }
-    } catch (parseError) {
-     this.separationPaths = {};
-    }
-   })
-   .catch((err) => { });
+   }
+  } catch (err) {
+   this.hasGraphicsPositions = false;
+  }
  }
 
  loadSeparations(): void {
@@ -416,6 +424,8 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 
   if (!this.teamCode || this.teamCode === '') {
    console.log(logPrefix, 'Skipped – missing teamCode:', this.teamCode || '(empty)');
+   this.separations = [];
+   this.cdr.detectChanges();
    return;
   }
 

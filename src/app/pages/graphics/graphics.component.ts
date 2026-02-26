@@ -9,6 +9,7 @@ import {
  SimpleChanges
 } from '@angular/core';
 import { ControllerService } from '../../services/controller.service';
+import { GraphicsDataService } from '../../services/graphics-data.service';
 
 interface Graphic {
  id: string;
@@ -92,7 +93,11 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
 
  isRunningInBrowser = false;
 
- constructor(private controller: ControllerService, private cdr: ChangeDetectorRef) {
+ constructor(
+  private controller: ControllerService,
+  private cdr: ChangeDetectorRef,
+  private graphicsDataService: GraphicsDataService
+ ) {
   this.isRunningInBrowser = !(window as any).__adobe_cep__ && !(window as any).leap;
  }
 
@@ -216,7 +221,7 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
     } else {
     }
    })
-   .catch((err) => {});
+   .catch((err) => { });
  }
 
  loadAvailableColors(): void {
@@ -314,7 +319,7 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
      }, 100);
     }
    })
-   .catch((err) => {});
+   .catch((err) => { });
  }
 
  loadGraphicsList(): void {
@@ -598,10 +603,12 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
    .saveGraphicsData(graphicsToSave)
    .then((result) => {
     if (result.success) {
+     // Sync to shared service to notify other components/tabs
+     this.saveToLocalStorage();
     } else {
     }
    })
-   .catch((err) => {})
+   .catch((err) => { })
    .finally(() => {
     this.isSaving = false;
     this.cdr.detectChanges();
@@ -611,10 +618,7 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
  saveToLocalStorage(): void {
   if (this.graphics.length > 0) {
    const graphicsData = this.graphics.filter((g) => g.id !== 'all');
-   try {
-    localStorage.setItem('graphicsPositions', JSON.stringify(graphicsData));
-    window.dispatchEvent(new CustomEvent('graphicsPositionsUpdated'));
-   } catch (err) {}
+   this.graphicsDataService.updateGraphicsData(graphicsData);
   }
  }
 

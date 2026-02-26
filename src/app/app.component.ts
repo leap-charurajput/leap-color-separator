@@ -1,6 +1,7 @@
 import { ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
 import { checkForJSXUpdates } from '../libs/helper';
 import { ControllerService } from './services/controller.service';
+import { GraphicsDataService } from './services/graphics-data.service';
 
 @Component({
  selector: 'app-root',
@@ -16,7 +17,7 @@ export class AppComponent implements OnInit, OnDestroy {
  showConfirmDialog = false;
  confirmError: string | null = null;
 
- constructor(private controller: ControllerService, private cdr: ChangeDetectorRef) {}
+ constructor(private controller: ControllerService, private cdr: ChangeDetectorRef, private graphicsDataService: GraphicsDataService) { }
 
  ngOnInit(): void {
   document.body.classList.add('dark');
@@ -186,7 +187,7 @@ export class AppComponent implements OnInit, OnDestroy {
      csInterface.removeEventListener(EVENT_DOCUMENT_ACTIVATE, handleDocumentActivate);
     }
    };
-  } catch (err) {}
+  } catch (err) { }
  }
 
  private registerFlyoutMenu(): void {
@@ -260,7 +261,7 @@ export class AppComponent implements OnInit, OnDestroy {
      csInterface.removeEventListener(EVENT_FLYOUT_MENU_CLICKED, handleFlyoutMenuClicked);
     }
    };
-  } catch (err) {}
+  } catch (err) { }
  }
 
  openRemoveConfirmation(): void {
@@ -289,6 +290,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
    if (result?.success) {
     this.documentRefreshKey++;
+    this.graphicsDataService.resetData();
     if ((window as any).__LEAP_DOCUMENT_EVENT__?.handler) {
      (window as any).__LEAP_DOCUMENT_EVENT__.handler();
     }
