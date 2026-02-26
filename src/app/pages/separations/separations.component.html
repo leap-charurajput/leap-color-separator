@@ -43,6 +43,11 @@
   </div>
  </div>
 
+ <app-confirm-dialog [isOpen]="showDeleteAllConfirm" title="Confirm"
+  message="Are you sure you want to delete all separation plates from this document?" confirmText="Delete"
+  cancelText="Cancel" confirmVariant="danger" (confirm)="confirmDeleteAllPlates()" (cancel)="cancelDeleteAllPlates()">
+ </app-confirm-dialog>
+
  <div *ngIf="!hasVersionDocument && !isSeparatedDoc && !isCheckingDocument" class="organize-graphics-content">
   <div class="panelTitle mx-5" style="text-align: center; padding: 40px 20px;">
    <span *ngIf="isRunningInBrowser">Please run this in Illustrator</span>

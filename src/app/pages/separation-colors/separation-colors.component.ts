@@ -103,11 +103,24 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
    // Reset state when document changes
    this.colorRows = [];
    this.graphicSwatches = [];
-   this.checkIfSeparatedDocument();
+
+   if (this.refreshCheckTimeoutId != null) {
+    clearTimeout(this.refreshCheckTimeoutId);
+   }
+   this.refreshCheckTimeoutId = setTimeout(() => {
+    this.refreshCheckTimeoutId = null;
+    this.checkIfSeparatedDocument();
+   }, 250);
   }
  }
 
+ private refreshCheckTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
  ngOnDestroy(): void {
+  if (this.refreshCheckTimeoutId != null) {
+   clearTimeout(this.refreshCheckTimeoutId);
+   this.refreshCheckTimeoutId = null;
+  }
   delete (window as any).__LEAP_SEPARATION_COLORS_REFRESH__;
  }
 

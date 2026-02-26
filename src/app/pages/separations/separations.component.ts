@@ -60,6 +60,8 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
    styleCodes?: string[];
   };
  } = {};
+ /** Show confirmation dialog before deleting all plates */
+ showDeleteAllConfirm = false;
  private documentActivateHandler: (() => void) | null = null;
 
  constructor(private controller: ControllerService, private cdr: ChangeDetectorRef) {
@@ -727,6 +729,18 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 
  handleDeleteAllPlates(): void {
   if (this.isRunningInBrowser) return;
+  this.showDeleteAllConfirm = true;
+  this.cdr.detectChanges();
+ }
+
+ cancelDeleteAllPlates(): void {
+  this.showDeleteAllConfirm = false;
+  this.cdr.detectChanges();
+ }
+
+ confirmDeleteAllPlates(): void {
+  this.showDeleteAllConfirm = false;
+  this.cdr.detectChanges();
   this.controller.deleteAllPlatesInSeparationDoc?.()
    ?.then((res) => {
     if (res?.success && (window as any).__LEAP_SEPARATION_COLORS_REFRESH__) {
@@ -740,24 +754,19 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
   if (this.isRunningInBrowser) return;
   const meta = this.separatedDocInfo?.profileMetaData;
   const graphicName = meta?.graphicName ? String(meta.graphicName).trim() : '';
-  const styleCodes = Array.isArray(meta?.styleCodes) ? meta?.styleCodes || [] : [];
+  if (!graphicName) return;
   this.controller.deleteAllPlatesInSeparationDoc?.()
    ?.then((delRes) => {
     if (delRes && !delRes.success) return undefined;
-    return this.controller.switchToVersionDocument?.();
+    return this.controller.recreatePlatesInActiveDocument?.(graphicName);
    })
-   ?.then((switchRes) => {
-    if (switchRes && !switchRes.success) return undefined;
-    if (graphicName && styleCodes.length > 0) {
-     return this.controller.performSeparation(graphicName, styleCodes, meta);
-    }
-    return undefined;
-   })
-   ?.then((sepRes) => {
-    if (sepRes?.success && (window as any).__LEAP_TAB_NAVIGATION__?.navigateToTab) {
-     (window as any).__LEAP_TAB_NAVIGATION__.navigateToTab(2);
+   ?.then((recreateRes) => {
+    if (recreateRes?.success) {
      if ((window as any).__LEAP_SEPARATION_COLORS_REFRESH__) {
       (window as any).__LEAP_SEPARATION_COLORS_REFRESH__();
+     }
+     if ((window as any).__LEAP_TAB_NAVIGATION__?.navigateToTab) {
+      (window as any).__LEAP_TAB_NAVIGATION__.navigateToTab(2);
      }
     }
    })

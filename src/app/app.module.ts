@@ -8,6 +8,7 @@ import { OverlayModule } from '@angular/cdk/overlay';
 import { AppComponent } from './app.component';
 import { ButtonComponent } from './components/button/button.component';
 import { CheckboxComponent } from './components/checkbox/checkbox.component';
+import { ConfirmDialogComponent } from './components/confirm-dialog/confirm-dialog.component';
 import { CompoundPlateModalComponent } from './components/compound-plate-modal/compound-plate-modal.component';
 import { DropdownComponent } from './components/dropdown/dropdown.component';
 import { EditSeparationModalComponent } from './components/edit-separation-modal/edit-separation-modal.component';
@@ -33,6 +34,7 @@ import { ControllerService } from './services/controller.service';
   TabNavigatorComponent,
   SubMenuComponent,
   ButtonComponent,
+  ConfirmDialogComponent,
   ComboBoxComponent,
   DropdownComponent,
   EditSeparationModalComponent,
@@ -53,4 +55,4 @@ import { ControllerService } from './services/controller.service';
  providers: [ControllerService],
  bootstrap: [AppComponent]
 })
-export class AppModule {}
+export class AppModule { }

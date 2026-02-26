@@ -231,7 +231,7 @@ export class ControllerService {
       if (links.leapTemplatePath) result.data.leapTemplatePath = links.leapTemplatePath;
       if (links.leapTemplateName) result.data.leapTemplateName = links.leapTemplateName;
      }
-    } catch (_) {}
+    } catch (_) { }
     return result;
    })
    .catch(() => result);
@@ -901,16 +901,20 @@ getAppVersion();
  performSeparation(
   graphicName: string,
   styleCodes: string[] = [],
-  profileMetadata: any = null
+  profileMetadata: any = null,
+  options?: { recreateInActiveDoc?: boolean }
  ): Promise<any> {
-  this.log('performSeparation called for: ' + graphicName);
+  this.log('performSeparation called for: ' + graphicName + (options?.recreateInActiveDoc ? ' (recreate in active doc)' : ''));
 
   return this.ensureSession().then(() => {
-   const params = {
+   const params: any = {
     graphicName: graphicName,
     styleCodes: styleCodes,
     profileMetadata: profileMetadata
    };
+   if (options?.recreateInActiveDoc === true) {
+    params.recreateInActiveDoc = true;
+   }
 
    return (window as any).leap
     .scriptLoader()
@@ -924,6 +928,14 @@ getAppVersion();
      throw err;
     });
   });
+ }
+
+ /**
+  * Recreate plates in the active (separated) document.
+  * Call after deleteAllPlatesInSeparationDoc when the user clicks "Recreate All Plates".
+  */
+ recreatePlatesInActiveDocument(graphicName: string): Promise<any> {
+  return this.performSeparation(graphicName, [], null, { recreateInActiveDoc: true });
  }
 
  selectAndSaveLeapSettings(): Promise<any> {
@@ -1101,7 +1113,7 @@ getAppVersion();
   });
  }
 
- private log(val: string): void {}
+ private log(val: string): void { }
 
  private get name(): string {
   return 'Client Controller:: ';
