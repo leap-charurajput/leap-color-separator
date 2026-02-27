@@ -221,7 +221,7 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
     } else {
     }
    })
-   .catch((err) => { });
+   .catch((err) => {});
  }
 
  loadAvailableColors(): void {
@@ -247,20 +247,21 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
   this.controller
    .getGraphicPlacementOptions()
    .then((result) => {
-    if (result.success && result.placements && Array.isArray(result.placements)) {
-     this.positionOptions =
-      result.placements.length > 0 ? result.placements : [...DEFAULT_GRAPHIC_POSITIONS];
+    let placements: string[] = [];
 
-     this.cdr.detectChanges();
-     setTimeout(() => {
-      this.autoSelectSinglePosition();
-     }, 100);
-    } else {
-     this.positionOptions = [...DEFAULT_GRAPHIC_POSITIONS];
-     this.cdr.detectChanges();
+    if (result.success && Array.isArray(result.placements)) {
+     // Remove "Choose" (case-insensitive)
+     placements = result.placements.filter((p: string) => p.trim().toLowerCase() !== 'choose');
     }
+
+    this.positionOptions = placements.length > 0 ? placements : [...DEFAULT_GRAPHIC_POSITIONS];
+
+    this.cdr.detectChanges();
+    setTimeout(() => {
+     this.autoSelectSinglePosition();
+    }, 100);
    })
-   .catch((err) => {
+   .catch(() => {
     this.positionOptions = [...DEFAULT_GRAPHIC_POSITIONS];
     this.cdr.detectChanges();
    });
@@ -319,7 +320,7 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
      }, 100);
     }
    })
-   .catch((err) => { });
+   .catch((err) => {});
  }
 
  loadGraphicsList(): void {
@@ -608,7 +609,7 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
     } else {
     }
    })
-   .catch((err) => { })
+   .catch((err) => {})
    .finally(() => {
     this.isSaving = false;
     this.cdr.detectChanges();
