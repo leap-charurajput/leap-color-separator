@@ -92,10 +92,11 @@ function collectItemsByColor(item, colorGroups) {
 }
 
 function duplicateItemToLayer(item, targetLayer, copiedItems) {
-	item.duplicate(targetLayer, ElementPlacement.PLACEATBEGINNING);
+	var newItem = item.duplicate(targetLayer, ElementPlacement.PLACEATBEGINNING);
 	if (copiedItems) {
-		copiedItems.push(item);
+		copiedItems.push(newItem);
 	}
+	return newItem;
 }
 
 function expandObject() {
@@ -111,7 +112,7 @@ function expandObject() {
 		app.unloadAction(CONSTANTS.ACTIONS.SET_NAME, '');
 		pathFinderTrim();
 	} catch (e) {
-		}
+	}
 }
 
 function pathFinderTrim() {
@@ -121,11 +122,97 @@ function pathFinderTrim() {
 	app.executeMenuCommand("ungroup");
 }
 
+function loadLEAPColorSepsActions() {
+	var actionStr = [
+		"/version 3",
+		"/name [ 15",
+		"	4c45415020436f6c6f722053657073",
+		"]",
+		"/isOpen 1",
+		"/actionCount 2",
+		"/action-1 {",
+		"	/name [ 16",
+		"		5061746866696e6465725f4d65726765",
+		"	]",
+		"	/keyIndex 1",
+		"	/colorIndex 0",
+		"	/isOpen 1",
+		"	/eventCount 1",
+		"	/event-1 {",
+		"		/useRulersIn1stQuadrant 0",
+		"		/internalName (ai_plugin_pathfinder)",
+		"		/localizedName [ 10",
+		"			5061746866696e646572",
+		"		]",
+		"		/isOpen 1",
+		"		/isOn 1",
+		"		/hasDialog 0",
+		"		/parameterCount 1",
+		"		/parameter-1 {",
+		"			/key 1851878757",
+		"			/showInPalette 4294967295",
+		"			/type (enumerated)",
+		"			/name [ 5",
+		"				4d65726765",
+		"			]",
+		"			/value 8",
+		"		}",
+		"	}",
+		"}",
+		"/action-2 {",
+		"	/name [ 14",
+		"		5061746866696e6465725f416464",
+		"	]",
+		"	/keyIndex 3",
+		"	/colorIndex 0",
+		"	/isOpen 1",
+		"	/eventCount 1",
+		"	/event-1 {",
+		"		/useRulersIn1stQuadrant 0",
+		"		/internalName (ai_plugin_pathfinder)",
+		"		/localizedName [ 10",
+		"			5061746866696e646572",
+		"		]",
+		"		/isOpen 1",
+		"		/isOn 1",
+		"		/hasDialog 0",
+		"		/parameterCount 1",
+		"		/parameter-1 {",
+		"			/key 1851878757",
+		"			/showInPalette 4294967295",
+		"			/type (enumerated)",
+		"			/name [ 3",
+		"				416464",
+		"			]",
+		"			/value 0",
+		"		}",
+		"	}",
+		"}",
+	].join("");
+
+	var _actionFile = File(Folder.desktop + "/PathFinderAdd.aia");
+	if (_actionFile.exists) {
+		_actionFile.remove();
+	}
+	_actionFile.open('w');
+	_actionFile.write(actionStr);
+	_actionFile.close();
+	app.loadAction(_actionFile);
+	_actionFile.remove();
+}
+
+function unloadLEAPColorSepsActions() {
+	try {
+		app.unloadAction("LEAP Color Seps", "");
+	} catch (e) { }
+}
+
+function pathFinderMerge() {
+	app.doScript("Pathfinder_Merge", "LEAP Color Seps");
+}
+
 function pathFinderAdd() {
-	app.executeMenuCommand("group");
-	app.executeMenuCommand("Live Pathfinder Add");
-	app.executeMenuCommand("expandStyle");
-	app.executeMenuCommand("ungroup");
+	app.doScript("Pathfinder_Add", "LEAP Color Seps");
 }
 
 function findLayerByName(layers, layerName) {
@@ -221,7 +308,7 @@ function setTextFrameColor(textFrame, color) {
 			textFrame.textRange.fillColor = color;
 		}
 	} catch (e) {
-		}
+	}
 }
 
 function applyColorToAllTextFramesInGroup(group, color) {
@@ -267,7 +354,7 @@ function applyColorToRectanglesInGroup(group, color) {
 			colRect.filled = true;
 			colRect.fillColor = color;
 		} catch (e) {
-			}
+		}
 	}
 }
 

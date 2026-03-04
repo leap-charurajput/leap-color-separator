@@ -58,6 +58,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
   profileMetaData?: {
    graphicName?: string;
    createdDate?: string;
+   artistName?: string;
    artistInitials?: string;
    styleCodes?: string[];
   };
@@ -67,7 +68,11 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
  private documentActivateHandler: (() => void) | null = null;
  private graphicsSubscription: Subscription | null = null;
 
- constructor(private controller: ControllerService, private cdr: ChangeDetectorRef, private graphicsDataService: GraphicsDataService) {
+ constructor(
+  private controller: ControllerService,
+  private cdr: ChangeDetectorRef,
+  private graphicsDataService: GraphicsDataService
+ ) {
   this.isRunningInBrowser = !(window as any).__adobe_cep__ && !(window as any).leap;
  }
 
@@ -111,7 +116,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
      this.loadGraphicsData(),
      this.loadSeparationPaths()
     ]);
-   } else {
+   } else if (!this.isSeparatedDoc) {
     this.graphicOptions = [];
     this.teamCode = '';
     this.separations = [];
@@ -168,11 +173,55 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
   this.isCheckingDocument = true;
   try {
    const separatedResult = await this.controller.checkSeparatedDocument();
+   // Debug: share this console output to inspect XMP/document detection
+   console.log('[Separations] checkSeparatedDocument result:', JSON.stringify({
+    success: separatedResult?.success,
+    isSeparatedDoc: separatedResult?.data?.isSeparatedDoc,
+    docPath: separatedResult?.data?.docPath,
+    docName: separatedResult?.data?.docName,
+    _debug: separatedResult?.data?._debug
+   }, null, 2));
    if (separatedResult.success && separatedResult.data && separatedResult.data.isSeparatedDoc) {
     this.isSeparatedDoc = true;
-    this.separatedDocInfo = separatedResult.data || {};
+    this.separatedDocInfo = { ...(separatedResult.data || {}) };
     this.hasVersionDocument = false;
     this.versionDocumentPath = null;
+    this.isCheckingDocument = false;
+
+    // Try to fetch styleInfo if missing from XMP but styleCodes are present
+    const meta: any = this.separatedDocInfo.profileMetaData;
+    if (meta && !meta.styleInfo && meta.styleCodes && Array.isArray(meta.styleCodes) && meta.styleCodes.length > 0) {
+     try {
+      const styleRes = await this.controller.getStyleInformation(meta.styleCodes);
+      if (styleRes?.success && styleRes.styleInfoMap) {
+       const firstCode = meta.styleCodes[0];
+       const styleInfo = styleRes.styleInfoMap[firstCode];
+       if (styleInfo) {
+        meta.styleInfo = styleInfo;
+       }
+      }
+     } catch (e) {
+      console.warn('[Separations] Failed to fetch styleInfo for separated doc', e);
+     }
+    }
+
+    // Debug: full payload received by Separations (should show template/version links and profileMetaData)
+    console.log('[Separations] separatedDocInfo set (Current sep UI data):', {
+     hasProfileMetaData: !!this.separatedDocInfo.profileMetaData,
+     hasStyleInfo: !!(this.separatedDocInfo.profileMetaData as any)?.styleInfo,
+     graphicName: (this.separatedDocInfo.profileMetaData as any)?.graphicName,
+     artistName: (this.separatedDocInfo.profileMetaData as any)?.artistName,
+     artistInitials: (this.separatedDocInfo.profileMetaData as any)?.artistInitials,
+     teamVersionName: this.separatedDocInfo.teamVersionName,
+     leapTemplateName: this.separatedDocInfo.leapTemplateName,
+     willShowRows: !!(
+      this.separatedDocInfo.teamVersionName ||
+      this.separatedDocInfo.leapTemplateName ||
+      ((this.separatedDocInfo.profileMetaData as any)?.graphicName || '').trim() ||
+      ((this.separatedDocInfo.profileMetaData as any)?.artistName || (this.separatedDocInfo.profileMetaData as any)?.artistInitials || '').trim()
+     )
+    });
+    this.cdr.detectChanges();
     await this.loadProfileNamesFromSettings();
     return;
    }
@@ -208,6 +257,14 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
    console.error('[Separations] checkVersionDocument error:', err);
    this.hasVersionDocument = false;
   } finally {
+   // Debug: final state after check (share this to verify UI state)
+   console.log('[Separations] checkVersionDocument state:', {
+    isSeparatedDoc: this.isSeparatedDoc,
+    hasVersionDocument: this.hasVersionDocument,
+    versionDocumentPath: this.versionDocumentPath,
+    isCheckingDocument: this.isCheckingDocument,
+    separatedDocInfoKeys: this.isSeparatedDoc ? Object.keys(this.separatedDocInfo || {}) : []
+   });
    this.isCheckingDocument = false;
    this.cdr.detectChanges();
   }
@@ -566,7 +623,29 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
     ? String(graphicData.position).trim()
     : '';
 
-   const profileMetadata = {
+   // Resolve body color from first color code via COLOR_CODE_LOOKUP.xlsx (same folder as Styles.xlsx)
+   let bodyColorData: any = null;
+   const firstColorCode = Array.isArray(graphicColors) && graphicColors.length > 0 ? graphicColors[0] : null;
+   if (firstColorCode && !this.isRunningInBrowser && this.controller.getColorByCodeFromLookup) {
+    try {
+     const lookupResult = await this.controller.getColorByCodeFromLookup(firstColorCode);
+     if (lookupResult?.success && lookupResult.color) {
+      bodyColorData = {
+       bodyColor: lookupResult.color.hex,
+       colorName: lookupResult.color.colorName,
+       cmyk: lookupResult.color.cmyk,
+       rgb: lookupResult.color.rgb
+      };
+      console.log('[SEPARATIONS] Body color from COLOR_CODE_LOOKUP.xlsx:', bodyColorData.colorName, bodyColorData.bodyColor);
+     } else {
+      console.warn('[SEPARATIONS] Color lookup failed for code:', firstColorCode, lookupResult?.error);
+     }
+    } catch (lookupErr) {
+     console.warn('[SEPARATIONS] Color lookup error for code:', firstColorCode, lookupErr);
+    }
+   }
+
+   const profileMetadata: any = {
     profileName: profileName,
     profileCode: profileCode,
     styleCodes: styleCodes,
@@ -577,6 +656,9 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
     artistInitials: artistInitials,
     position: position
    };
+   if (bodyColorData) {
+    profileMetadata.bodyColorData = bodyColorData;
+   }
 
    return this.controller.performSeparation(graphicName, styleCodes, profileMetadata);
   };
@@ -786,6 +868,14 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
  getCurrentSepGraphicName(): string {
   const name = this.separatedDocInfo?.profileMetaData?.graphicName;
   return name && name.trim() ? name.trim() : '';
+ }
+
+ getCurrentSepArtistDisplay(): string {
+  const meta = this.separatedDocInfo?.profileMetaData;
+  if (!meta) return '';
+  const name = meta.artistName && String(meta.artistName).trim() ? String(meta.artistName).trim() : '';
+  const initials = meta.artistInitials && String(meta.artistInitials).trim() ? String(meta.artistInitials).trim() : '';
+  return name || initials || '';
  }
 
  getCurrentSepGeneratedLine(): string {

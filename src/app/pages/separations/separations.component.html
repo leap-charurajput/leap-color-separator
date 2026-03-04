@@ -3,7 +3,7 @@
   <div class="current-sep-block">
    <div class="current-sep-heading">Current sep</div>
    <ng-container
-    *ngIf="separatedDocInfo.teamVersionName || separatedDocInfo.leapTemplateName || getCurrentSepGraphicName() || getCurrentSepGeneratedLine()">
+    *ngIf="separatedDocInfo.teamVersionName || separatedDocInfo.leapTemplateName || getCurrentSepGraphicName() || getCurrentSepGeneratedLine() || getCurrentSepArtistDisplay()">
     <div class="current-sep-rows">
      <div *ngIf="separatedDocInfo.leapTemplateName" class="current-sep-row">
       <span class="current-sep-label">LEAP Template:</span>
@@ -19,6 +19,10 @@
       <span class="current-sep-label">Graphic:</span>
       <span class="current-sep-value">{{ getCurrentSepGraphicName() }}</span>
      </div>
+     <div *ngIf="getCurrentSepArtistDisplay()" class="current-sep-row">
+      <span class="current-sep-label">Artist:</span>
+      <span class="current-sep-value">{{ getCurrentSepArtistDisplay() }}</span>
+     </div>
      <div *ngIf="getCurrentSepGeneratedLine()" class="current-sep-row">
       <span class="current-sep-label">Generated</span>
       <span class="current-sep-value">{{ getCurrentSepGeneratedLine() }}</span>
@@ -26,7 +30,7 @@
     </div>
    </ng-container>
    <div
-    *ngIf="!separatedDocInfo.teamVersionName && !separatedDocInfo.leapTemplateName && !getCurrentSepGraphicName() && !getCurrentSepGeneratedLine()"
+    *ngIf="!separatedDocInfo.teamVersionName && !separatedDocInfo.leapTemplateName && !getCurrentSepGraphicName() && !getCurrentSepGeneratedLine() && !getCurrentSepArtistDisplay()"
     class="current-sep-fallback">
     Separated document is open. Team version and template links are not available.
    </div>

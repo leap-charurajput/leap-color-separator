@@ -728,60 +728,101 @@ getAppVersion();
   const inksLiteral = JSON.stringify(safeInks);
   return `
 (function() {
- try {
-  var inks = ${inksLiteral};
-  if (!app.documents.length) {
-   return JSON.stringify({ success: false, error: "No active document found" });
+  try {
+    var inks = ${inksLiteral};
+    if (!app.documents.length) {
+      return JSON.stringify({
+        success: false,
+        error: "No active document found"
+      });
+    }
+    var doc = app.activeDocument;
+    var docFile = new File(doc.fullName);
+    var docFolder = docFile.parent;
+    var docName = docFile.name.replace(/\\.[^\\.]+$/, "");
+    var outputPath = docFolder.fsName + "/" + docName + ".ps";
+
+    // Flattener
+    var flatOptions = new PrintFlattenerOptions();
+    flatOptions.clipComplexRegions = false;
+    flatOptions.convertStrokesToOutlines = false;
+    flatOptions.convertTextToOutlines = false;
+    flatOptions.flatteningBalance = 100;
+    flatOptions.gradientResolution = 300;
+    flatOptions.rasterizationResolution = 300;
+
+     // Font options
+    var fontOptions = new PrintFontOptions();
+    fontOptions.downloadFonts = PrintFontDownloadMode.DOWNLOADSUBSET;
+
+
+    // Job options for the print job
+    var jobOptions = new PrintJobOptions();
+    jobOptions.copies = 1;
+    jobOptions.printArea = PrintingBounds.ARTBOARDBOUNDS;
+    jobOptions.file = new File(outputPath);
+
+     // Color separation options
+    var colorSepOptions = new PrintColorSeparationOptions();
+    colorSepOptions.colorSeparationMode = PrintColorSeparationMode.HOSTBASEDSEPARATION;
+    colorSepOptions.convertSpotColors = false;
+    colorSepOptions.overprintBlack = false;
+
+    var _inkList = doc.inkList;
+    var printInks = [];
+    var inksLookup = {};
+    for (var i = 0; i < inks.length; i++) {
+      inksLookup[inks[i].toUpperCase()] = true;
+    }
+    for (var i = 0; i < _inkList.length; i++) {
+      var ink = _inkList[i];
+      var inkName = ink.name.toUpperCase();
+      if (inksLookup[inkName]) {
+        printInks.push(ink);
+      }
+    }
+
+    colorSepOptions.inkList = printInks;
+
+
+ 		// Page marks options
+    var marksOptions = new PrintPageMarksOptions();
+    marksOptions.trimMarks = false;
+    marksOptions.registrationMarks = false;
+    marksOptions.colorBars = false;
+    marksOptions.pageInformationMarks = false;
+
+    // PostScript
+		var psOptions = new PrintPostScriptOptions();
+		psOptions.postScriptLevel = PrinterPostScriptLevelEnum.PSLEVEL2;
+		psOptions.binaryPrinting = false;
+		psOptions.imageCompression = PostScriptImageCompressionType.IMAGECOMPRESSIONNONE
+
+    // Print options
+		var printOptions = new PrintOptions();
+    printOptions.colorSeparationOptions = colorSepOptions;
+    // printOptions.file = new File(outputPath);
+    printOptions.flattenerOptions = flatOptions;
+    printOptions.fontOptions = fontOptions;
+    printOptions.jobOptions = jobOptions;
+    printOptions.pageMarksOptions = marksOptions;
+    // printOptions.paperOptions = paperOptions;
+    printOptions.postScriptOptions = psOptions;
+    printOptions.PPDName = 'IBlock v2';
+
+    app.activeDocument.print(printOptions);
+
+    return JSON.stringify({
+      success: true,
+      message: "PostScript exported successfully",
+      filePath: outputPath
+    });
+  } catch (e) {
+    return JSON.stringify({
+      success: false,
+      error: "Error exporting PostScript: " + (e.message || e.toString())
+    });
   }
-  var doc = app.activeDocument;
-  var docFile = new File(doc.fullName);
-  var docFolder = docFile.parent;
-  var docName = docFile.name.replace(/\\.[^\\.]+$/, '');
-  var outputPath = docFolder.fsName + "/" + docName + ".ps";
-
-  var jobOptions = new PrintJobOptions();
-  var printOptions = new PrintOptions();
-  printOptions.printerName = app.printerList[0].name;
-  printOptions.PPDName = 'Device Independent';
-  printOptions.printToFile = true;
-  printOptions.jobOptions = jobOptions;
-
-  var colorSepOptions = new PrintColorSeparationOptions();
-  colorSepOptions.colorSeparationMode = PrintColorSeparationMode.HOSTBASEDSEPARATION;
-  colorSepOptions.convertSpotColors = false;
-  colorSepOptions.overprintBlack = true;
-
-  var _inkList = doc.inkList;
-  var printInks = [];
-  var inksLookup = {};
-  for (var i = 0; i < inks.length; i++) {
-   inksLookup[inks[i].toUpperCase()] = true;
-  }
-  for (var i = 0; i < _inkList.length; i++) {
-   var ink = _inkList[i];
-   var inkName = ink.name.toUpperCase();
-   if (inksLookup[inkName]) {
-    printInks.push(ink);
-   }
-  }
-
-  colorSepOptions.inkList = printInks;
-  printOptions.colorSeparationOptions = colorSepOptions;
-  printOptions.file = new File(outputPath);
-
-  app.activeDocument.print(printOptions);
-
-  return JSON.stringify({
-   success: true,
-   message: "PostScript exported successfully",
-   filePath: outputPath
-  });
- } catch (e) {
-  return JSON.stringify({
-   success: false,
-   error: "Error exporting PostScript: " + (e.message || e.toString())
-  });
- }
 })();
 `;
  }
@@ -875,6 +916,23 @@ getAppVersion();
   });
  }
 
+ /**
+  * Look up body color (Hex/CMYK/RGB) by code from COLOR_CODE_LOOKUP.xlsx (same folder as Styles.xlsx).
+  */
+ getColorByCodeFromLookup(
+  colorCode: string
+ ): Promise<{
+  success: boolean;
+  color?: { hex: string; colorName: string; cmyk: { c: number; m: number; y: number; k: number }; rgb: { r: number; g: number; b: number } };
+  error?: string;
+ }> {
+  const win = window as any;
+  if (!win.leap) {
+   return Promise.reject(new Error('leap not available'));
+  }
+  return this.ensureSession().then(() => win.leap.getColorByCodeFromLookup(colorCode));
+ }
+
  removeSeparationData(): Promise<any> {
   this.log('removeSeparationData called');
 
@@ -935,7 +993,19 @@ getAppVersion();
   * Call after deleteAllPlatesInSeparationDoc when the user clicks "Recreate All Plates".
   */
  recreatePlatesInActiveDocument(graphicName: string): Promise<any> {
-  return this.performSeparation(graphicName, [], null, { recreateInActiveDoc: true });
+  return this.ensureSession().then(() => {
+   const params = { graphicName: graphicName };
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleRecreatePlatesInActiveDocument', params)
+    .then((res: string) => {
+     const result = JSON.parse(res);
+     return result;
+    })
+    .catch((err: any) => {
+     throw err;
+    });
+  });
  }
 
  selectAndSaveLeapSettings(): Promise<any> {

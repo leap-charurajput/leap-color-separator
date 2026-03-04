@@ -536,6 +536,119 @@ async function getStyleInformation(styleCodes) {
  }
 }
 
+/**
+ * Look up color by Code from COLOR_CODE_LOOKUP.xlsx (same folder as Styles.xlsx).
+ * Columns: Color Name, Code, Hex, R, G, B, C, M, Y, K
+ * @param {string} colorCode - Code to look up (e.g. "0042", "006R")
+ * @returns {Promise<{ success: boolean, color?: { hex, colorName, cmyk, rgb }, error?: string }>}
+ */
+async function getColorByCodeFromLookup(colorCode) {
+ try {
+  if (!colorCode || String(colorCode).trim() === '') {
+   return { success: false, error: 'Color code is required' };
+  }
+
+  const code = String(colorCode).trim();
+  const serverBasePath = getServerBasePath();
+  if (!serverBasePath) {
+   return { success: false, error: 'Server base path not found' };
+  }
+
+  const normalizedBasePath = serverBasePath.replace(/\/$/, '');
+  const excelFilePath = path.join(
+   normalizedBasePath,
+   'SETTINGS',
+   'LEAP_SEPS',
+   'Data',
+   'COLOR_CODE_LOOKUP.xlsx'
+  );
+
+  if (!fs.existsSync(excelFilePath)) {
+   return { success: false, error: `COLOR_CODE_LOOKUP.xlsx not found at: ${excelFilePath}` };
+  }
+
+  let workbook;
+  try {
+   const fileBuffer = fs.readFileSync(excelFilePath);
+   workbook = XLSX.read(fileBuffer, { type: 'buffer' });
+  } catch (bufferError) {
+   workbook = XLSX.readFile(excelFilePath);
+  }
+
+  const sheetName = workbook.SheetNames[0];
+  const worksheet = workbook.Sheets[sheetName];
+  const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+  if (!data || data.length < 2) {
+   return { success: false, error: 'COLOR_CODE_LOOKUP.xlsx has no data rows' };
+  }
+
+  const headerRow = data[0];
+  const codeColIndex = headerRow.findIndex((col) => String(col || '').trim() === 'Code');
+  const hexColIndex = headerRow.findIndex((col) => String(col || '').trim() === 'Hex');
+  const colorNameColIndex = headerRow.findIndex((col) => String(col || '').trim() === 'Color Name');
+  const rCol = headerRow.findIndex((col) => String(col || '').trim() === 'R');
+  const gCol = headerRow.findIndex((col) => String(col || '').trim() === 'G');
+  const bCol = headerRow.findIndex((col) => String(col || '').trim() === 'B');
+  const cCol = headerRow.findIndex((col) => String(col || '').trim() === 'C');
+  const mCol = headerRow.findIndex((col) => String(col || '').trim() === 'M');
+  const yCol = headerRow.findIndex((col) => String(col || '').trim() === 'Y');
+  const kCol = headerRow.findIndex((col) => String(col || '').trim() === 'K');
+
+  if (codeColIndex === -1) {
+   return { success: false, error: 'Code column not found in COLOR_CODE_LOOKUP.xlsx' };
+  }
+
+  const toNum = (v) => {
+   if (v == null || v === '') return 0;
+   const n = Number(v);
+   return isNaN(n) ? 0 : Math.max(0, Math.min(100, n));
+  };
+  const toNum255 = (v) => {
+   if (v == null || v === '') return 0;
+   const n = Number(v);
+   return isNaN(n) ? 0 : Math.max(0, Math.min(255, Math.round(n)));
+  };
+
+  for (let row = 1; row < data.length; row++) {
+   const rowData = data[row];
+   if (!rowData || rowData[codeColIndex] == null) continue;
+   const rowCode = String(rowData[codeColIndex]).trim();
+   if (rowCode !== code) continue;
+
+   let hex = hexColIndex >= 0 && rowData[hexColIndex] != null ? String(rowData[hexColIndex]).trim() : '';
+   if (hex && !hex.startsWith('#')) hex = '#' + hex;
+
+   const colorName =
+    colorNameColIndex >= 0 && rowData[colorNameColIndex] != null
+     ? String(rowData[colorNameColIndex]).trim()
+     : rowCode;
+
+   const c = cCol >= 0 ? toNum(rowData[cCol]) : 0;
+   const m = mCol >= 0 ? toNum(rowData[mCol]) : 0;
+   const y = yCol >= 0 ? toNum(rowData[yCol]) : 0;
+   const k = kCol >= 0 ? toNum(rowData[kCol]) : 0;
+
+   const r = rCol >= 0 ? toNum255(rowData[rCol]) : 0;
+   const g = gCol >= 0 ? toNum255(rowData[gCol]) : 0;
+   const b = bCol >= 0 ? toNum255(rowData[bCol]) : 0;
+
+   const color = {
+    hex: hex || '#000000',
+    colorName,
+    cmyk: { c, m, y, k },
+    rgb: { r, g, b }
+   };
+   return { success: true, color };
+  }
+
+  return { success: false, error: `No row with Code "${code}" in COLOR_CODE_LOOKUP.xlsx` };
+ } catch (error) {
+  console.error('[getColorByCodeFromLookup] Error:', error);
+  return { success: false, error: error.message || 'Failed to read COLOR_CODE_LOOKUP.xlsx' };
+ }
+}
+
 async function getGraphicPlacementOptions(documentPath) {
  try {
   let excelFilePath;
@@ -1012,6 +1125,16 @@ class Leap {
     success: false,
     error: error.message
    };
+  }
+ }
+
+ async getColorByCodeFromLookup(colorCode) {
+  try {
+   const result = await getColorByCodeFromLookup(colorCode);
+   return result;
+  } catch (error) {
+   console.error('[Leap.getColorByCodeFromLookup] Error:', error);
+   return { success: false, error: error.message };
   }
  }
 

@@ -86,6 +86,11 @@ export class AppComponent implements OnInit, OnDestroy {
  onTabChange(index: number): void {
   this.activeTab = index;
   this.selectedMenuOption = null;
+  // Refetch document/XMP when switching to Separations tab so UI shows correct hasVersionDocument / isSeparatedDoc
+  if (index === 1) {
+   this.documentRefreshKey++;
+   this.cdr.detectChanges();
+  }
  }
 
  onMenuOptionClick(title: string): void {

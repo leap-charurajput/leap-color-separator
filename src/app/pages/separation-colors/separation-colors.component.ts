@@ -374,7 +374,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
         console.log(
          '[SEPARATION] Should show table?',
          !this.isLoadingSwatches &&
-          (this.isSeparatedDoc || (!this.isLoadingGraphics && this.graphicOptions.length > 0))
+         (this.isSeparatedDoc || (!this.isLoadingGraphics && this.graphicOptions.length > 0))
         );
        } else {
         console.log(
@@ -557,9 +557,9 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
     return fallbackProfilePromise.then((fallbackProfileResult: any) => {
      const fallbackProfile =
       fallbackProfileResult &&
-      fallbackProfileResult.success &&
-      fallbackProfileResult.profileInfo &&
-      fallbackProfileResult.profileInfo.found
+       fallbackProfileResult.success &&
+       fallbackProfileResult.profileInfo &&
+       fallbackProfileResult.profileInfo.found
        ? fallbackProfileResult.profileInfo
        : null;
 
@@ -609,7 +609,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
      console.log(
       '[SEPARATION] Should show table?',
       !this.isLoadingSwatches &&
-       (this.isSeparatedDoc || (!this.isLoadingGraphics && this.graphicOptions.length > 0))
+      (this.isSeparatedDoc || (!this.isLoadingGraphics && this.graphicOptions.length > 0))
      );
     });
    })
@@ -915,14 +915,14 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
    const updatedRows = this.colorRows.map((row) =>
     row.id === this.editingRow!.id
      ? {
-        ...row,
-        colorName: plateData.colorName,
-        mesh: plateData.mesh,
-        micron: plateData.micron,
-        flashEnabled: plateData.flashEnabled,
-        coolEnabled: plateData.coolEnabled,
-        wbEnabled: plateData.wbEnabled
-       }
+      ...row,
+      colorName: plateData.colorName,
+      mesh: plateData.mesh,
+      micron: plateData.micron,
+      flashEnabled: plateData.flashEnabled,
+      coolEnabled: plateData.coolEnabled,
+      wbEnabled: plateData.wbEnabled
+     }
      : row
    );
    this.colorRows = updatedRows;
@@ -958,19 +958,19 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
    const updatedRows = this.colorRows.map((row) =>
     row.id === this.editingRow!.id
      ? {
-        ...row,
-        colorName: plateData.colorName,
-        components: plateData.components,
-        mesh: plateData.mesh,
-        micron: plateData.micron,
-        flashEnabled: plateData.flashEnabled,
-        coolEnabled: plateData.coolEnabled,
-        wbEnabled: plateData.wbEnabled,
-        specialInk: plateData.specialInk,
-        specialInkValue: plateData.specialInkValue,
-        generateChoke: plateData.generateChoke,
-        chokeColor: plateData.chokeColor
-       }
+      ...row,
+      colorName: plateData.colorName,
+      components: plateData.components,
+      mesh: plateData.mesh,
+      micron: plateData.micron,
+      flashEnabled: plateData.flashEnabled,
+      coolEnabled: plateData.coolEnabled,
+      wbEnabled: plateData.wbEnabled,
+      specialInk: plateData.specialInk,
+      specialInkValue: plateData.specialInkValue,
+      generateChoke: plateData.generateChoke,
+      chokeColor: plateData.chokeColor
+     }
      : row
    );
    this.colorRows = updatedRows;
@@ -1200,7 +1200,6 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  }
 
  getAvailableColors(): string[] {
-  console.log('[SEPARATION] Getting available separation colors', this.colorRows);
   return this.colorRows
    .filter((row) => row.type === 'separation' && !/ub/i.test(row.colorName))
    .map((row) => row.colorName);
