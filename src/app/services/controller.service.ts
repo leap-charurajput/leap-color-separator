@@ -798,6 +798,9 @@ getAppVersion();
 		psOptions.binaryPrinting = false;
 		psOptions.imageCompression = PostScriptImageCompressionType.IMAGECOMPRESSIONNONE
 
+    var printCoordinateOptions = new PrintCoordinateOptions();
+    printCoordinateOptions.fitToPage = true;
+
     // Print options
 		var printOptions = new PrintOptions();
     printOptions.colorSeparationOptions = colorSepOptions;
@@ -807,6 +810,7 @@ getAppVersion();
     printOptions.jobOptions = jobOptions;
     printOptions.pageMarksOptions = marksOptions;
     // printOptions.paperOptions = paperOptions;
+    printOptions.coordinateOptions = printCoordinateOptions;
     printOptions.postScriptOptions = psOptions;
     printOptions.PPDName = 'IBlock v2';
 
