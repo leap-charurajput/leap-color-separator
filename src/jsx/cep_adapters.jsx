@@ -715,6 +715,7 @@ function handlePerformSeparation(params_string) {
     sepDoc.save();
     loadLEAPColorSepsActions();
     splitColors(graphicName);
+    deleteNonFillStrokeItems();
     generateUnderbase(graphicName);
     setOverprintOnSeparatedArt(sepDoc);
     unloadLEAPColorSepsActions();
@@ -866,6 +867,7 @@ function handleRecreatePlatesInActiveDocument(params_string) {
     var doc = app.activeDocument;
     loadLEAPColorSepsActions();
     splitColors(graphicName);
+    deleteNonFillStrokeItems();
     generateUnderbase(graphicName);
     setOverprintOnSeparatedArt(doc);
     unloadLEAPColorSepsActions();

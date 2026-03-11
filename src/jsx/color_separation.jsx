@@ -15,6 +15,7 @@ function splitColors(_graphicName) {
 		app.redraw();
 		expandObject();
 		app.executeMenuCommand('group');
+		pathFinderDivide();
 		var _processItem = app.selection[0];
 		app.selection = null;
 
@@ -72,7 +73,12 @@ function generateUnderbase(_graphicName) {
 		app.activeDocument.activeLayer.hasSelectedArtwork = true;
 		app.redraw();
 
-		pathFinderMerge();
+		pathFinderDivide();
+		app.executeMenuCommand('ungroup');
+		deleteNonFillStrokeItems();
+		// pathFinderMerge();
+		app.activeDocument.activeLayer = whiteUBLayer;
+		app.activeDocument.activeLayer.hasSelectedArtwork = true;
 		app.redraw();
 
 		applySwatchToFill(app.activeDocument, CONSTANTS.SWATCH_NAMES.WHITE_UB);
