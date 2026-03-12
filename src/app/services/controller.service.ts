@@ -231,7 +231,7 @@ export class ControllerService {
       if (links.leapTemplatePath) result.data.leapTemplatePath = links.leapTemplatePath;
       if (links.leapTemplateName) result.data.leapTemplateName = links.leapTemplateName;
      }
-    } catch (_) {}
+    } catch (_) { }
     return result;
    })
    .catch(() => result);
@@ -688,13 +688,80 @@ export class ControllerService {
   this.log('exportPrintGuidePDF called');
 
   return this.ensureSession().then(() => {
-   return (window as any).leap
-    .scriptLoader()
-    .evalScript('handleExportPrintGuidePDF', {})
-    .then((res: string) => {
-     const result = JSON.parse(res);
+   const script = `
+(function() {
+  try {
+    if (!app.documents.length) {
+      return JSON.stringify({
+        success: false,
+        error: "No active document found"
+      });
+    }
 
-     return result;
+    var doc = app.activeDocument;
+
+    if (!doc.artboards || doc.artboards.length === 0) {
+      return JSON.stringify({
+        success: false,
+        error: "No artboards found in document"
+      });
+    }
+
+    var pgArtboardIndex = -1;
+    for (var i = 0; i < doc.artboards.length; i++) {
+      var ab = doc.artboards[i];
+      var name = (ab && ab.name != null) ? ab.name.toString() : "";
+      if (name && name.toUpperCase() === "PG") {
+        pgArtboardIndex = i;
+        break;
+      }
+    }
+
+    if (pgArtboardIndex === -1) {
+      return JSON.stringify({
+        success: false,
+        error: "Artboard named \\"PG\\" not found"
+      });
+    }
+
+    var docFile = new File(doc.fullName);
+    var docFolder = docFile.parent;
+    var docName = docFile.name.replace(/\\.[^\\.]+$/, "");
+    var destFile = new File(docFolder.fsName + "/" + docName + "_PrintGuide.pdf");
+
+    var pdfOptions = new PDFSaveOptions();
+    pdfOptions.artboardRange = (pgArtboardIndex + 1).toString(); // 1-based index as string
+    pdfOptions.compatibility = PDFCompatibility.ACROBAT5;
+    pdfOptions.generateThumbnails = true;
+    pdfOptions.preserveEditability = false;
+
+    // Save only the PG artboard as PDF
+    doc.saveAs(destFile, pdfOptions);
+
+    return JSON.stringify({
+      success: true,
+      message: "Print Guide PDF exported successfully",
+      filePath: destFile.fsName,
+      artboardName: "PG",
+      artboardIndex: pgArtboardIndex
+    });
+  } catch (e) {
+    return JSON.stringify({
+      success: false,
+      error: "Error exporting Print Guide PDF: " + (e.message || e.toString())
+    });
+  }
+})();
+`;
+
+   return evalScript(script)
+    .then((res: any) => {
+     const str = typeof res === 'string' ? res : '';
+     try {
+      return str ? JSON.parse(str) : { success: false, error: 'Empty response from host' };
+     } catch (e) {
+      return { success: false, error: 'Invalid JSON response from host', raw: str };
+     }
     })
     .catch((err: any) => {
      throw err;
@@ -831,13 +898,79 @@ export class ControllerService {
   this.log('exportSeparationsPreviewPDF called');
 
   return this.ensureSession().then(() => {
-   return (window as any).leap
-    .scriptLoader()
-    .evalScript('handleExportSeparationsPreviewPDF', {})
-    .then((res: string) => {
-     const result = JSON.parse(res);
+   const script = `
+(function() {
+  try {
+    if (!app.documents.length) {
+      return JSON.stringify({
+        success: false,
+        error: "No active document found"
+      });
+    }
 
-     return result;
+    var doc = app.activeDocument;
+
+    if (!doc.artboards || doc.artboards.length === 0) {
+      return JSON.stringify({
+        success: false,
+        error: "No artboards found in document"
+      });
+    }
+
+    var gridArtboardIndex = -1;
+    for (var i = 0; i < doc.artboards.length; i++) {
+      var ab = doc.artboards[i];
+      var name = (ab && ab.name != null) ? ab.name.toString() : "";
+      if (name && name.toUpperCase() === "GRID") {
+        gridArtboardIndex = i;
+        break;
+      }
+    }
+
+    if (gridArtboardIndex === -1) {
+      return JSON.stringify({
+        success: false,
+        error: "Artboard named \\"Grid\\" not found"
+      });
+    }
+
+    var docFile = new File(doc.fullName);
+    var docFolder = docFile.parent;
+    var docName = docFile.name.replace(/\\.[^\\.]+$/, "");
+    var destFile = new File(docFolder.fsName + "/" + docName + "_SeparationsPreview.pdf");
+
+    var pdfOptions = new PDFSaveOptions();
+    pdfOptions.artboardRange = (gridArtboardIndex + 1).toString();
+    pdfOptions.compatibility = PDFCompatibility.ACROBAT5;
+    pdfOptions.generateThumbnails = true;
+    pdfOptions.preserveEditability = false;
+
+    doc.saveAs(destFile, pdfOptions);
+
+    return JSON.stringify({
+      success: true,
+      message: "Separations Preview PDF exported successfully",
+      filePath: destFile.fsName,
+      artboardName: "Grid",
+      artboardIndex: gridArtboardIndex
+    });
+  } catch (e) {
+    return JSON.stringify({
+      success: false,
+      error: "Error exporting Separations Preview PDF: " + (e.message || e.toString())
+    });
+  }
+})();
+`;
+
+   return evalScript(script)
+    .then((res: any) => {
+     const str = typeof res === 'string' ? res : '';
+     try {
+      return str ? JSON.parse(str) : { success: false, error: 'Empty response from host' };
+     } catch (e) {
+      return { success: false, error: 'Invalid JSON response from host', raw: str };
+     }
     })
     .catch((err: any) => {
      throw err;
@@ -967,8 +1100,8 @@ export class ControllerService {
  ): Promise<any> {
   this.log(
    'performSeparation called for: ' +
-    graphicName +
-    (options?.recreateInActiveDoc ? ' (recreate in active doc)' : '')
+   graphicName +
+   (options?.recreateInActiveDoc ? ' (recreate in active doc)' : '')
   );
 
   return this.ensureSession().then(() => {
@@ -1190,7 +1323,7 @@ export class ControllerService {
   });
  }
 
- private log(val: string): void {}
+ private log(val: string): void { }
 
  private get name(): string {
   return 'Client Controller:: ';
