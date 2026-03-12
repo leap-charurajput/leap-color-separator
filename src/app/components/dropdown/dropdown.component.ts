@@ -19,6 +19,7 @@ export class DropdownComponent implements OnChanges {
 	isOpen = false;
 	selectedValue = '';
 	dropdownWidth = 0;
+	private lastOpenTime = 0;
 	positions: ConnectedPosition[] = [
 		{
 			originX: 'start',
@@ -56,6 +57,9 @@ export class DropdownComponent implements OnChanges {
 		}
 
 		this.isOpen = !this.isOpen;
+		if (this.isOpen) {
+			this.lastOpenTime = Date.now();
+		}
 		this.cdr.detectChanges();
 	}
 
@@ -71,6 +75,11 @@ export class DropdownComponent implements OnChanges {
 	}
 
 	onBackdropClick(): void {
+		// Ignore backdrop clicks within 150ms of opening - prevents the opening click
+		// from being treated as a backdrop click (CDK overlay known behavior)
+		if (Date.now() - this.lastOpenTime < 150) {
+			return;
+		}
 		this.isOpen = false;
 		this.cdr.detectChanges();
 	}

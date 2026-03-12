@@ -34,7 +34,12 @@
        "src/assets",
        "src/libs",
        "src/leap-dist.js",
-       "src/leap-dist.js.map"
+       "src/leap-dist.js.map",
+       {
+        "glob": "**/*",
+        "input": "src/jsx",
+        "output": "/jsx"
+       }
       ],
       "styles": ["src/styles.css"],
       "scripts": ["src/libs/CSInterface.js", "src/leap-dist.js"]

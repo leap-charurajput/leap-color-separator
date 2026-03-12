@@ -1,4 +1,5 @@
 import { Component, OnInit } from '@angular/core';
+import { csInterface } from '../../../libs/helper';
 import { ControllerService } from '../../services/controller.service';
 
 interface Profile {
@@ -24,6 +25,8 @@ export class SettingsComponent implements OnInit {
  selectedProfile: Profile | null = null;
  defaultMesh = '110';
  addUnderbase = true;
+ artistName = '';
+ artistInitials = '';
  selectedSection = 'Separation Profiles';
 
  // 🔑 Environment config
@@ -37,10 +40,14 @@ export class SettingsComponent implements OnInit {
 
  selectedEnvironmentKey: keyof typeof this.environments = 'Production';
 
+ leapServerPath = '';
+
  constructor(private controller: ControllerService) {}
 
  async ngOnInit(): Promise<void> {
   this.loadProfiles();
+  this.loadLeapServerPath();
+  this.loadGeneralSettings();
 
   try {
    const result = await this.controller.getAppVersion();
@@ -66,10 +73,56 @@ export class SettingsComponent implements OnInit {
 
   this.controller.saveAppVersion(this.selectedEnvironmentUrl).then((result) => {
    if (result) {
-    alert('Restart Adobe Illustrator for this change to take effect');
     // console.log('Environment URL saved:', this.selectedEnvironmentUrl);
+    // This reloads the panel iframe correctly
+    csInterface.evalScript('app.redraw()');
+
+    // Reload HTML
+    window.location.reload();
+    alert('Restart Adobe Illustrator for this change to take effect');
    } else {
     alert('Failed to save environment URL');
+   }
+  });
+ }
+
+ loadGeneralSettings(): void {
+  this.controller.loadGeneralSettings().then((result) => {
+   if (result.success && result.data) {
+    this.defaultMesh = result.data.defaultMesh != null ? String(result.data.defaultMesh) : '110';
+    this.addUnderbase = result.data.addUnderbase !== undefined ? result.data.addUnderbase : true;
+    this.artistName = result.data.artistName != null ? String(result.data.artistName) : '';
+    this.artistInitials = result.data.artistInitials != null ? String(result.data.artistInitials) : '';
+   }
+  });
+ }
+
+ saveGeneralSettings(): void {
+  const settings = {
+   defaultMesh: this.defaultMesh,
+   addUnderbase: this.addUnderbase,
+   artistName: this.artistName,
+   artistInitials: this.artistInitials
+  };
+  this.controller.saveGeneralSettings(settings).then((result) => {
+   if (!result.success) {
+    console.error('Failed to save general settings:', result.error);
+   }
+  });
+ }
+
+ loadLeapServerPath(): void {
+  this.controller.getLeapServerDataPath().then((path) => {
+   this.leapServerPath = path;
+  });
+ }
+
+ onChooseLeapPath(): void {
+  this.controller.selectAndSaveLeapSettings().then((result) => {
+   if (result.success && result.path) {
+    this.leapServerPath = result.path;
+   } else if (!result.cancelled) {
+    // console.error('Error updating LEAP Data path', result.error);
    }
   });
  }

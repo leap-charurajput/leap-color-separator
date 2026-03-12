@@ -134,3 +134,18 @@
 .disabled-row {
 	opacity: 0.5;
 }
+
+.sep-doc-link-row {
+	cursor: pointer;
+	padding: 10px 0;
+}
+
+.sep-file-link {
+	text-decoration: underline;
+	cursor: pointer;
+	font-style: italic;
+}
+
+.ml-10 {
+	margin-left: 10px;
+}

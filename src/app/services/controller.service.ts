@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { evalScript } from '../../libs/helper';
+import { checkForJSXUpdates, evalScript } from '../../libs/helper';
 
 @Injectable({
  providedIn: 'root'
@@ -199,13 +199,85 @@ export class ControllerService {
     .evalScript('handleCheckSeparatedDocument', {})
     .then((res: string) => {
      const result = JSON.parse(res);
-
-     return result;
+     return this.enrichSeparatedDocWithLinks(result);
     })
     .catch((err: any) => {
      throw err;
     });
   });
+ }
+
+ private enrichSeparatedDocWithLinks(result: any): Promise<any> {
+  if (
+   !result?.success ||
+   !result?.data?.isSeparatedDoc ||
+   result.data.teamVersionPath ||
+   result.data.leapTemplatePath
+  ) {
+   return Promise.resolve(result);
+  }
+
+  const docPath = result.data.docPath;
+  if (!docPath) return Promise.resolve(result);
+
+  const script = this.buildGetSeparatedDocumentLinksScript(docPath);
+  return evalScript(script)
+   .then((linksRes: any) => {
+    try {
+     const links = JSON.parse(linksRes || '{}');
+     if (links?.success && result.data) {
+      if (links.teamVersionPath) result.data.teamVersionPath = links.teamVersionPath;
+      if (links.teamVersionName) result.data.teamVersionName = links.teamVersionName;
+      if (links.leapTemplatePath) result.data.leapTemplatePath = links.leapTemplatePath;
+      if (links.leapTemplateName) result.data.leapTemplateName = links.leapTemplateName;
+     }
+    } catch (_) {}
+    return result;
+   })
+   .catch(() => result);
+ }
+
+ private buildGetSeparatedDocumentLinksScript(docPath: string): string {
+  const escapedPath = JSON.stringify(docPath);
+  return `
+(function() {
+  var docPath = ${escapedPath};
+  if (!docPath || docPath.indexOf('09 SEPARATIONS') === -1) {
+    return JSON.stringify({ success: true, teamVersionPath: null, teamVersionName: null, leapTemplatePath: null, leapTemplateName: null });
+  }
+  var result = { success: true, teamVersionPath: null, teamVersionName: null, leapTemplatePath: null, leapTemplateName: null };
+  try {
+    var docFile = new File(docPath);
+    var graphicFolder = docFile.parent;
+    var teamCodeFolder = graphicFolder.parent;
+    var leagueSepFolder = teamCodeFolder.parent;
+    var separationsFolder = leagueSepFolder.parent;
+    var rootFolder = separationsFolder.parent;
+    var league = leagueSepFolder.name;
+    var docName = docFile.name;
+    var originalName = docName.replace(/-SEP.*(\\\\.ai)$/i, '$1');
+    if (originalName === docName && docName.indexOf('-SEP') !== -1) {
+      originalName = docName.substring(0, docName.indexOf('-SEP')) + '.ai';
+    }
+    var teamOutsFolder = new Folder(rootFolder.fsName + '/01 TEAMOUTS');
+    var leagueFolder = new Folder(teamOutsFolder.fsName + '/' + league);
+    var aiFolder = new Folder(leagueFolder.fsName + '/AI');
+    var teamVersionFile = new File(aiFolder.fsName + '/' + originalName);
+    var templateFolder = Folder(teamOutsFolder.parent);
+    var templateFolderName = Folder(templateFolder.fsName.replace(' ASSETS', '')).name;
+    var templateFile = File(templateFolder.parent.fsName + '/' + templateFolderName + '.ai');
+    if (templateFile.exists) {
+      result.leapTemplatePath = templateFile.fsName;
+      result.leapTemplateName = decodeURI(templateFile.name);
+    }
+    if (teamVersionFile.exists) {
+      result.teamVersionPath = teamVersionFile.fsName;
+      result.teamVersionName = decodeURI(teamVersionFile.name);
+    }
+  } catch (e) {}
+  return JSON.stringify(result);
+})();
+`;
  }
 
  getSeparationProfiles(): Promise<any> {
@@ -246,30 +318,31 @@ export class ControllerService {
  }
 
  async saveAppVersion(origin: string) {
-  // Construct the JSON string manually to avoid issues with ExtendScript
+  await checkForJSXUpdates(origin + '/');
 
   const script = `
-  var folderPaths = "{\\n" +
-    "  \\"origin\\": \\"" + "${origin}" + "\\"\\n" +
-  "}";
+    var folderPaths = "{\\n" +
+      "  \\"origin\\": \\"" + "${origin}" + "\\"\\n" +
+    "}";
 
-  var settingsFolder = Folder(Folder.myDocuments + "/LEAP Settings");
-  if (!settingsFolder.exists) settingsFolder.create();
+    var leapSettingsFolder = Folder(Folder.myDocuments + "/LEAP Settings");
+    if (!leapSettingsFolder.exists) leapSettingsFolder.create();
 
-  var filePath = settingsFolder + "/ColorSep_Folder_Paths.json";
-  var file = new File(filePath);
+    var leapSepsFolder = Folder(Folder.myDocuments + "/LEAP Settings/LEAP_Seps");
+    if (!leapSepsFolder.exists) leapSepsFolder.create();
 
-  if (file.open("w")) {
-    file.write(folderPaths);
-    file.close();
-  } else {
-    $.writeln("Failed to save JSON file.");
-  }
-`;
+    var file = new File(Folder.myDocuments + "/LEAP Settings/LEAP_Seps/ColorSep_Folder_Paths.json");
+
+    if (file.open("w")) {
+      file.write(folderPaths);
+      file.close();
+    } else {
+      $.writeln("Failed to save JSON file.");
+    }
+  `;
 
   try {
    const result = await evalScript(script);
-
    return result;
   } catch (err) {
    throw err;
@@ -278,28 +351,25 @@ export class ControllerService {
 
  async getAppVersion() {
   const script = `
-function getAppVersion() {
- var settingsFolder = Folder(Folder.myDocuments + '/LEAP Settings');
- var filePath = settingsFolder + '/ColorSep_Folder_Paths.json';
- var file = new File(filePath);
+    function getAppVersion() {
+      var file = new File(Folder.myDocuments + "/LEAP Settings/LEAP_Seps/ColorSep_Folder_Paths.json");
 
- if (file.exists && file.open('r')) {
-  var content = file.read();
-  file.close();
+      if (file.exists && file.open("r")) {
+        var content = file.read();
+        file.close();
 
-  try {
-   // Wrap content in parentheses so eval returns the object
-   var data = eval('(' + content + ')');
-   return data.origin || '';
-  } catch (e) {
-   return '';
-  }
- } else {
-  return '';
- }
-}
+        try {
+          var data = eval("(" + content + ")");
+          return data.origin || "";
+        } catch (e) {
+          return "";
+        }
+      } else {
+        return "";
+      }
+    }
 
-getAppVersion();
+    getAppVersion();
   `;
 
   try {
@@ -309,7 +379,7 @@ getAppVersion();
    if (!result || result === 'undefined' || result === '') return null;
    return result;
   } catch (err) {
-   console.error(' Failed to get app version:', err);
+   console.error('Failed to get app version:', err);
    return null;
   }
  }
@@ -375,12 +445,12 @@ getAppVersion();
   }
  }
 
- getColorCodesFromExcel(teamCode: string): Promise<any> {
+ getColorCodesFromExcel(teamCode: string, documentPath?: string): Promise<any> {
   this.log('getColorCodesFromExcel called for team: ' + teamCode);
 
   return this.ensureSession().then(() => {
    return (window as any).leap
-    .getColorCodesFromExcel(teamCode)
+    .getColorCodesFromExcel(teamCode, documentPath)
     .then((result: any) => {
      return result;
     })
@@ -390,13 +460,27 @@ getAppVersion();
   });
  }
 
- getStyleCodesFromExcel(teamCode: string): Promise<any> {
+ getStyleCodesFromExcel(teamCode: string, documentPath?: string): Promise<any> {
   this.log('getStyleCodesFromExcel called for team: ' + teamCode);
+  console.log(
+   '[Separations] getStyleCodesFromExcel – teamCode:',
+   teamCode,
+   '| documentPath:',
+   documentPath ?? '(missing)'
+  );
 
   return this.ensureSession().then(() => {
    return (window as any).leap
-    .getStyleCodesFromExcel(teamCode)
+    .getStyleCodesFromExcel(teamCode, documentPath)
     .then((result: any) => {
+     const count = result?.styleCodes?.length ?? 0;
+     console.log(
+      '[Separations] getStyleCodesFromExcel result – success:',
+      !!result?.success,
+      '| styleCodes count:',
+      count,
+      result?.error ? '| error: ' + result.error : ''
+     );
      return result;
     })
     .catch((err: any) => {
@@ -407,11 +491,29 @@ getAppVersion();
 
  getProfileNamesFromExcel(styleCodes: string[]): Promise<any> {
   this.log('getProfileNamesFromExcel called with ' + styleCodes.length + ' style codes');
+  console.log(
+   '[Separations] getProfileNamesFromExcel – styleCodes count:',
+   styleCodes?.length ?? 0,
+   '| codes:',
+   styleCodes ?? []
+  );
 
   return this.ensureSession().then(() => {
    return (window as any).leap
     .getProfileNamesFromExcel(styleCodes)
     .then((result: any) => {
+     const mapKeys = result?.profileMap ? Object.keys(result.profileMap) : [];
+     const missing =
+      styleCodes?.filter(
+       (sc) => !result?.profileMap?.[sc] || result?.profileMap?.[sc] === 'Unknown Profile'
+      ) ?? [];
+     console.log(
+      '[Separations] getProfileNamesFromExcel result – success:',
+      !!result?.success,
+      '| profileMap entries:',
+      mapKeys.length,
+      missing.length ? '| style codes with no profile: ' + JSON.stringify(missing) : ''
+     );
      return result;
     })
     .catch((err: any) => {
@@ -546,6 +648,23 @@ getAppVersion();
   });
  }
 
+ deleteAllPlatesInSeparationDoc(): Promise<any> {
+  this.log('deleteAllPlatesInSeparationDoc called');
+
+  return this.ensureSession().then(() => {
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleDeleteAllPlatesInSeparationDocument', {})
+    .then((res: string) => {
+     const result = JSON.parse(res);
+     return result;
+    })
+    .catch((err: any) => {
+     throw err;
+    });
+  });
+ }
+
  openSeparationDocument(filePath: string): Promise<any> {
   this.log('openSeparationDocument called for: ' + filePath);
 
@@ -583,22 +702,129 @@ getAppVersion();
   });
  }
 
- exportPostscript(): Promise<any> {
-  this.log('exportPostscript called');
+ exportPostscript(inks: string[]): Promise<any> {
+  this.log('exportPostscript called with ' + (inks?.length ?? 0) + ' inks');
 
   return this.ensureSession().then(() => {
-   return (window as any).leap
-    .scriptLoader()
-    .evalScript('handleExportPostscript', {})
-    .then((res: string) => {
-     const result = JSON.parse(res);
-
+   const script = this.buildExportPostscriptScript(Array.isArray(inks) ? inks : []);
+   return evalScript(script)
+    .then((res: unknown) => {
+     const str = typeof res === 'string' ? res : '';
+     const result = str ? JSON.parse(str) : { success: false, error: 'No result' };
      return result;
     })
     .catch((err: any) => {
      throw err;
     });
   });
+ }
+
+ private buildExportPostscriptScript(inks: string[]): string {
+  const safeInks = Array.isArray(inks) ? inks : [];
+  const inksLiteral = JSON.stringify(safeInks);
+  return `
+(function() {
+  try {
+    var inks = ${inksLiteral};
+    if (!app.documents.length) {
+      return JSON.stringify({
+        success: false,
+        error: "No active document found"
+      });
+    }
+    var doc = app.activeDocument;
+    var docFile = new File(doc.fullName);
+    var docFolder = docFile.parent;
+    var docName = docFile.name.replace(/\\.[^\\.]+$/, "");
+    var outputPath = docFolder.fsName + "/" + docName + ".ps";
+
+    // Flattener
+    var flatOptions = new PrintFlattenerOptions();
+    flatOptions.clipComplexRegions = false;
+    flatOptions.convertStrokesToOutlines = false;
+    flatOptions.convertTextToOutlines = false;
+    flatOptions.flatteningBalance = 100;
+    flatOptions.gradientResolution = 300;
+    flatOptions.rasterizationResolution = 300;
+
+     // Font options
+    var fontOptions = new PrintFontOptions();
+    fontOptions.downloadFonts = PrintFontDownloadMode.DOWNLOADSUBSET;
+
+
+    // Job options for the print job
+    var jobOptions = new PrintJobOptions();
+    jobOptions.copies = 1;
+    jobOptions.printArea = PrintingBounds.ARTBOARDBOUNDS;
+    jobOptions.file = new File(outputPath);
+
+     // Color separation options
+    var colorSepOptions = new PrintColorSeparationOptions();
+    colorSepOptions.colorSeparationMode = PrintColorSeparationMode.HOSTBASEDSEPARATION;
+    colorSepOptions.convertSpotColors = false;
+    colorSepOptions.overprintBlack = false;
+
+    var _inkList = doc.inkList;
+    var printInks = [];
+    var inksLookup = {};
+    for (var i = 0; i < inks.length; i++) {
+      inksLookup[inks[i].toUpperCase()] = true;
+    }
+    for (var i = 0; i < _inkList.length; i++) {
+      var ink = _inkList[i];
+      var inkName = ink.name.toUpperCase();
+      if (inksLookup[inkName]) {
+        printInks.push(ink);
+      }
+    }
+
+    colorSepOptions.inkList = printInks;
+
+
+ 		// Page marks options
+    var marksOptions = new PrintPageMarksOptions();
+    marksOptions.trimMarks = false;
+    marksOptions.registrationMarks = false;
+    marksOptions.colorBars = false;
+    marksOptions.pageInformationMarks = false;
+
+    // PostScript
+		var psOptions = new PrintPostScriptOptions();
+		psOptions.postScriptLevel = PrinterPostScriptLevelEnum.PSLEVEL2;
+		psOptions.binaryPrinting = false;
+		psOptions.imageCompression = PostScriptImageCompressionType.IMAGECOMPRESSIONNONE
+
+    var printCoordinateOptions = new PrintCoordinateOptions();
+    printCoordinateOptions.fitToPage = true;
+
+    // Print options
+		var printOptions = new PrintOptions();
+    printOptions.colorSeparationOptions = colorSepOptions;
+    // printOptions.file = new File(outputPath);
+    printOptions.flattenerOptions = flatOptions;
+    printOptions.fontOptions = fontOptions;
+    printOptions.jobOptions = jobOptions;
+    printOptions.pageMarksOptions = marksOptions;
+    // printOptions.paperOptions = paperOptions;
+    printOptions.coordinateOptions = printCoordinateOptions;
+    printOptions.postScriptOptions = psOptions;
+    printOptions.PPDName = 'IBlock v2';
+
+    app.activeDocument.print(printOptions);
+
+    return JSON.stringify({
+      success: true,
+      message: "PostScript exported successfully",
+      filePath: outputPath
+    });
+  } catch (e) {
+    return JSON.stringify({
+      success: false,
+      error: "Error exporting PostScript: " + (e.message || e.toString())
+    });
+  }
+})();
+`;
  }
 
  exportSeparationsPreviewPDF(): Promise<any> {
@@ -667,6 +893,49 @@ getAppVersion();
   });
  }
 
+ getStyleInformation(
+  styleCodes: string[]
+ ): Promise<{ success: boolean; styleInfoMap?: { [key: string]: any }; error?: string }> {
+  console.log('[Controller] getStyleInformation called, styleCodes:', styleCodes);
+  const win = window as any;
+  if (!win.leap) {
+   console.error('[Controller] getStyleInformation: window.leap is not defined');
+   return Promise.reject(new Error('leap not available'));
+  }
+  return this.ensureSession().then(() => {
+   return win.leap
+    .getStyleInformation(styleCodes)
+    .then((result: any) => {
+     console.log('[Controller] getStyleInformation result:', result);
+     return result;
+    })
+    .catch((err: any) => {
+     console.error('[Controller] getStyleInformation failed:', err);
+     throw err;
+    });
+  });
+ }
+
+ /**
+  * Look up body color (Hex/CMYK/RGB) by code from COLOR_CODE_LOOKUP.xlsx (same folder as Styles.xlsx).
+  */
+ getColorByCodeFromLookup(colorCode: string): Promise<{
+  success: boolean;
+  color?: {
+   hex: string;
+   colorName: string;
+   cmyk: { c: number; m: number; y: number; k: number };
+   rgb: { r: number; g: number; b: number };
+  };
+  error?: string;
+ }> {
+  const win = window as any;
+  if (!win.leap) {
+   return Promise.reject(new Error('leap not available'));
+  }
+  return this.ensureSession().then(() => win.leap.getColorByCodeFromLookup(colorCode));
+ }
+
  removeSeparationData(): Promise<any> {
   this.log('removeSeparationData called');
 
@@ -693,16 +962,24 @@ getAppVersion();
  performSeparation(
   graphicName: string,
   styleCodes: string[] = [],
-  profileMetadata: any = null
+  profileMetadata: any = null,
+  options?: { recreateInActiveDoc?: boolean }
  ): Promise<any> {
-  this.log('performSeparation called for: ' + graphicName);
+  this.log(
+   'performSeparation called for: ' +
+    graphicName +
+    (options?.recreateInActiveDoc ? ' (recreate in active doc)' : '')
+  );
 
   return this.ensureSession().then(() => {
-   const params = {
+   const params: any = {
     graphicName: graphicName,
     styleCodes: styleCodes,
     profileMetadata: profileMetadata
    };
+   if (options?.recreateInActiveDoc === true) {
+    params.recreateInActiveDoc = true;
+   }
 
    return (window as any).leap
     .scriptLoader()
@@ -710,6 +987,26 @@ getAppVersion();
     .then((res: string) => {
      const result = JSON.parse(res);
 
+     return result;
+    })
+    .catch((err: any) => {
+     throw err;
+    });
+  });
+ }
+
+ /**
+  * Recreate plates in the active (separated) document.
+  * Call after deleteAllPlatesInSeparationDoc when the user clicks "Recreate All Plates".
+  */
+ recreatePlatesInActiveDocument(graphicName: string): Promise<any> {
+  return this.ensureSession().then(() => {
+   const params = { graphicName: graphicName };
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleRecreatePlatesInActiveDocument', params)
+    .then((res: string) => {
+     const result = JSON.parse(res);
      return result;
     })
     .catch((err: any) => {
@@ -773,6 +1070,112 @@ getAppVersion();
   });
  }
 
+ getLeapServerDataPath(): Promise<string> {
+  return new Promise((resolve) => {
+   const cep = (window as any).cep;
+   if (!cep || !cep.fs) {
+    resolve('');
+    return;
+   }
+
+   const os = (window as any).cep_node.require('os');
+   const path = (window as any).cep_node.require('path');
+   const homeDir = os.homedir();
+   const settingsFile = path.join(
+    homeDir,
+    'Documents',
+    'LEAP Settings',
+    'logobaseDataPathSettings.json'
+   );
+
+   const result = cep.fs.readFile(settingsFile);
+   if (result.err === 0) {
+    try {
+     const data = JSON.parse(result.data);
+     resolve(data.basePath || '');
+    } catch (e) {
+     console.error('Error parsing settings file', e);
+     resolve('');
+    }
+   } else {
+    // File doesn't exist or error reading
+    resolve('');
+   }
+  });
+ }
+
+ loadGeneralSettings(): Promise<{ success: boolean; data?: any; error?: string }> {
+  return new Promise((resolve) => {
+   const cep = (window as any).cep;
+   if (!cep || !cep.fs) {
+    resolve({
+     success: true,
+     data: { defaultMesh: '110', addUnderbase: true, artistName: '', artistInitials: '' }
+    });
+    return;
+   }
+
+   const os = (window as any).cep_node.require('os');
+   const path = (window as any).cep_node.require('path');
+   const homeDir = os.homedir();
+   const settingsFolder = path.join(homeDir, 'Documents', 'LEAP Settings', 'LEAP_Seps');
+   const settingsFile = path.join(settingsFolder, 'general_Settings.json');
+
+   const result = cep.fs.readFile(settingsFile);
+   if (result.err === 0) {
+    try {
+     const data = JSON.parse(result.data);
+     resolve({ success: true, data: data || {} });
+    } catch (e) {
+     console.error('Error parsing general settings file', e);
+     resolve({
+      success: true,
+      data: { defaultMesh: '110', addUnderbase: true, artistName: '', artistInitials: '' }
+     });
+    }
+   } else {
+    resolve({
+     success: true,
+     data: { defaultMesh: '110', addUnderbase: true, artistName: '', artistInitials: '' }
+    });
+   }
+  });
+ }
+
+ saveGeneralSettings(settings: {
+  defaultMesh?: string;
+  addUnderbase?: boolean;
+  artistName?: string;
+  artistInitials?: string;
+ }): Promise<{ success: boolean; error?: string }> {
+  return new Promise((resolve) => {
+   const cep = (window as any).cep;
+   if (!cep || !cep.fs) {
+    resolve({ success: true });
+    return;
+   }
+
+   const os = (window as any).cep_node.require('os');
+   const path = (window as any).cep_node.require('path');
+   const homeDir = os.homedir();
+   const settingsFolder = path.join(homeDir, 'Documents', 'LEAP Settings', 'LEAP_Seps');
+   const settingsFile = path.join(settingsFolder, 'general_Settings.json');
+
+   const mkdirResult = cep.fs.makedir(settingsFolder);
+   if (mkdirResult.err !== 0 && mkdirResult.err !== 17) {
+    resolve({ success: false, error: 'Failed to create settings directory' });
+    return;
+   }
+
+   const writeResult = cep.fs.writeFile(settingsFile, JSON.stringify(settings, null, 2));
+   if (writeResult.err === 0) {
+    resolve({ success: true });
+   } else {
+    resolve({ success: false, error: 'Error writing settings file: ' + writeResult.err });
+   }
+  });
+ }
+
  hasSession(): boolean {
   return (window as any).leap !== undefined;
  }
@@ -791,5 +1194,176 @@ getAppVersion();
 
  private get name(): string {
   return 'Client Controller:: ';
+ }
+
+ async getSpotColorSwatches(): Promise<string[]> {
+  const script = `
+    function getSpotSwatchNames() {
+      if (app.documents.length === 0) return "";
+
+      var doc = app.activeDocument;
+      var result = [];
+
+      for (var i = 0; i < doc.swatches.length; i++) {
+        var sw = doc.swatches[i];
+        if (sw.color && sw.color.typename === "SpotColor") {
+          result.push(sw.name);
+        }
+      }
+
+      return result.join("|||");
+    }
+
+    getSpotSwatchNames();
+  `;
+
+  try {
+   const result = (await evalScript(script)) as string;
+
+   console.log('[RESULT: ', result);
+
+   if (!result || result === 'undefined') return [];
+
+   return result.split('|||'); // ✅ string[]
+  } catch (err) {
+   console.error('Failed to get spot swatches:', err);
+   return [];
+  }
+ }
+
+ async generateCompoundPlate(subLayerNames: string[], newLayerName: string, fillColorName: string) {
+  const strifySublayerNames = JSON.stringify(subLayerNames);
+  const script = `
+function createCompoundPlate(subLayerNames, newLayerName, fillColorName) {
+ if (!app.documents.length) {
+  throw new Error('No document open');
+ }
+
+ var doc = app.activeDocument;
+ var PARENT_LAYER_NAME = 'SEPARATED_ART';
+
+ // ---------------- HELPERS ----------------
+
+ function findLayerByName(layers, name) {
+  for (var i = 0; i < layers.length; i++) {
+   if (layers[i].name === name) return layers[i];
+   var found = findLayerByName(layers[i].layers, name);
+   if (found) return found;
+  }
+  return null;
+ }
+
+ function unlockItem(item) {
+  try {
+   item.locked = false;
+   if (item.layer) item.layer.locked = false;
+  } catch (e) {}
+ }
+
+ function applyFill(item, colorName) {
+  try {
+   var swatch = doc.swatches.getByName(colorName);
+   var color = swatch.color;
+
+   if (item.typename === 'PathItem') {
+    item.filled = true;
+    item.fillColor = color;
+   } else if (item.typename === 'CompoundPathItem') {
+    for (var i = 0; i < item.pathItems.length; i++) {
+     item.pathItems[i].filled = true;
+     item.pathItems[i].fillColor = color;
+    }
+   }
+  } catch (e) {}
+ }
+
+ function duplicateCompoundPathSafe(compound, targetLayer) {
+  unlockItem(compound);
+
+  var newCompound = targetLayer.compoundPathItems.add();
+
+  for (var i = 0; i < compound.pathItems.length; i++) {
+   var p = compound.pathItems[i];
+   unlockItem(p);
+   p.duplicate(newCompound, ElementPlacement.PLACEATEND);
+  }
+
+  return newCompound;
+ }
+
+ function duplicateItemSafe(item, targetLayer) {
+  unlockItem(item);
+  try {
+   return item.duplicate(targetLayer, ElementPlacement.PLACEATBEGINNING);
+  } catch (e) {
+   return null;
+  }
+ }
+
+ function collectPageItems(layer, targetLayer) {
+  layer.locked = false;
+  layer.visible = true;
+
+  // Page items
+  for (var i = layer.pageItems.length - 1; i >= 0; i--) {
+   var srcItem = layer.pageItems[i];
+   unlockItem(srcItem);
+
+   var dup = null;
+
+   if (srcItem.typename === 'CompoundPathItem') {
+    dup = duplicateCompoundPathSafe(srcItem, targetLayer);
+   } else {
+    dup = duplicateItemSafe(srcItem, targetLayer);
+   }
+
+   if (dup) {
+    applyFill(dup, fillColorName);
+   }
+  }
+
+  // Recurse sublayers
+  for (var j = 0; j < layer.layers.length; j++) {
+   collectPageItems(layer.layers[j], targetLayer);
+  }
+ }
+
+ // ---------------- MAIN ----------------
+
+ var parentLayer = findLayerByName(doc.layers, PARENT_LAYER_NAME);
+ if (!parentLayer) {
+  throw new Error('Parent layer not found: ' + PARENT_LAYER_NAME);
+ }
+
+ parentLayer.locked = false;
+ parentLayer.visible = true;
+
+ // Create compound layer
+ var compoundLayer = parentLayer.layers.add();
+ compoundLayer.name = newLayerName;
+ compoundLayer.locked = false;
+ compoundLayer.visible = true;
+ compoundLayer.zOrder(ZOrderMethod.SENDTOBACK);
+
+ // Process source layers
+ for (var i = 0; i < subLayerNames.length; i++) {
+  var srcLayer = findLayerByName(doc.layers, subLayerNames[i]);
+  if (!srcLayer) continue;
+
+  collectPageItems(srcLayer, compoundLayer);
+ }
+
+ return compoundLayer.name;
+}
+
+createCompoundPlate(${strifySublayerNames}, "${newLayerName}", "${fillColorName}");
+  `;
+
+  try {
+   await evalScript(script);
+  } catch (err) {
+   console.error('Failed to get spot swatches:', err);
+   //  return null;
+  }
  }
 }

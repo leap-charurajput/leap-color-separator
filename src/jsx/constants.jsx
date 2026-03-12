@@ -9,7 +9,7 @@ var CONSTANTS = {
 	},
 	SWATCH_NAMES: {
 		WHITE_UB: "White UB",
-		GARMENT_EXAMPLE: "GARMENT-EXAMPLE",
+		GARMENT: "GARMENT",
 		NONE: "[None]"
 	},
 	GRAPHIC: {

@@ -111,75 +111,22 @@
    </p>
   </div>
 
-  <div
-   *ngIf="
-    !isLoadingSwatches && (isSeparatedDoc || (!isLoadingGraphics && graphicOptions.length > 0))
-   "
-   class="separation-colors-table-container border-1"
-   data-submenu-boundary
-  >
-   <div class="thRow row d-flex align-center">
-    <div class="col"><span>SEQ</span></div>
-    <div class="col text-center">
-     <span
-      class="icon-toggle-clickable"
-      title="Toggle ink layer visibility"
-      [class.dimmed]="visibilityMode === 'singleVisible'"
-      (click)="handleToggleHeaderVisibility()"
-     >
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14">
-       <path
-        fill="currentColor"
-        d="M12 5C6.5 5 2.1 8.2.5 12c1.6 3.8 6 7 11.5 7s9.9-3.2 11.5-7C21.9 8.2 17.5 5 12 5zm0 11c-2.2 0-4-1.8-4-4s1.8-4 4-4 4 1.8 4 4-1.8 4-4 4zm0-6.5A2.5 2.5 0 1 0 14.5 12 2.5 2.5 0 0 0 12 9.5z"
-       />
-      </svg>
-     </span>
-    </div>
-    <div class="col bigger"><span>Ink</span></div>
-    <div class="col"><span>Mesh</span></div>
-    <div class="col mr-15"><span>Micron</span></div>
-    <div class="col text-center width-8"><span>Flash</span></div>
-    <div class="col text-center width-8"><span>Cool</span></div>
-    <div class="col text-center width-8"><span>WB</span></div>
-    <div class="col emptyCol"></div>
-   </div>
+  <div class="separation-colors-content">
    <div
-    *ngIf="colorRows.length === 0"
-    class="panelTitle mx-5"
-    style="padding: 20px; text-align: center"
+    *ngIf="
+     !isLoadingSwatches && (isSeparatedDoc || (!isLoadingGraphics && graphicOptions.length > 0))
+    "
+    class="separation-colors-table-container border-1"
+    data-submenu-boundary
    >
-    <p class="mt-15" style="color: rgba(255, 255, 255, 0.6)">No color rows loaded</p>
-   </div>
-   <div
-    class="exportFieldTable"
-    *ngIf="colorRows.length > 0"
-    cdkDropList
-    (cdkDropListDropped)="drop($event)"
-   >
-    <div
-     *ngFor="let row of colorRows; let i = index"
-     class="row d-flex align-center"
-     [class.removed-row]="row.removed"
-     cdkDrag
-     [cdkDragDisabled]="row.removed"
-     [style.cursor]="row.removed ? 'not-allowed' : 'move'"
-     [style.pointer-events]="row.removed ? 'none' : 'auto'"
-    >
-     <div class="col d-flex align-center gap-3">
-      <span
-       class="icon-DRAG"
-       [style.cursor]="row.removed ? 'not-allowed' : 'grab'"
-       cdkDragHandle
-      ></span>
-      <span>{{ getSequenceNumber(i) }}</span>
-     </div>
+    <div class="thRow row d-flex align-center">
+     <div class="col"><span>SEQ</span></div>
      <div class="col text-center">
       <span
        class="icon-toggle-clickable"
-       [class.disabled]="row.removed"
-       [class.dimmed]="isInkDimmed(row.colorName)"
        title="Toggle ink layer visibility"
-       (click)="!row.removed && handleToggleInkVisibility(row.colorName)"
+       [class.dimmed]="visibilityMode === 'singleVisible'"
+       (click)="handleToggleHeaderVisibility()"
       >
        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14">
         <path
@@ -189,97 +136,156 @@
        </svg>
       </span>
      </div>
-     <div class="col bigger">
-      <div class="d-flex gap-5 align-center">
-       <div class="fieldIcon">
-        <span
-         *ngIf="isCompoundPlate(row) || isWhiteUB(row.colorName)"
-         class="icon-colorIcon"
-        ></span>
-        <span
-         *ngIf="!isCompoundPlate(row) && !isWhiteUB(row.colorName)"
-         class="squareColorIcon"
-         [style.background]="getSeparationColor(row)"
-        ></span>
-       </div>
-       <span>{{ row.colorName }}</span>
-      </div>
-     </div>
+     <div class="col bigger"><span>Ink</span></div>
+     <div class="col"><span>Mesh</span></div>
+     <div class="col mr-15"><span>Micron</span></div>
+     <div class="col text-center width-8"><span>Flash</span></div>
+     <div class="col text-center width-8"><span>Cool</span></div>
+     <div class="col text-center width-8"><span>WB</span></div>
+     <div class="col emptyCol"></div>
+    </div>
+    <div
+     *ngIf="colorRows.length === 0"
+     class="panelTitle mx-5"
+     style="padding: 20px; text-align: center"
+    >
+     <p class="mt-15" style="color: rgba(255, 255, 255, 0.6)">No color rows loaded</p>
+    </div>
+    <div
+     class="exportFieldTable"
+     *ngIf="colorRows.length > 0"
+     cdkDropList
+     (cdkDropListDropped)="drop($event)"
+    >
      <div
-      class="col mesh-cell-editable"
-      [class.editing]="isMeshEditing(row.id)"
-      [class.selected]="isMeshSelected(row.id)"
-      (click)="handleMeshCellClick(row.id, $event)"
-     >
-      <input
-       *ngIf="isMeshEditing(row.id)"
-       type="text"
-       [value]="meshEditValue"
-       (input)="handleMeshInputChange($event.target.value)"
-       (blur)="handleMeshInputBlur()"
-       (keydown)="handleMeshInputKeyDown($event)"
-       [attr.data-mesh-row-id]="row.id"
-       style="
-        width: 100%;
-        background: transparent;
-        border: 1px solid #7bb4ff;
-        color: rgba(255, 255, 255, 0.9);
-        padding: 2px 4px;
-        font-size: 11px;
-        font-family: 'Adobe Clean', sans-serif;
-       "
-      />
-      <span *ngIf="!isMeshEditing(row.id)">{{ row.mesh }}</span>
-     </div>
-     <div class="col">{{ row.micron }}</div>
-     <div class="col text-center width-8">
-      <span
-       [class.icon-flash]="true"
-       [class.disabled]="!row.flashEnabled"
-       (click)="!row.removed && handleToggleFlash(row.id)"
-       [style.cursor]="row.removed ? 'not-allowed' : 'pointer'"
-       [style.pointer-events]="row.removed ? 'none' : 'auto'"
-      ></span>
-     </div>
-     <div class="col text-center width-8">
-      <span
-       [class.icon-cool]="true"
-       [class.disabled]="!row.coolEnabled"
-       (click)="!row.removed && handleToggleCool(row.id)"
-       [style.cursor]="row.removed ? 'not-allowed' : 'pointer'"
-       [style.pointer-events]="row.removed ? 'none' : 'auto'"
-      ></span>
-     </div>
-     <div class="col text-center width-8">
-      <span
-       [class.icon-wb]="true"
-       [class.disabled]="!row.wbEnabled"
-       (click)="!row.removed && handleToggleWb(row.id)"
-       [style.cursor]="row.removed ? 'not-allowed' : 'pointer'"
-       [style.pointer-events]="row.removed ? 'none' : 'auto'"
-      ></span>
-     </div>
-     <div
-      class="col text-center"
+      *ngFor="let row of colorRows; let i = index"
+      class="row d-flex align-center"
+      [class.removed-row]="row.removed"
+      cdkDrag
+      [cdkDragDisabled]="row.removed"
+      [style.cursor]="row.removed ? 'not-allowed' : 'move'"
       [style.pointer-events]="row.removed ? 'none' : 'auto'"
-      [style.opacity]="row.removed ? 0.3 : 1"
      >
-      <app-sub-menu
-       *ngIf="!row.removed"
-       [items]="['Edit', 'Add second hit...', 'Remove color']"
-       (onItemClick)="handleColorRowMenuClick($event, row.id)"
-      ></app-sub-menu>
+      <div class="col d-flex align-center gap-3">
+       <span
+        class="icon-DRAG"
+        [style.cursor]="row.removed ? 'not-allowed' : 'grab'"
+        cdkDragHandle
+       ></span>
+       <span>{{ getSequenceNumber(i) }}</span>
+      </div>
+      <div class="col text-center">
+       <span
+        class="icon-toggle-clickable"
+        [class.disabled]="row.removed"
+        [class.dimmed]="isInkDimmed(row.colorName)"
+        title="Toggle ink layer visibility"
+        (click)="!row.removed && handleToggleInkVisibility(row.colorName)"
+       >
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14">
+         <path
+          fill="currentColor"
+          d="M12 5C6.5 5 2.1 8.2.5 12c1.6 3.8 6 7 11.5 7s9.9-3.2 11.5-7C21.9 8.2 17.5 5 12 5zm0 11c-2.2 0-4-1.8-4-4s1.8-4 4-4 4 1.8 4 4-1.8 4-4 4zm0-6.5A2.5 2.5 0 1 0 14.5 12 2.5 2.5 0 0 0 12 9.5z"
+         />
+        </svg>
+       </span>
+      </div>
+      <div class="col bigger">
+       <div class="d-flex gap-5 align-center">
+        <div class="fieldIcon">
+         <span
+          *ngIf="isCompoundPlate(row) || isWhiteUB(row.colorName)"
+          class="icon-colorIcon"
+         ></span>
+         <span
+          *ngIf="!isCompoundPlate(row) && !isWhiteUB(row.colorName)"
+          class="squareColorIcon"
+          [style.background]="getSeparationColor(row)"
+         ></span>
+        </div>
+        <span>{{ row.colorName }}</span>
+       </div>
+      </div>
+      <div
+       class="col mesh-cell-editable"
+       [class.editing]="isMeshEditing(row.id)"
+       [class.selected]="isMeshSelected(row.id)"
+       (click)="handleMeshCellClick(row.id, $event)"
+      >
+       <input
+        *ngIf="isMeshEditing(row.id)"
+        type="text"
+        [value]="meshEditValue"
+        (input)="handleMeshInputChange($event.target.value)"
+        (blur)="handleMeshInputBlur()"
+        (keydown)="handleMeshInputKeyDown($event)"
+        [attr.data-mesh-row-id]="row.id"
+        style="
+         width: 100%;
+         background: transparent;
+         border: 1px solid #7bb4ff;
+         color: rgba(255, 255, 255, 0.9);
+         padding: 2px 4px;
+         font-size: 11px;
+         font-family: 'Adobe Clean', sans-serif;
+        "
+       />
+       <span *ngIf="!isMeshEditing(row.id)">{{ row.mesh }}</span>
+      </div>
+      <div class="col">{{ row.micron }}</div>
+      <div class="col text-center width-8">
+       <span
+        [class.icon-flash]="true"
+        [class.disabled]="!row.flashEnabled"
+        (click)="!row.removed && handleToggleFlash(row.id)"
+        [style.cursor]="row.removed ? 'not-allowed' : 'pointer'"
+        [style.pointer-events]="row.removed ? 'none' : 'auto'"
+       ></span>
+      </div>
+      <div class="col text-center width-8">
+       <span
+        [class.icon-cool]="true"
+        [class.disabled]="!row.coolEnabled"
+        (click)="!row.removed && handleToggleCool(row.id)"
+        [style.cursor]="row.removed ? 'not-allowed' : 'pointer'"
+        [style.pointer-events]="row.removed ? 'none' : 'auto'"
+       ></span>
+      </div>
+      <div class="col text-center width-8">
+       <span
+        [class.icon-wb]="true"
+        [class.disabled]="!row.wbEnabled"
+        (click)="!row.removed && handleToggleWb(row.id)"
+        [style.cursor]="row.removed ? 'not-allowed' : 'pointer'"
+        [style.pointer-events]="row.removed ? 'none' : 'auto'"
+       ></span>
+      </div>
+      <div
+       class="col text-center"
+       [style.pointer-events]="row.removed ? 'none' : 'auto'"
+       [style.opacity]="row.removed ? 0.3 : 1"
+      >
+       <app-sub-menu
+        *ngIf="!row.removed"
+        [items]="['Edit', 'Add second hit...', 'Remove color']"
+        (onItemClick)="handleColorRowMenuClick($event, row.id)"
+       ></app-sub-menu>
+      </div>
      </div>
     </div>
    </div>
-  </div>
 
-  <app-layer-stack-visualization
-   [colorRows]="colorRows"
-   garmentColor="#4A5568"
-   garmentName="Garment: Athletic Navy"
-  >
-  </app-layer-stack-visualization>
+   <app-layer-stack-visualization
+    [colorRows]="colorRows"
+    garmentColor="#4A5568"
+    garmentName="Garment: "
+    [styleInfo]="documentProfileMetadata?.styleInfo || null"
+    [documentRefreshKey]="documentRefreshKey"
+    [bodyColorFromDocument]="bodyColorFromDocument"
+    [bodyColorNameFromDocument]="bodyColorNameFromDocument"
+   >
+   </app-layer-stack-visualization>
+  </div>
 
   <app-edit-separation-modal
    [isOpen]="isSeparationModalOpen"
@@ -300,7 +306,7 @@
 
   <app-export-separations-modal
    [isOpen]="isExportModalOpen"
-   (close)="isExportModalOpen = false"
+   (close)="handleExportModalClose()"
    (export)="handleExportSeparations($event)"
   >
   </app-export-separations-modal>
