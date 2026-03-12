@@ -87,7 +87,7 @@ npm run build
 
 ```sh
 cd /var/www/html/leap-color-sep
-git pull origin production
+git pull origin main
 npm run build:leap
 npm run build
 ```
