@@ -231,7 +231,7 @@ export class ControllerService {
       if (links.leapTemplatePath) result.data.leapTemplatePath = links.leapTemplatePath;
       if (links.leapTemplateName) result.data.leapTemplateName = links.leapTemplateName;
      }
-    } catch (_) { }
+    } catch (_) {}
     return result;
    })
    .catch(() => result);
@@ -318,32 +318,31 @@ export class ControllerService {
  }
 
  async saveAppVersion(origin: string) {
-  // Construct the JSON string manually to avoid issues with ExtendScript
-
   await checkForJSXUpdates(origin + '/');
 
   const script = `
-  var folderPaths = "{\\n" +
-    "  \\"origin\\": \\"" + "${origin}" + "\\"\\n" +
-  "}";
+    var folderPaths = "{\\n" +
+      "  \\"origin\\": \\"" + "${origin}" + "\\"\\n" +
+    "}";
 
-  var settingsFolder = Folder(Folder.myDocuments + "/LEAP Settings");
-  if (!settingsFolder.exists) settingsFolder.create();
+    var leapSettingsFolder = Folder(Folder.myDocuments + "/LEAP Settings");
+    if (!leapSettingsFolder.exists) leapSettingsFolder.create();
 
-  var filePath = settingsFolder + "/ColorSep_Folder_Paths.json";
-  var file = new File(filePath);
+    var leapSepsFolder = Folder(Folder.myDocuments + "/LEAP Settings/LEAP_Seps");
+    if (!leapSepsFolder.exists) leapSepsFolder.create();
 
-  if (file.open("w")) {
-    file.write(folderPaths);
-    file.close();
-  } else {
-    $.writeln("Failed to save JSON file.");
-  }
-`;
+    var file = new File(Folder.myDocuments + "/LEAP Settings/LEAP_Seps/ColorSep_Folder_Paths.json");
+
+    if (file.open("w")) {
+      file.write(folderPaths);
+      file.close();
+    } else {
+      $.writeln("Failed to save JSON file.");
+    }
+  `;
 
   try {
    const result = await evalScript(script);
-
    return result;
   } catch (err) {
    throw err;
@@ -352,28 +351,25 @@ export class ControllerService {
 
  async getAppVersion() {
   const script = `
-function getAppVersion() {
- var settingsFolder = Folder(Folder.myDocuments + '/LEAP Settings');
- var filePath = settingsFolder + '/ColorSep_Folder_Paths.json';
- var file = new File(filePath);
+    function getAppVersion() {
+      var file = new File(Folder.myDocuments + "/LEAP Settings/LEAP_Seps/ColorSep_Folder_Paths.json");
 
- if (file.exists && file.open('r')) {
-  var content = file.read();
-  file.close();
+      if (file.exists && file.open("r")) {
+        var content = file.read();
+        file.close();
 
-  try {
-   // Wrap content in parentheses so eval returns the object
-   var data = eval('(' + content + ')');
-   return data.origin || '';
-  } catch (e) {
-   return '';
-  }
- } else {
-  return '';
- }
-}
+        try {
+          var data = eval("(" + content + ")");
+          return data.origin || "";
+        } catch (e) {
+          return "";
+        }
+      } else {
+        return "";
+      }
+    }
 
-getAppVersion();
+    getAppVersion();
   `;
 
   try {
@@ -383,7 +379,7 @@ getAppVersion();
    if (!result || result === 'undefined' || result === '') return null;
    return result;
   } catch (err) {
-   console.error(' Failed to get app version:', err);
+   console.error('Failed to get app version:', err);
    return null;
   }
  }
@@ -923,11 +919,14 @@ getAppVersion();
  /**
   * Look up body color (Hex/CMYK/RGB) by code from COLOR_CODE_LOOKUP.xlsx (same folder as Styles.xlsx).
   */
- getColorByCodeFromLookup(
-  colorCode: string
- ): Promise<{
+ getColorByCodeFromLookup(colorCode: string): Promise<{
   success: boolean;
-  color?: { hex: string; colorName: string; cmyk: { c: number; m: number; y: number; k: number }; rgb: { r: number; g: number; b: number } };
+  color?: {
+   hex: string;
+   colorName: string;
+   cmyk: { c: number; m: number; y: number; k: number };
+   rgb: { r: number; g: number; b: number };
+  };
   error?: string;
  }> {
   const win = window as any;
@@ -966,7 +965,11 @@ getAppVersion();
   profileMetadata: any = null,
   options?: { recreateInActiveDoc?: boolean }
  ): Promise<any> {
-  this.log('performSeparation called for: ' + graphicName + (options?.recreateInActiveDoc ? ' (recreate in active doc)' : ''));
+  this.log(
+   'performSeparation called for: ' +
+    graphicName +
+    (options?.recreateInActiveDoc ? ' (recreate in active doc)' : '')
+  );
 
   return this.ensureSession().then(() => {
    const params: any = {
@@ -1187,7 +1190,7 @@ getAppVersion();
   });
  }
 
- private log(val: string): void { }
+ private log(val: string): void {}
 
  private get name(): string {
   return 'Client Controller:: ';
