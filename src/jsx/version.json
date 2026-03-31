@@ -1,9 +1,9 @@
 {
-    "jsxVersion": 1.5,
-    "updatedFiles": [
-        "cep_adapters.jsx",
-        "color_separator.jsx",
-        "utilities.jsx",
-        "actions/PathFinderAdd.aia"
-    ]
+ "jsxVersion": 1.6,
+ "updatedFiles": [
+  "cep_adapters.jsx",
+  "color_separator.jsx",
+  "utilities.jsx",
+  "actions/PathFinderAdd.aia"
+ ]
 }

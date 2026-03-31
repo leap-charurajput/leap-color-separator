@@ -72,8 +72,11 @@ function generateUnderbase(_graphicName) {
 		app.activeDocument.activeLayer = whiteUBLayer;
 		app.activeDocument.activeLayer.hasSelectedArtwork = true;
 		app.redraw();
+		setFillOverprintOnContainer(whiteUBLayer, false);
+		app.redraw();
 
-		pathFinderDivide();
+		// pathFinderDivide();
+		pathFinderMerge();
 		app.executeMenuCommand('ungroup');
 		deleteNonFillStrokeItems();
 		// pathFinderMerge();

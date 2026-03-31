@@ -22,9 +22,9 @@ export class AppComponent implements OnInit, OnDestroy {
  ngOnInit(): void {
   document.body.classList.add('dark');
 
-  checkForJSXUpdates((window as any).location.href).then((res) => {
-   console.log('check update status ref', res);
-  });
+    checkForJSXUpdates((window as any).location.href).then((res) => {
+      console.log('check update status ref', res);
+    });
 
   this.waitForSession()
    .then(() => {

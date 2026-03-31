@@ -775,14 +775,96 @@ export class ControllerService {
   return this.ensureSession().then(() => {
    const script = this.buildExportPostscriptScript(Array.isArray(inks) ? inks : []);
    return evalScript(script)
-    .then((res: unknown) => {
+    .then(async (res: unknown) => {
      const str = typeof res === 'string' ? res : '';
      const result = str ? JSON.parse(str) : { success: false, error: 'No result' };
+
+    //  if (result?.success && result?.filePath) {
+    //   console.log('[exportPostscript] PS exported:', result.filePath);
+    //   const distiller = await this.launchDistiller(result.filePath);
+    //   console.log('[exportPostscript] Distiller launch result:', distiller);
+    //   return {
+    //    ...result,
+    //    distiller,
+    //    note: distiller.success
+    //     ? 'Adobe Distiller launched to process PostScript.'
+    //     : 'PostScript exported, but Adobe Distiller could not be launched automatically.'
+    //   };
+    //  }
+
      return result;
     })
     .catch((err: any) => {
      throw err;
     });
+  });
+ }
+
+ private launchDistiller(psPath: string): Promise<{ success: boolean; error?: string }> {
+  return new Promise((resolve) => {
+   try {
+    console.log('[launchDistiller] Requested with PS path:', psPath);
+    const win = window as any;
+    const req = win?.cep_node?.require;
+    if (!req) {
+     const msg = 'CEP node runtime is unavailable';
+     console.error('[launchDistiller] ' + msg);
+     resolve({ success: false, error: msg });
+     return;
+    }
+
+    const cp = req('child_process');
+    const fs = req('fs');
+    const appCandidates = [
+     '/Applications/Adobe Acrobat Distiller.app',
+     '/Applications/Adobe Acrobat DC/Adobe Acrobat Distiller.app',
+     '/Applications/Adobe Acrobat 2020/Adobe Acrobat Distiller.app'
+    ];
+    let foundAppPath = '';
+    for (let i = 0; i < appCandidates.length; i++) {
+     const p = appCandidates[i];
+     try {
+      if (fs.existsSync(p)) {
+       foundAppPath = p;
+       break;
+      }
+     } catch (_) { }
+    }
+
+    const psExists = (() => {
+     try {
+      return !!(psPath && fs.existsSync(psPath));
+     } catch (_) {
+      return false;
+     }
+    })();
+
+    console.log('[launchDistiller] PS exists:', psExists);
+    console.log('[launchDistiller] Distiller app found:', foundAppPath || 'not found in known paths');
+
+    const appNameOrPath = foundAppPath || 'Adobe Acrobat Distiller';
+    const openArgs = ['-a', appNameOrPath, psPath];
+    console.log('[launchDistiller] Running command: open ' + openArgs.join(' '));
+
+    cp.execFile('open', openArgs, (err: any, stdout: string, stderr: string) => {
+     if (err) {
+      const errMsg = err.message || String(err);
+      console.error('[launchDistiller] Launch failed:', errMsg);
+      if (stderr) console.error('[launchDistiller] stderr:', stderr);
+      if (stdout) console.log('[launchDistiller] stdout:', stdout);
+      resolve({ success: false, error: errMsg + (stderr ? ' | ' + stderr : '') });
+      return;
+     }
+     if (stderr) console.warn('[launchDistiller] stderr:', stderr);
+     if (stdout) console.log('[launchDistiller] stdout:', stdout);
+     console.log('[launchDistiller] Launch command completed successfully');
+     resolve({ success: true });
+    });
+   } catch (e: any) {
+    const msg = e?.message || String(e);
+    console.error('[launchDistiller] Exception:', msg);
+    resolve({ success: false, error: msg });
+   }
   });
  }
 
@@ -840,9 +922,8 @@ export class ControllerService {
     for (var i = 0; i < _inkList.length; i++) {
       var ink = _inkList[i];
       var inkName = ink.name.toUpperCase();
-      if (inksLookup[inkName]) {
-        printInks.push(ink);
-      }
+      ink.printingStatus = inksLookup[inkName] ? true : false;
+      printInks.push(ink);
     }
 
     colorSepOptions.inkList = printInks;
@@ -875,7 +956,8 @@ export class ControllerService {
     // printOptions.paperOptions = paperOptions;
     printOptions.coordinateOptions = printCoordinateOptions;
     printOptions.postScriptOptions = psOptions;
-    printOptions.PPDName = 'IBlock v2';
+    printOptions.printerName = 'Adobe PostScript File';
+    printOptions.PPDName = 'IBlock_AI_SEP v2';
 
     app.activeDocument.print(printOptions);
 
