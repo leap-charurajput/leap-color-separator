@@ -267,7 +267,7 @@
       >
        <app-sub-menu
         *ngIf="!row.removed"
-        [items]="['Edit', 'Add second hit...', 'Remove color']"
+        [items]="getColorRowMenuItems(row)"
         (onItemClick)="handleColorRowMenuClick($event, row.id)"
        ></app-sub-menu>
       </div>

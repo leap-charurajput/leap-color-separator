@@ -311,7 +311,7 @@ function setFillOverprintOnContainer(container, overprintValue) {
  if (!container) return;
  try {
   if (container.typename === "PathItem") {
-   setOverprintOnPathItem(container);
+   setOverprintOnPathItem(container, overprintValue);
    return;
   }
   if (container.typename === "CompoundPathItem") {
@@ -831,6 +831,8 @@ function handlePerformSeparation(params_string) {
   deleteNonFillStrokeItems();
   generateUnderbase(graphicName);
   setOverprintOnSeparatedArt(sepDoc, true);
+  var _sizedArtLayer = app.activeDocument.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_ART);
+  _sizedArtLayer.visible = false;
   unloadLEAPColorSepsActions();
 
   try {
@@ -988,6 +990,8 @@ function handleRecreatePlatesInActiveDocument(params_string) {
   deleteNonFillStrokeItems();
   generateUnderbase(graphicName);
   setOverprintOnSeparatedArt(doc, true);
+  var _sizedArtLayer = app.activeDocument.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_ART);
+  _sizedArtLayer.visible = false;
   unloadLEAPColorSepsActions();
 
   try {

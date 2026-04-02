@@ -717,7 +717,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
    return aIsWhiteUB ? -1 : 1; // White UB at top (return -1 when a is White UB)
   });
 
-  return rows;
+  return sorted;
  }
 
  isWhiteUB(colorName: string): boolean {
@@ -1009,6 +1009,10 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   this.cdr.detectChanges();
  }
 
+ getColorRowMenuItems(row: ColorRow): string[] {
+  return ['Edit', `Add second hit of ${row.colorName}`, 'Remove color'];
+ }
+
  handleColorRowMenuClick(item: string, rowId: number): void {
   console.log('[SEPARATION] Color row menu clicked:', item, 'for row:', rowId);
 
@@ -1016,7 +1020,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
    this.handleRemoveColor(rowId);
   } else if (item === 'Edit') {
    this.handleEditSeparation(rowId);
-  } else if (item === 'Add second hit...') {
+  } else if (item.startsWith('Add second hit')) {
    console.log('[HIT THE DROPDOWN]', rowId);
    this.handleAddSecondHit(rowId);
   }
