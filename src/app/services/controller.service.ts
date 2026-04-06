@@ -954,9 +954,9 @@ export class ControllerService {
     // printOptions.paperOptions = paperOptions;
     printOptions.coordinateOptions = printCoordinateOptions;
     printOptions.postScriptOptions = psOptions;
-    printOptions.printPreset = 'Process PostScript';
+    printOptions.printPreset = 'Print PostScript';
+    // printOptions.PPDName = 'IBlock v2';
     // printOptions.printerName = 'Adobe PostScript File';
-    // printOptions.PPDName = 'IBlock_AI_SEP v2';
 
 
     app.activeDocument.print(printOptions);
