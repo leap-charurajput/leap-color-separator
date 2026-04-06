@@ -779,18 +779,18 @@ export class ControllerService {
      const str = typeof res === 'string' ? res : '';
      const result = str ? JSON.parse(str) : { success: false, error: 'No result' };
 
-    //  if (result?.success && result?.filePath) {
-    //   console.log('[exportPostscript] PS exported:', result.filePath);
-    //   const distiller = await this.launchDistiller(result.filePath);
-    //   console.log('[exportPostscript] Distiller launch result:', distiller);
-    //   return {
-    //    ...result,
-    //    distiller,
-    //    note: distiller.success
-    //     ? 'Adobe Distiller launched to process PostScript.'
-    //     : 'PostScript exported, but Adobe Distiller could not be launched automatically.'
-    //   };
-    //  }
+     if (result?.success && result?.filePath) {
+      console.log('[exportPostscript] PS exported:', result.filePath);
+      const distiller = await this.launchDistiller(result.filePath);
+      console.log('[exportPostscript] Distiller launch result:', distiller);
+      return {
+       ...result,
+       distiller,
+       note: distiller.success
+        ? 'Adobe Distiller launched to process PostScript.'
+        : 'PostScript exported, but Adobe Distiller could not be launched automatically.'
+      };
+     }
 
      return result;
     })
@@ -816,9 +816,7 @@ export class ControllerService {
     const cp = req('child_process');
     const fs = req('fs');
     const appCandidates = [
-     '/Applications/Adobe Acrobat Distiller.app',
-     '/Applications/Adobe Acrobat DC/Adobe Acrobat Distiller.app',
-     '/Applications/Adobe Acrobat 2020/Adobe Acrobat Distiller.app'
+     '/Applications/Adobe Acrobat DC/Acrobat Distiller.app',
     ];
     let foundAppPath = '';
     for (let i = 0; i < appCandidates.length; i++) {
@@ -956,8 +954,10 @@ export class ControllerService {
     // printOptions.paperOptions = paperOptions;
     printOptions.coordinateOptions = printCoordinateOptions;
     printOptions.postScriptOptions = psOptions;
-    printOptions.printerName = 'Adobe PostScript File';
-    printOptions.PPDName = 'IBlock_AI_SEP v2';
+    printOptions.printPreset = 'Process PostScript';
+    // printOptions.printerName = 'Adobe PostScript File';
+    // printOptions.PPDName = 'IBlock_AI_SEP v2';
+
 
     app.activeDocument.print(printOptions);
 
