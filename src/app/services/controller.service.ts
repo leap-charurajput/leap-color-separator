@@ -902,6 +902,17 @@ export class ControllerService {
     // Job options for the print job
     var jobOptions = new PrintJobOptions();
     jobOptions.copies = 1;
+    jobOptions.printAllArtboards = false;
+    
+    var foundIndex = -1;
+    for (var i = 0; i < doc.artboards.length; i++) {
+      if (doc.artboards[i].name === 'Grid') {
+        foundIndex = i;
+        break;
+      }
+    }
+
+    jobOptions.artboardRange = (foundIndex + 1).toString();
     jobOptions.printArea = PrintingBounds.ARTBOARDBOUNDS;
     jobOptions.file = new File(outputPath);
 
@@ -919,8 +930,8 @@ export class ControllerService {
     }
     for (var i = 0; i < _inkList.length; i++) {
       var ink = _inkList[i];
-      var inkName = ink.name.toUpperCase();
-      ink.printingStatus = inksLookup[inkName] ? true : false;
+      // var inkName = ink.name.toUpperCase();
+      // ink.inkInfo.printingStatus = inksLookup[inkName] ? true : false;
       printInks.push(ink);
     }
 
