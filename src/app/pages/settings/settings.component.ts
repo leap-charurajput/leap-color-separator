@@ -27,6 +27,8 @@ export class SettingsComponent implements OnInit {
  addUnderbase = true;
  artistName = '';
  artistInitials = '';
+ chokeStrokeColorSwatch = '';
+ koDarkColorNames = 'Black, PANTONE PROCESS BLACK C';
  selectedSection = 'Separation Profiles';
 
  // 🔑 Environment config
@@ -93,6 +95,12 @@ export class SettingsComponent implements OnInit {
     this.addUnderbase = result.data.addUnderbase !== undefined ? result.data.addUnderbase : true;
     this.artistName = result.data.artistName != null ? String(result.data.artistName) : '';
     this.artistInitials = result.data.artistInitials != null ? String(result.data.artistInitials) : '';
+    this.chokeStrokeColorSwatch =
+     result.data.chokeStrokeColorSwatch != null ? String(result.data.chokeStrokeColorSwatch) : '';
+    this.koDarkColorNames =
+     result.data.koDarkColorNames !== undefined && result.data.koDarkColorNames !== null
+      ? String(result.data.koDarkColorNames)
+      : 'Black, PANTONE PROCESS BLACK C';
    }
   });
  }
@@ -102,7 +110,9 @@ export class SettingsComponent implements OnInit {
    defaultMesh: this.defaultMesh,
    addUnderbase: this.addUnderbase,
    artistName: this.artistName,
-   artistInitials: this.artistInitials
+   artistInitials: this.artistInitials,
+   chokeStrokeColorSwatch: this.chokeStrokeColorSwatch,
+   koDarkColorNames: this.koDarkColorNames
   };
   this.controller.saveGeneralSettings(settings).then((result) => {
    if (!result.success) {

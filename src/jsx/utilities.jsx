@@ -207,6 +207,69 @@ function applyStroke(doc, swatchName, strokeWidth) {
   return false;
 }
 
+function getGeneralSettingsFromDisk() {
+  try {
+    var documentsFolder = Folder.myDocuments || new Folder("~/Documents");
+    var settingsPath = documentsFolder.fsName + "/LEAP Settings/LEAP_Seps/general_Settings.json";
+    var settingsFile = new File(settingsPath);
+    if (!settingsFile.exists) {
+      return null;
+    }
+    if (!settingsFile.open("r")) {
+      return null;
+    }
+    var content = settingsFile.read();
+    settingsFile.close();
+    if (!content || !content.length) {
+      return null;
+    }
+    var parsed;
+    if (typeof JSON !== "undefined" && JSON.parse) {
+      parsed = JSON.parse(content);
+    } else {
+      parsed = eval("(" + content + ")");
+    }
+    return parsed || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/** Choke stroke swatch from general_Settings.json, or GARMENT if unset, blank, or not in doc. */
+function getChokeStrokeSwatchNameForDocument(doc) {
+  var fallback = CONSTANTS.SWATCH_NAMES.GARMENT;
+  var gen = getGeneralSettingsFromDisk();
+  if (!gen) {
+    return fallback;
+  }
+  var raw = gen.chokeStrokeColorSwatch;
+  if (raw === undefined || raw === null) {
+    return fallback;
+  }
+  var name = String(raw).replace(/^\s+|\s+$/g, "");
+  if (!name.length) {
+    return fallback;
+  }
+  if (getSwatchByName(doc, name)) {
+    return name;
+  }
+  return fallback;
+}
+
+/** Apply choke stroke; if it fails, force default swatch (e.g. settings name invalid at apply time). */
+function applyChokeStroke(doc, strokeWidth) {
+  var defaultName = CONSTANTS.SWATCH_NAMES.GARMENT;
+  var width = strokeWidth != null ? strokeWidth : CONSTANTS.STYLES.CHOKE_STROKE_WIDTH;
+  var chosen = getChokeStrokeSwatchNameForDocument(doc);
+  if (applyStroke(doc, chosen, width)) {
+    return true;
+  }
+  if (chosen !== defaultName) {
+    return applyStroke(doc, defaultName, width);
+  }
+  return false;
+}
+
 function findTextFrameInGroup(items, name) {
   for (var i = 0; i < items.length; i++) {
     var item = items[i];

@@ -61,6 +61,23 @@
           <button class="settings-action-link" (click)="onChooseLeapPath()">Choose...</button>
         </div>
       </div>
+
+      <div class="settings-field">
+        <label class="settings-field-label" for="chokeStrokeSwatch">Choke stroke color swatch</label>
+        <input id="chokeStrokeSwatch" type="text" class="settings-field-input settings-field-input-wide"
+          [(ngModel)]="chokeStrokeColorSwatch" (ngModelChange)="saveGeneralSettings()"
+          placeholder="Swatch name (e.g. GARMENT)" />
+      </div>
+
+      <div class="settings-field settings-field-textarea-row">
+        <div class="settings-field-label-stack">
+          <label class="settings-field-label" for="koDarkColorNames">k/o dark color names</label>
+          <span class="settings-field-sublabel">(Comma separated)</span>
+        </div>
+        <textarea id="koDarkColorNames" class="settings-field-textarea" rows="4"
+          [(ngModel)]="koDarkColorNames" (ngModelChange)="saveGeneralSettings()"
+          placeholder="Black, PANTONE PROCESS BLACK C"></textarea>
+      </div>
     </div>
   </div>
 

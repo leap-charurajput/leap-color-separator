@@ -122,7 +122,7 @@ function generateChoke(whiteUBLayer, separatedArtLayer) {
 	}
 
 
-	applyStroke(app.activeDocument, CONSTANTS.SWATCH_NAMES.GARMENT, CONSTANTS.STYLES.CHOKE_STROKE_WIDTH);
+	applyChokeStroke(app.activeDocument, CONSTANTS.STYLES.CHOKE_STROKE_WIDTH);
 }
 
 

@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { checkForJSXUpdates, evalScript } from '../../libs/helper';
+import { checkForJSXUpdates, csInterface, evalScript } from '../../libs/helper';
 
 @Injectable({
  providedIn: 'root'
@@ -866,6 +866,20 @@ export class ControllerService {
   });
  }
 
+ /** Absolute path to jsx/presets/Print Postscript inside the installed CEP extension (matches angular.json asset copy). */
+ private resolveBundledPrintPostscriptPresetPath(): string {
+  const w = window as any;
+  if (!w.__adobe_cep__ || typeof csInterface?.getSystemPath !== 'function') {
+   return '';
+  }
+  try {
+   const extensionRoot = csInterface.getSystemPath('extension');
+   return extensionRoot + '/jsx/presets/Print Postscript';
+  } catch {
+   return '';
+  }
+ }
+
  private buildExportPostscriptScript(inks: string[]): string {
   const safeInks = Array.isArray(inks) ? inks : [];
   const inksLiteral = JSON.stringify(safeInks);
@@ -1336,7 +1350,14 @@ export class ControllerService {
    if (!cep || !cep.fs) {
     resolve({
      success: true,
-     data: { defaultMesh: '110', addUnderbase: true, artistName: '', artistInitials: '' }
+     data: {
+      defaultMesh: '110',
+      addUnderbase: true,
+      artistName: '',
+      artistInitials: '',
+      chokeStrokeColorSwatch: '',
+      koDarkColorNames: 'Black, PANTONE PROCESS BLACK C'
+     }
     });
     return;
    }
@@ -1356,13 +1377,27 @@ export class ControllerService {
      console.error('Error parsing general settings file', e);
      resolve({
       success: true,
-      data: { defaultMesh: '110', addUnderbase: true, artistName: '', artistInitials: '' }
+      data: {
+       defaultMesh: '110',
+       addUnderbase: true,
+       artistName: '',
+       artistInitials: '',
+       chokeStrokeColorSwatch: '',
+       koDarkColorNames: 'Black, PANTONE PROCESS BLACK C'
+      }
      });
     }
    } else {
     resolve({
      success: true,
-     data: { defaultMesh: '110', addUnderbase: true, artistName: '', artistInitials: '' }
+     data: {
+      defaultMesh: '110',
+      addUnderbase: true,
+      artistName: '',
+      artistInitials: '',
+      chokeStrokeColorSwatch: '',
+      koDarkColorNames: 'Black, PANTONE PROCESS BLACK C'
+     }
     });
    }
   });
@@ -1373,6 +1408,8 @@ export class ControllerService {
   addUnderbase?: boolean;
   artistName?: string;
   artistInitials?: string;
+  chokeStrokeColorSwatch?: string;
+  koDarkColorNames?: string;
  }): Promise<{ success: boolean; error?: string }> {
   return new Promise((resolve) => {
    const cep = (window as any).cep;
@@ -1495,11 +1532,14 @@ function createCompoundPlate(subLayerNames, newLayerName, fillColorName) {
     item.filled = true;
     item.fillColor = color;
    } else if (item.typename === 'CompoundPathItem') {
-    for (var i = 0; i < item.pathItems.length; i++) {
-     item.pathItems[i].filled = true;
-     item.pathItems[i].fillColor = color;
-    }
+     item.pathItems[0].filled = true;
+     item.pathItems[0].fillColor = color;
    }
+    else if(item.typename === 'GroupItem') {
+     for (var i = 0; i < item.pageItems.length; i++) {
+     applyFill(item.pageItems[i], colorName);
+     }
+    }
   } catch (e) {}
  }
 

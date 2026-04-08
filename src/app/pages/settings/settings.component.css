@@ -64,6 +64,51 @@
 	text-align: right;
 }
 
+.settings-field-input-wide {
+	width: min(100%, 220px);
+	text-align: left;
+}
+
+.settings-field-textarea-row {
+	align-items: flex-start;
+}
+
+.settings-field-label-stack {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	flex-shrink: 0;
+}
+
+.settings-field-sublabel {
+	font-size: 10px;
+	color: rgba(255, 255, 255, 0.55);
+	font-family: 'Adobe Clean', sans-serif;
+}
+
+.settings-field-textarea {
+	flex: 1;
+	min-width: 0;
+	max-width: 280px;
+	min-height: 72px;
+	padding: 6px 8px;
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	border-radius: 4px;
+	background-color: #2a2a2a;
+	color: rgba(255, 255, 255, 0.9);
+	font-size: 12px;
+	font-family: 'Adobe Clean', sans-serif;
+	line-height: 1.35;
+	resize: vertical;
+	box-sizing: border-box;
+}
+
+.settings-field-textarea:focus {
+	outline: none;
+	border-color: #5e9eee;
+	box-shadow: 0 0 0 2px rgba(94, 158, 238, 0.2);
+}
+
 .settings-field-input:focus {
 	outline: none;
 	border-color: #5e9eee;
