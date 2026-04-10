@@ -773,8 +773,25 @@ export class ControllerService {
   this.log('exportPostscript called with ' + (inks?.length ?? 0) + ' inks');
 
   return this.ensureSession().then(() => {
-   const script = this.buildExportPostscriptScript(Array.isArray(inks) ? inks : []);
-   return evalScript(script)
+   const presetPath = this.resolveBundledPrintPostscriptPresetPath();
+   if (!presetPath) {
+    return Promise.resolve({
+     success: false,
+     error:
+      'Could not resolve bundled print preset (extension root). Open the panel from the Illustrator CEP extension so jsx/presets/Print Postscript is on disk.'
+    });
+   }
+   return this.loadGeneralSettings().then((settingsResult) => {
+    const resolvedPpdName =
+     settingsResult?.success && settingsResult?.data?.ppdName != null
+      ? String(settingsResult.data.ppdName).trim() || 'IBlock v2'
+      : 'IBlock v2';
+    const script = this.buildExportPostscriptScript(
+     Array.isArray(inks) ? inks : [],
+     presetPath,
+     resolvedPpdName
+    );
+    return evalScript(script)
     .then(async (res: unknown) => {
      const str = typeof res === 'string' ? res : '';
      const result = str ? JSON.parse(str) : { success: false, error: 'No result' };
@@ -797,6 +814,7 @@ export class ControllerService {
     .catch((err: any) => {
      throw err;
     });
+   });
   });
  }
 
@@ -880,9 +898,11 @@ export class ControllerService {
   }
  }
 
- private buildExportPostscriptScript(inks: string[]): string {
+private buildExportPostscriptScript(inks: string[], printPresetFsPath: string, ppdName: string): string {
   const safeInks = Array.isArray(inks) ? inks : [];
   const inksLiteral = JSON.stringify(safeInks);
+  const presetPathLiteral = JSON.stringify(printPresetFsPath);
+ const ppdNameLiteral = JSON.stringify(ppdName || 'IBlock v2');
   return `
 (function() {
   try {
@@ -979,10 +999,17 @@ export class ControllerService {
     // printOptions.paperOptions = paperOptions;
     printOptions.coordinateOptions = printCoordinateOptions;
     printOptions.postScriptOptions = psOptions;
+    var _printPresetFile = new File(${presetPathLiteral});
+    if (!_printPresetFile.exists) {
+      return JSON.stringify({
+        success: false,
+        error: "Print preset file not found: " + _printPresetFile.fsName
+      });
+    }
+    printOptions.printerName = 'Adobe PostScript File';
+    printOptions.PPDName = ${ppdNameLiteral};
     printOptions.printPreset = 'Print PostScript';
-    // printOptions.PPDName = 'IBlock v2';
-    // printOptions.printerName = 'Adobe PostScript File';
-
+    // app.activeDocument.importPrintPreset('Print PostScript', _printPresetFile);
 
     app.activeDocument.print(printOptions);
 
@@ -1355,6 +1382,7 @@ export class ControllerService {
       addUnderbase: true,
       artistName: '',
       artistInitials: '',
+      ppdName: 'IBlock v2',
       chokeStrokeColorSwatch: '',
       koDarkColorNames: 'Black, PANTONE PROCESS BLACK C'
      }
@@ -1382,6 +1410,7 @@ export class ControllerService {
        addUnderbase: true,
        artistName: '',
        artistInitials: '',
+       ppdName: 'IBlock v2',
        chokeStrokeColorSwatch: '',
        koDarkColorNames: 'Black, PANTONE PROCESS BLACK C'
       }
@@ -1395,6 +1424,7 @@ export class ControllerService {
       addUnderbase: true,
       artistName: '',
       artistInitials: '',
+      ppdName: 'IBlock v2',
       chokeStrokeColorSwatch: '',
       koDarkColorNames: 'Black, PANTONE PROCESS BLACK C'
      }
@@ -1408,6 +1438,7 @@ export class ControllerService {
   addUnderbase?: boolean;
   artistName?: string;
   artistInitials?: string;
+ ppdName?: string;
   chokeStrokeColorSwatch?: string;
   koDarkColorNames?: string;
  }): Promise<{ success: boolean; error?: string }> {

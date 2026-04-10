@@ -53,6 +53,12 @@
       </div>
 
       <div class="settings-field">
+        <label class="settings-field-label">PPD Name</label>
+        <input type="text" class="settings-field-input" [(ngModel)]="ppdName"
+          (ngModelChange)="saveGeneralSettings()" placeholder="IBlock v2" />
+      </div>
+
+      <div class="settings-field">
         <div class="settings-field-label">Data Folder Path:</div>
         <div class="settings-path-display">
           <div class="path-text" title="{{ leapServerPath }}">

@@ -27,6 +27,7 @@ export class SettingsComponent implements OnInit {
  addUnderbase = true;
  artistName = '';
  artistInitials = '';
+ ppdName = 'IBlock v2';
  chokeStrokeColorSwatch = '';
  koDarkColorNames = 'Black, PANTONE PROCESS BLACK C';
  selectedSection = 'Separation Profiles';
@@ -95,6 +96,7 @@ export class SettingsComponent implements OnInit {
     this.addUnderbase = result.data.addUnderbase !== undefined ? result.data.addUnderbase : true;
     this.artistName = result.data.artistName != null ? String(result.data.artistName) : '';
     this.artistInitials = result.data.artistInitials != null ? String(result.data.artistInitials) : '';
+    this.ppdName = result.data.ppdName != null ? String(result.data.ppdName) : 'IBlock v2';
     this.chokeStrokeColorSwatch =
      result.data.chokeStrokeColorSwatch != null ? String(result.data.chokeStrokeColorSwatch) : '';
     this.koDarkColorNames =
@@ -111,6 +113,7 @@ export class SettingsComponent implements OnInit {
    addUnderbase: this.addUnderbase,
    artistName: this.artistName,
    artistInitials: this.artistInitials,
+   ppdName: this.ppdName,
    chokeStrokeColorSwatch: this.chokeStrokeColorSwatch,
    koDarkColorNames: this.koDarkColorNames
   };

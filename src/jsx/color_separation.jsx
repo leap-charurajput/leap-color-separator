@@ -103,7 +103,7 @@ function generateUnderbase(_graphicName) {
 function generateChoke(whiteUBLayer, separatedArtLayer) {
 
 	var chokeLayer = getOrCreateLayer(app.activeDocument, CONSTANTS.LAYER_NAMES.CHOKE, separatedArtLayer);
-	chokeLayer.move(separatedArtLayer, ElementPlacement.PLACEATEND);
+	chokeLayer.move(separatedArtLayer, ElementPlacement.PLACEATBEGINNING);
 
 	app.activeDocument.activeLayer = whiteUBLayer;
 	app.activeDocument.activeLayer.hasSelectedArtwork = true;
