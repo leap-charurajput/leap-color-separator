@@ -125,6 +125,11 @@
  gap: 6px;
 }
 
+.settings-style .settings-field-vertical .settings-field-input-wide {
+ width: 100%;
+ box-sizing: border-box;
+}
+
 .settings-style .settings-field-readonly {
  font-size: 11px;
  color: rgba(255, 255, 255, 0.7);

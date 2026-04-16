@@ -43,7 +43,8 @@
      </div>
 
      <!-- Underbase 1-4: Underbase 1 always checked and disabled -->
-     <div *ngFor="let mesh of formState.underbaseMeshes; let i = index" class="settings-field settings-field-inline">
+     <div *ngFor="let mesh of formState.underbaseMeshes; let i = index; trackBy: trackByIndex"
+      class="settings-field settings-field-inline">
       <app-checkbox [checked]="formState.underbaseEnabled[i]" [label]="'Underbase ' + (i + 1)" [disabled]="i === 0"
        (change)="onUnderbaseEnabledChange(i, $event)"></app-checkbox>
       <label class="settings-field-label-inline">Mesh</label>
@@ -66,7 +67,8 @@
     <!-- Black inks k/o'd (read-only): show only when any k/o black inks is checked -->
     <div *ngIf="isAnyKnockoutBlackChecked()" class="settings-field settings-field-vertical">
      <label class="settings-field-label">Black inks k/o'd:</label>
-     <div class="settings-field-readonly">{{ formState.blackInksKnockoutDisplay }}</div>
+     <textarea class="settings-field-input settings-field-input-wide" [value]="formState.blackInksKnockoutDisplay"
+      (input)="onInputChange('blackInksKnockoutDisplay', $event)"></textarea>
     </div>
    </div>
 

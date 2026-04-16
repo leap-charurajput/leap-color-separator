@@ -52,6 +52,11 @@
   cancelText="Cancel" confirmVariant="danger" (confirm)="confirmDeleteAllPlates()" (cancel)="cancelDeleteAllPlates()">
  </app-confirm-dialog>
 
+ <app-confirm-dialog [isOpen]="showRecreateAllConfirm" title="Recreate All Plates" message=""
+  [checkboxOptions]="recreatePlateCheckboxOptions" confirmText="Recreate" cancelText="Cancel" confirmVariant="primary"
+  (confirm)="confirmRecreateAllPlates($event)" (cancel)="cancelRecreateAllPlates()">
+ </app-confirm-dialog>
+
  <div *ngIf="!hasVersionDocument && !isSeparatedDoc && !isCheckingDocument" class="organize-graphics-content">
   <div class="panelTitle mx-5" style="text-align: center; padding: 40px 20px;">
    <span *ngIf="isRunningInBrowser">Please run this in Illustrator</span>

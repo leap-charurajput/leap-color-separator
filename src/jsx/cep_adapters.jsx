@@ -622,6 +622,275 @@ function getSeparatedArtLayerNames(doc) {
  } catch (e) { }
  return layerNames;
 }
+
+function duplicateLayerContentsToNewLayer(sourceLayerName, newLayerName, shouldClearTarget) {
+ try {
+  $.writeln("[SEPARATION][UB_DEBUG] duplicateLayerContentsToNewLayer start source=" + sourceLayerName + " target=" + newLayerName);
+  if (!app.documents.length) {
+   $.writeln("[SEPARATION][UB_DEBUG] No open document; skip duplication");
+   return false;
+  }
+  var doc = app.activeDocument;
+  var separatedArtLayer = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SEPARATED_ART);
+  var sourceLayer = null;
+  for (var i = 0; i < separatedArtLayer.layers.length; i++) {
+   if (separatedArtLayer.layers[i].name === sourceLayerName) {
+    sourceLayer = separatedArtLayer.layers[i];
+    break;
+   }
+  }
+  if (!sourceLayer) {
+   $.writeln("[SEPARATION][UB_DEBUG] Source layer not found: " + sourceLayerName);
+   return false;
+  }
+  var newLayer = null;
+  for (var j = 0; j < separatedArtLayer.layers.length; j++) {
+   if (separatedArtLayer.layers[j].name === newLayerName) {
+    newLayer = separatedArtLayer.layers[j];
+    break;
+   }
+  }
+  if (!newLayer) {
+   newLayer = separatedArtLayer.layers.add();
+   newLayer.name = newLayerName;
+   $.writeln("[SEPARATION][UB_DEBUG] Created target layer: " + newLayerName);
+  } else {
+   $.writeln("[SEPARATION][UB_DEBUG] Target layer exists; refreshing contents: " + newLayerName);
+  }
+
+  // Keep added UB layers below source White UB in the layer stack.
+  try {
+   newLayer.move(sourceLayer, ElementPlacement.PLACEAFTER);
+  } catch (moveErr) {
+   $.writeln("[SEPARATION][UB_DEBUG] Could not move layer below source: " + (moveErr.message || moveErr.toString()));
+  }
+  if (shouldClearTarget !== false) {
+   for (var k = newLayer.pageItems.length - 1; k >= 0; k--) {
+    try {
+     newLayer.pageItems[k].remove();
+    } catch (clearErr) { }
+   }
+  }
+  sourceLayer.visible = true;
+  sourceLayer.locked = false;
+  newLayer.visible = true;
+  newLayer.locked = false;
+  for (var p = sourceLayer.pageItems.length - 1; p >= 0; p--) {
+   try {
+    sourceLayer.pageItems[p].duplicate(newLayer, ElementPlacement.PLACEATBEGINNING);
+   } catch (dupErr) { }
+  }
+  $.writeln("[SEPARATION][UB_DEBUG] Duplicated " + sourceLayer.pageItems.length + " items from " + sourceLayerName + " to " + newLayerName);
+  return true;
+ } catch (e) {
+  $.writeln("[SEPARATION][UB_DEBUG] duplicateLayerContentsToNewLayer error: " + (e.message || e.toString()));
+  return false;
+ }
+}
+
+function getSeparatedArtSubLayerByNameCaseInsensitive(separatedArtLayer, layerName) {
+ if (!separatedArtLayer || !layerName) return null;
+ var search = String(layerName).toUpperCase();
+ for (var i = 0; i < separatedArtLayer.layers.length; i++) {
+  var candidate = separatedArtLayer.layers[i];
+  if (candidate && candidate.name && String(candidate.name).toUpperCase() === search) {
+   return candidate;
+  }
+ }
+ return null;
+}
+
+function parseBlackLayerNamesFromProfile(profileMetadata) {
+ try {
+  var raw = profileMetadata && profileMetadata.blackInksKnockoutDisplay != null
+   ? String(profileMetadata.blackInksKnockoutDisplay)
+   : "";
+  if (!raw) return [];
+
+  var tokens = raw.split(/[\r\n,;|]+/);
+  var names = [];
+  var seen = {};
+  for (var i = 0; i < tokens.length; i++) {
+   var name = tokens[i] ? String(tokens[i]).replace(/^\s+|\s+$/g, "") : "";
+   if (!name) continue;
+   var key = name.toUpperCase();
+   if (seen[key]) continue;
+   seen[key] = true;
+   names.push(name);
+  }
+  return names;
+ } catch (e) {
+  return [];
+ }
+}
+
+function duplicateLayerPageItemsToTarget(sourceLayer, targetLayer) {
+ if (!sourceLayer || !targetLayer) return 0;
+ var duplicatedCount = 0;
+ sourceLayer.visible = true;
+ sourceLayer.locked = false;
+ targetLayer.visible = true;
+ targetLayer.locked = false;
+
+ for (var i = sourceLayer.pageItems.length - 1; i >= 0; i--) {
+  try {
+   sourceLayer.pageItems[i].duplicate(targetLayer, ElementPlacement.PLACEATBEGINNING);
+   duplicatedCount++;
+  } catch (dupErr) { }
+ }
+
+ for (var j = 0; j < sourceLayer.layers.length; j++) {
+  duplicatedCount += duplicateLayerPageItemsToTarget(sourceLayer.layers[j], targetLayer);
+ }
+
+ return duplicatedCount;
+}
+
+function copyBlackLayersToUnderbaseTargets(profileMetadata) {
+ try {
+  if (!app.documents.length) return;
+  var doc = app.activeDocument;
+  var separatedArtLayer = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SEPARATED_ART);
+  var enabledFlags = profileMetadata && profileMetadata.underbaseEnabled instanceof Array
+   ? profileMetadata.underbaseEnabled
+   : null;
+  var koFlags = profileMetadata && profileMetadata.underbaseKnockoutBlack instanceof Array
+   ? profileMetadata.underbaseKnockoutBlack
+   : null;
+  if (!enabledFlags || !koFlags) {
+   $.writeln("[SEPARATION][UB_DEBUG] Missing underbaseEnabled/underbaseKnockoutBlack; skipping black copy");
+   return;
+  }
+
+  var blackLayerNames = parseBlackLayerNamesFromProfile(profileMetadata);
+  if (blackLayerNames.length === 0) {
+   $.writeln("[SEPARATION][UB_DEBUG] Black k/o list is empty; skipping black copy");
+   return;
+  }
+
+  var blackSourceLayers = [];
+  for (var i = 0; i < blackLayerNames.length; i++) {
+   var blackLayer = getSeparatedArtSubLayerByNameCaseInsensitive(separatedArtLayer, blackLayerNames[i]);
+   if (blackLayer) {
+    blackSourceLayers.push(blackLayer);
+   }
+  }
+  if (blackSourceLayers.length === 0) {
+   $.writeln("[SEPARATION][UB_DEBUG] No black source layer found from profile list: " + blackLayerNames.join(", "));
+   return;
+  }
+
+  var ubTargets = [
+   CONSTANTS.LAYER_NAMES.WHITE_UB,
+   CONSTANTS.LAYER_NAMES.WHITE_UB + " 2",
+   CONSTANTS.LAYER_NAMES.WHITE_UB + " 3",
+   CONSTANTS.LAYER_NAMES.WHITE_UB + " 4"
+  ];
+
+  for (var ubIndex = 0; ubIndex < ubTargets.length; ubIndex++) {
+   if (enabledFlags[ubIndex] !== true || koFlags[ubIndex] !== true) {
+    continue;
+   }
+   var targetLayer = getSeparatedArtSubLayerByNameCaseInsensitive(separatedArtLayer, ubTargets[ubIndex]);
+   if (!targetLayer) {
+    $.writeln("[SEPARATION][UB_DEBUG] Target UB layer not found for black copy: " + ubTargets[ubIndex]);
+    continue;
+   }
+   var copiedItems = 0;
+   for (var srcIdx = 0; srcIdx < blackSourceLayers.length; srcIdx++) {
+    copiedItems += duplicateLayerPageItemsToTarget(blackSourceLayers[srcIdx], targetLayer);
+   }
+   $.writeln("[SEPARATION][UB_DEBUG] Copied black layer items to " + ubTargets[ubIndex] + ": " + copiedItems);
+  }
+ } catch (e) {
+  $.writeln("[SEPARATION][UB_DEBUG] copyBlackLayersToUnderbaseTargets error: " + (e.message || e.toString()));
+ }
+}
+
+function ensureSwatchExistsFromSource(sourceSwatchName, newSwatchName) {
+ try {
+  var doc = app.activeDocument;
+  try {
+   var existing = doc.swatches.getByName(newSwatchName);
+   if (existing) {
+    $.writeln("[SEPARATION][UB_DEBUG] Swatch already exists: " + newSwatchName);
+    return true;
+   }
+  } catch (existingErr) { }
+
+  var sourceSwatch = doc.swatches.getByName(sourceSwatchName);
+  if (!sourceSwatch || !sourceSwatch.color) {
+   $.writeln("[SEPARATION][UB_DEBUG] Source swatch not found for duplication: " + sourceSwatchName);
+   return false;
+  }
+
+  var sourceColor = sourceSwatch.color;
+  if (sourceColor.typename === "SpotColor" && sourceColor.spot) {
+   var newSpot = doc.spots.add();
+   newSpot.name = newSwatchName;
+   try {
+    newSpot.colorType = sourceColor.spot.colorType;
+   } catch (ctErr) { }
+   newSpot.color = sourceColor.spot.color;
+   $.writeln("[SEPARATION][UB_DEBUG] Created spot swatch: " + newSwatchName);
+   return true;
+  }
+
+  // Non-spot fallback.
+  var newSwatch = doc.swatches.add();
+  newSwatch.name = newSwatchName;
+  newSwatch.color = sourceColor;
+  $.writeln("[SEPARATION][UB_DEBUG] Created process swatch: " + newSwatchName);
+  return true;
+ } catch (e) {
+  $.writeln("[SEPARATION][UB_DEBUG] ensureSwatchExistsFromSource error: " + (e.message || e.toString()));
+  return false;
+ }
+}
+
+function applyProfileUnderbaseLayers(profileMetadata) {
+ try {
+  $.writeln("[SEPARATION][UB_DEBUG] applyProfileUnderbaseLayers profileMetadata=" + JSON.stringify(profileMetadata));
+  var enabled = profileMetadata && profileMetadata.underbaseEnabled instanceof Array
+   ? profileMetadata.underbaseEnabled
+   : null;
+  if (!enabled || enabled.length < 2) {
+   $.writeln("[SEPARATION][UB_DEBUG] underbaseEnabled missing/short; skip extra UB layers");
+   return;
+  }
+  $.writeln("[SEPARATION][UB_DEBUG] underbaseEnabled flags=" + enabled.join(","));
+  if (enabled[1] === true) {
+   ensureSwatchExistsFromSource(CONSTANTS.LAYER_NAMES.WHITE_UB, CONSTANTS.LAYER_NAMES.WHITE_UB + " 2");
+   duplicateLayerContentsToNewLayer(CONSTANTS.LAYER_NAMES.WHITE_UB, CONSTANTS.LAYER_NAMES.WHITE_UB + " 2");
+  }
+  if (enabled[2] === true) {
+   ensureSwatchExistsFromSource(CONSTANTS.LAYER_NAMES.WHITE_UB, CONSTANTS.LAYER_NAMES.WHITE_UB + " 2");
+   ensureSwatchExistsFromSource(CONSTANTS.LAYER_NAMES.WHITE_UB, CONSTANTS.LAYER_NAMES.WHITE_UB + " 3");
+   duplicateLayerContentsToNewLayer(CONSTANTS.LAYER_NAMES.WHITE_UB, CONSTANTS.LAYER_NAMES.WHITE_UB + " 2");
+   duplicateLayerContentsToNewLayer(CONSTANTS.LAYER_NAMES.WHITE_UB, CONSTANTS.LAYER_NAMES.WHITE_UB + " 3");
+  }
+  if (enabled[3] === true) {
+   ensureSwatchExistsFromSource(CONSTANTS.LAYER_NAMES.WHITE_UB, CONSTANTS.LAYER_NAMES.WHITE_UB + " 2");
+   ensureSwatchExistsFromSource(CONSTANTS.LAYER_NAMES.WHITE_UB, CONSTANTS.LAYER_NAMES.WHITE_UB + " 3");
+   ensureSwatchExistsFromSource(CONSTANTS.LAYER_NAMES.WHITE_UB, CONSTANTS.LAYER_NAMES.WHITE_UB + " 4");
+   duplicateLayerContentsToNewLayer(CONSTANTS.LAYER_NAMES.WHITE_UB, CONSTANTS.LAYER_NAMES.WHITE_UB + " 2");
+   duplicateLayerContentsToNewLayer(CONSTANTS.LAYER_NAMES.WHITE_UB, CONSTANTS.LAYER_NAMES.WHITE_UB + " 3");
+   duplicateLayerContentsToNewLayer(CONSTANTS.LAYER_NAMES.WHITE_UB, CONSTANTS.LAYER_NAMES.WHITE_UB + " 4");
+  }
+  // Temporarily disabled per request: do not copy Black layer items into White UB layers.
+  // copyBlackLayersToUnderbaseTargets(profileMetadata);
+  try {
+   var sepLayer = app.activeDocument.layers.getByName(CONSTANTS.LAYER_NAMES.SEPARATED_ART);
+   var names = [];
+   for (var i = 0; i < sepLayer.layers.length; i++) {
+    names.push(sepLayer.layers[i].name);
+   }
+   $.writeln("[SEPARATION][UB_DEBUG] SEPARATED_ART sublayers after UB apply: " + names.join(" | "));
+  } catch (layerListErr) {
+   $.writeln("[SEPARATION][UB_DEBUG] Could not list sublayers: " + (layerListErr.message || layerListErr.toString()));
+  }
+ } catch (e) { }
+}
 function copyAndPrepareSEPDocument(templateFile, destinationFolder, docName, jsonData, styleCodes, profileMetadata, bodyColorFromXMP) {
  var profileCode = null;
  if (profileMetadata && profileMetadata.profileCode) {
@@ -829,7 +1098,7 @@ function handlePerformSeparation(params_string) {
   loadLEAPColorSepsActions();
   splitColors(graphicName);
   deleteNonFillStrokeItems();
-  generateUnderbase(graphicName);
+  generateUnderbase(graphicName, null, profileMetadata);
   setOverprintOnSeparatedArt(sepDoc, true);
   var _sizedArtLayer = app.activeDocument.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_ART);
   _sizedArtLayer.visible = false;
@@ -986,9 +1255,19 @@ function handleRecreatePlatesInActiveDocument(params_string) {
   }
   var doc = app.activeDocument;
   loadLEAPColorSepsActions();
-  splitColors(graphicName);
-  deleteNonFillStrokeItems();
-  generateUnderbase(graphicName);
+  var hasCleanupParams = params.hasOwnProperty("deleteUnpaintedPaths") || params.hasOwnProperty("deleteLeftoverPaths");
+  var cleanupOpts = null;
+  if (hasCleanupParams) {
+   cleanupOpts = {
+    deleteUnpaintedPaths: params.deleteUnpaintedPaths === true,
+    deleteLeftoverPaths: params.deleteLeftoverPaths === true
+   };
+  }
+  splitColors(graphicName, cleanupOpts);
+  if (cleanupOpts == null || cleanupOpts.deleteUnpaintedPaths) {
+   deleteNonFillStrokeItems();
+  }
+  generateUnderbase(graphicName, cleanupOpts, null);
   setOverprintOnSeparatedArt(doc, true);
   var _sizedArtLayer = app.activeDocument.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_ART);
   _sizedArtLayer.visible = false;

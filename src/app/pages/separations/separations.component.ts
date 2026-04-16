@@ -8,6 +8,7 @@ import {
  SimpleChanges
 } from '@angular/core';
 import { Subscription } from 'rxjs';
+import { ConfirmDialogCheckboxOption } from '../../components/confirm-dialog/confirm-dialog.component';
 import { ControllerService } from '../../services/controller.service';
 import { GraphicsDataService } from '../../services/graphics-data.service';
 
@@ -65,6 +66,18 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
  } = {};
  /** Show confirmation dialog before deleting all plates */
  showDeleteAllConfirm = false;
+ /** Show confirmation before recreating plates (optional cleanup checkboxes) */
+ showRecreateAllConfirm = false;
+ recreatePlateCheckboxOptions: ConfirmDialogCheckboxOption[] = [
+  {
+   id: 'deleteUnpaintedPaths',
+   label: 'Delete unpainted paths after Merge'
+  },
+  {
+   id: 'deleteLeftoverPaths',
+   label: 'Delete leftover paths after Add'
+  }
+ ];
  private documentActivateHandler: (() => void) | null = null;
  private graphicsSubscription: Subscription | null = null;
 
@@ -594,6 +607,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 
   const getProfileCodeAndCreateSeparation = async () => {
    let profileCode = null;
+   let profileInfo: any = null;
 
    if (profileName && !this.isRunningInBrowser) {
     try {
@@ -604,6 +618,17 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
      } else {
      }
     } catch (err) { }
+
+    try {
+     const profileLookupKey = profileCode || profileName;
+     if (profileLookupKey) {
+      const profileInfoResult = await this.controller.getProfileInformation(profileLookupKey);
+      console.log('[SEPARATIONS][UB_DEBUG] getProfileInformation result for', profileLookupKey, ':', profileInfoResult);
+      if (profileInfoResult && profileInfoResult.success && profileInfoResult.profileInfo) {
+       profileInfo = profileInfoResult.profileInfo;
+      }
+     }
+    } catch (profileInfoErr) { }
    }
 
    let artistName = '';
@@ -656,10 +681,50 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
     artistInitials: artistInitials,
     position: position
    };
+   if (profileInfo && profileInfo.found) {
+    profileMetadata.underbaseEnabled = [
+     true,
+     !!profileInfo.underbase2Enabled,
+     !!profileInfo.underbase3Enabled,
+     !!profileInfo.underbase4Enabled
+    ];
+    profileMetadata.underbaseMeshes = [
+     profileInfo.ub1Mesh != null ? String(profileInfo.ub1Mesh) : '',
+     profileInfo.ub2Mesh != null ? String(profileInfo.ub2Mesh) : '',
+     profileInfo.ub3Mesh != null ? String(profileInfo.ub3Mesh) : '',
+     profileInfo.ub4Mesh != null ? String(profileInfo.ub4Mesh) : ''
+    ];
+    profileMetadata.underbaseKnockoutBlack = Array.isArray(profileInfo.underbaseKnockoutBlack)
+     ? [
+      !!profileInfo.underbaseKnockoutBlack[0],
+      !!profileInfo.underbaseKnockoutBlack[1],
+      !!profileInfo.underbaseKnockoutBlack[2],
+      !!profileInfo.underbaseKnockoutBlack[3]
+     ]
+     : [false, false, false, false];
+    profileMetadata.blackInksKnockoutDisplay =
+     profileInfo.blackInksKnockoutDisplay != null
+      ? String(profileInfo.blackInksKnockoutDisplay)
+      : '';
+    console.log('[SEPARATIONS][UB_DEBUG] profileMetadata underbase flags/meshes:', {
+     profileName,
+     profileCode,
+     underbaseEnabled: profileMetadata.underbaseEnabled,
+     underbaseMeshes: profileMetadata.underbaseMeshes,
+     underbaseKnockoutBlack: profileMetadata.underbaseKnockoutBlack,
+     blackInksKnockoutDisplay: profileMetadata.blackInksKnockoutDisplay
+    });
+   } else {
+    console.warn('[SEPARATIONS][UB_DEBUG] No profileInfo found; underbaseEnabled not set on metadata', {
+     profileName,
+     profileCode
+    });
+   }
    if (bodyColorData) {
     profileMetadata.bodyColorData = bodyColorData;
    }
 
+   console.log('[SEPARATIONS][UB_DEBUG] performSeparation payload profileMetadata:', profileMetadata);
    return this.controller.performSeparation(graphicName, styleCodes, profileMetadata);
   };
 
@@ -847,10 +912,34 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
   const meta = this.separatedDocInfo?.profileMetaData;
   const graphicName = meta?.graphicName ? String(meta.graphicName).trim() : '';
   if (!graphicName) return;
+  this.showRecreateAllConfirm = true;
+  this.cdr.detectChanges();
+ }
+
+ cancelRecreateAllPlates(): void {
+  this.showRecreateAllConfirm = false;
+  this.cdr.detectChanges();
+ }
+
+ confirmRecreateAllPlates(ev?: void | Record<string, boolean>): void {
+  this.showRecreateAllConfirm = false;
+  this.cdr.detectChanges();
+  const meta = this.separatedDocInfo?.profileMetaData;
+  const graphicName = meta?.graphicName ? String(meta.graphicName).trim() : '';
+  if (!graphicName) return;
+
+  const evRec = ev && typeof ev === 'object' ? (ev as Record<string, boolean>) : null;
+  const cleanup = evRec
+   ? {
+    deleteUnpaintedPaths: !!evRec['deleteUnpaintedPaths'],
+    deleteLeftoverPaths: !!evRec['deleteLeftoverPaths']
+   }
+   : { deleteUnpaintedPaths: false, deleteLeftoverPaths: false };
+
   this.controller.deleteAllPlatesInSeparationDoc?.()
    ?.then((delRes) => {
     if (delRes && !delRes.success) return undefined;
-    return this.controller.recreatePlatesInActiveDocument?.(graphicName);
+    return this.controller.recreatePlatesInActiveDocument?.(graphicName, cleanup);
    })
    ?.then((recreateRes) => {
     if (recreateRes?.success) {

@@ -8,6 +8,9 @@ interface Profile {
  code: string;
  colorMesh: string;
  underbaseMeshes: string[];
+ underbaseEnabled: boolean[];
+ underbaseKnockoutBlack?: boolean[];
+ blackInksKnockoutDisplay?: string;
  waterbaseInk: boolean;
  distress?: string;
  _jsonData?: any;
@@ -45,7 +48,7 @@ export class SettingsComponent implements OnInit {
 
  leapServerPath = '';
 
- constructor(private controller: ControllerService) {}
+ constructor(private controller: ControllerService) { }
 
  async ngOnInit(): Promise<void> {
   this.loadProfiles();
@@ -172,18 +175,47 @@ export class SettingsComponent implements OnInit {
 
   const profileName = jsonProfile['Profile Name'] || '';
   const distress = jsonProfile['Distress'] || 'N';
+  const toEnabled = (value: any) => {
+   if (value === true || value === 1) return true;
+   if (typeof value === 'string') {
+    const v = value.trim().toUpperCase();
+    return v === 'Y' || v === 'YES' || v === 'TRUE' || v === '1';
+   }
+   return false;
+  };
+  const ubMeshes = [
+   meshToString(jsonProfile['UB 1 Mesh']),
+   meshToString(jsonProfile['UB 2 Mesh']),
+   meshToString(jsonProfile['UB 3 Mesh']),
+   meshToString(jsonProfile['UB 4 Mesh'])
+  ];
+  const savedEnabled = Array.isArray(jsonProfile.underbaseEnabled) ? jsonProfile.underbaseEnabled : null;
+  const savedKnockout = Array.isArray(jsonProfile.underbaseKnockoutBlack)
+   ? jsonProfile.underbaseKnockoutBlack
+   : null;
+  const underbaseEnabled = [
+   true,
+   savedEnabled ? !!savedEnabled[1] : toEnabled(jsonProfile['Underbase 2']) || ubMeshes[1] !== '',
+   savedEnabled ? !!savedEnabled[2] : toEnabled(jsonProfile['Underbase 3']) || ubMeshes[2] !== '',
+   savedEnabled ? !!savedEnabled[3] : toEnabled(jsonProfile['Underbase 4']) || ubMeshes[3] !== ''
+  ];
+  const underbaseKnockoutBlack = [
+   savedKnockout ? !!savedKnockout[0] : false,
+   savedKnockout ? !!savedKnockout[1] : false,
+   savedKnockout ? !!savedKnockout[2] : false,
+   savedKnockout ? !!savedKnockout[3] : false
+  ];
 
   return {
    id: jsonProfile.id || this.generateId(profileName, distress),
    name: profileName,
    code: jsonProfile['Profile Code'] || '',
    colorMesh: meshToString(jsonProfile['Color Mesh']),
-   underbaseMeshes: [
-    meshToString(jsonProfile['UB 1 Mesh']),
-    meshToString(jsonProfile['UB 2 Mesh']),
-    meshToString(jsonProfile['UB 3 Mesh']),
-    meshToString(jsonProfile['UB 4 Mesh'])
-   ],
+   underbaseMeshes: ubMeshes,
+   underbaseEnabled: underbaseEnabled,
+   underbaseKnockoutBlack: underbaseKnockoutBlack,
+   blackInksKnockoutDisplay:
+    jsonProfile.blackInksKnockoutDisplay != null ? String(jsonProfile.blackInksKnockoutDisplay) : '',
    waterbaseInk: jsonProfile['WB'] === 'Y' || jsonProfile['WB'] === true,
    distress: distress,
    _jsonData: jsonProfile
@@ -207,6 +239,25 @@ export class SettingsComponent implements OnInit {
    'UB 2 Mesh': stringToNumberOrEmpty(reactProfile.underbaseMeshes[1]),
    'UB 3 Mesh': stringToNumberOrEmpty(reactProfile.underbaseMeshes[2]),
    'UB 4 Mesh': stringToNumberOrEmpty(reactProfile.underbaseMeshes[3]),
+   'Underbase 2': reactProfile.underbaseEnabled && reactProfile.underbaseEnabled[1] ? 'Y' : 'N',
+   'Underbase 3': reactProfile.underbaseEnabled && reactProfile.underbaseEnabled[2] ? 'Y' : 'N',
+   'Underbase 4': reactProfile.underbaseEnabled && reactProfile.underbaseEnabled[3] ? 'Y' : 'N',
+   underbaseEnabled: [
+    true,
+    !!(reactProfile.underbaseEnabled && reactProfile.underbaseEnabled[1]),
+    !!(reactProfile.underbaseEnabled && reactProfile.underbaseEnabled[2]),
+    !!(reactProfile.underbaseEnabled && reactProfile.underbaseEnabled[3])
+   ],
+   underbaseKnockoutBlack: [
+    !!(reactProfile.underbaseKnockoutBlack && reactProfile.underbaseKnockoutBlack[0]),
+    !!(reactProfile.underbaseKnockoutBlack && reactProfile.underbaseKnockoutBlack[1]),
+    !!(reactProfile.underbaseKnockoutBlack && reactProfile.underbaseKnockoutBlack[2]),
+    !!(reactProfile.underbaseKnockoutBlack && reactProfile.underbaseKnockoutBlack[3])
+   ],
+   blackInksKnockoutDisplay:
+    reactProfile.blackInksKnockoutDisplay != null
+     ? String(reactProfile.blackInksKnockoutDisplay)
+     : '',
    WB: reactProfile.waterbaseInk ? 'Y' : 'N'
   };
 
@@ -216,14 +267,14 @@ export class SettingsComponent implements OnInit {
    jsonProfile.Blocker = reactProfile._jsonData.Blocker || 'N';
    jsonProfile.Flash =
     reactProfile._jsonData.Flash &&
-    reactProfile._jsonData.Flash !== null &&
-    !isNaN(reactProfile._jsonData.Flash)
+     reactProfile._jsonData.Flash !== null &&
+     !isNaN(reactProfile._jsonData.Flash)
      ? reactProfile._jsonData.Flash
      : '';
    jsonProfile.Cool =
     reactProfile._jsonData.Cool &&
-    reactProfile._jsonData.Cool !== null &&
-    !isNaN(reactProfile._jsonData.Cool)
+     reactProfile._jsonData.Cool !== null &&
+     !isNaN(reactProfile._jsonData.Cool)
      ? reactProfile._jsonData.Cool
      : '';
    jsonProfile.Micron = reactProfile._jsonData.Micron || 'XXX';

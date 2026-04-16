@@ -767,6 +767,7 @@ async function getProfileInformation(profileCode) {
   );
 
   if (!matchedProfile) {
+   console.warn('[LEAP][UB_DEBUG] Profile not found in Profiles.json for code:', profileCode);
    return {
     found: false,
     profileCode: profileCode,
@@ -776,6 +777,15 @@ async function getProfileInformation(profileCode) {
     wb: false
    };
   }
+
+  const toEnabled = (value) => {
+   if (value === true || value === 1) return true;
+   if (typeof value === 'string') {
+    const normalized = value.trim().toUpperCase();
+    return normalized === 'Y' || normalized === 'YES' || normalized === 'TRUE' || normalized === '1';
+   }
+   return false;
+  };
 
   const flashValue = matchedProfile['Flash']
    ? String(matchedProfile['Flash']).trim().toUpperCase()
@@ -790,6 +800,39 @@ async function getProfileInformation(profileCode) {
   const cool = coolValue === 'Y' || coolValue === 'YES';
   const wb = wbValue === 'Y' || wbValue === 'YES';
 
+  const ubEnabledArray = Array.isArray(matchedProfile.underbaseEnabled)
+   ? matchedProfile.underbaseEnabled
+   : null;
+  const ubKnockoutArray = Array.isArray(matchedProfile.underbaseKnockoutBlack)
+   ? matchedProfile.underbaseKnockoutBlack
+   : null;
+  const ub2Enabled = toEnabled(
+   matchedProfile['Underbase 2'] != null ? matchedProfile['Underbase 2'] : matchedProfile['UB 2']
+  ) || (ubEnabledArray ? !!ubEnabledArray[1] : false);
+  const ub3Enabled = toEnabled(
+   matchedProfile['Underbase 3'] != null ? matchedProfile['Underbase 3'] : matchedProfile['UB 3']
+  ) || (ubEnabledArray ? !!ubEnabledArray[2] : false);
+  const ub4Enabled = toEnabled(
+   matchedProfile['Underbase 4'] != null ? matchedProfile['Underbase 4'] : matchedProfile['UB 4']
+  ) || (ubEnabledArray ? !!ubEnabledArray[3] : false);
+
+  console.log('[LEAP][UB_DEBUG] Matched profile row:', {
+   profileCode,
+   profileName: matchedProfile['Profile Name'] || '',
+   underbase2Raw: matchedProfile['Underbase 2'] != null ? matchedProfile['Underbase 2'] : matchedProfile['UB 2'],
+   underbase3Raw: matchedProfile['Underbase 3'] != null ? matchedProfile['Underbase 3'] : matchedProfile['UB 3'],
+   underbase4Raw: matchedProfile['Underbase 4'] != null ? matchedProfile['Underbase 4'] : matchedProfile['UB 4'],
+   underbaseEnabledArray: ubEnabledArray,
+   underbaseKnockoutArray: ubKnockoutArray,
+   underbase2Enabled: ub2Enabled,
+   underbase3Enabled: ub3Enabled,
+   underbase4Enabled: ub4Enabled,
+   ub1Mesh: matchedProfile['UB 1 Mesh'] || '',
+   ub2Mesh: matchedProfile['UB 2 Mesh'] || '',
+   ub3Mesh: matchedProfile['UB 3 Mesh'] || '',
+   ub4Mesh: matchedProfile['UB 4 Mesh'] || ''
+  });
+
   return {
    found: true,
    profileCode: profileCode,
@@ -803,11 +846,25 @@ async function getProfileInformation(profileCode) {
    ub2Mesh: matchedProfile['UB 2 Mesh'] || '',
    ub3Mesh: matchedProfile['UB 3 Mesh'] || '',
    ub4Mesh: matchedProfile['UB 4 Mesh'] || '',
+   blackInksKnockoutDisplay:
+    matchedProfile.blackInksKnockoutDisplay != null
+     ? String(matchedProfile.blackInksKnockoutDisplay)
+     : '',
+   underbaseKnockoutBlack: [
+    ubKnockoutArray ? !!ubKnockoutArray[0] : false,
+    ubKnockoutArray ? !!ubKnockoutArray[1] : false,
+    ubKnockoutArray ? !!ubKnockoutArray[2] : false,
+    ubKnockoutArray ? !!ubKnockoutArray[3] : false
+   ],
+   underbase2Enabled: ub2Enabled,
+   underbase3Enabled: ub3Enabled,
+   underbase4Enabled: ub4Enabled,
    distress: matchedProfile['Distress'] || '',
    twoHits: matchedProfile['2 Hits'] || '',
    blocker: matchedProfile['Blocker'] || ''
   };
  } catch (error) {
+  console.error('[LEAP][UB_DEBUG] getProfileInformation failed:', profileCode, error.message);
   return {
    found: false,
    profileCode: profileCode,

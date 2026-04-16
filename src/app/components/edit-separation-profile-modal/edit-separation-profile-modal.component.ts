@@ -17,7 +17,7 @@ interface ProfileFormState {
  blackInksKnockoutDisplay: string;
 }
 
-const defaultProfile: ProfileFormState = {
+const buildDefaultProfile = (defaultBlackColorNames?: string): ProfileFormState => ({
  id: '',
  name: '',
  code: '',
@@ -31,8 +31,8 @@ const defaultProfile: ProfileFormState = {
  underbaseKnockoutBlack: [false, false, false, false],
  formatInkNameLabel: false,
  colorNameLabelFormat: '',
- blackInksKnockoutDisplay: 'Black, PANTONE Black C, PANTONE Black 6 C, BLACK 00A'
-};
+ blackInksKnockoutDisplay: defaultBlackColorNames || 'Black, PANTONE Black C, PANTONE Black 6 C, BLACK 00A'
+});
 
 @Component({
  selector: 'app-edit-separation-profile-modal',
@@ -42,22 +42,24 @@ const defaultProfile: ProfileFormState = {
 export class EditSeparationProfileModalComponent implements OnInit, OnChanges {
  @Input() isOpen = false;
  @Input() profile: any = null;
+ @Input() defaultBlackColorNames = '';
  @Output() close = new EventEmitter<void>();
  @Output() save = new EventEmitter<any>();
 
- formState: ProfileFormState = { ...defaultProfile };
+ formState: ProfileFormState = buildDefaultProfile();
 
  ngOnInit(): void {
   this.updateFormState();
  }
 
  ngOnChanges(changes: SimpleChanges): void {
-  if (changes['profile'] || changes['isOpen']) {
+  if (changes['profile'] || changes['isOpen'] || changes['defaultBlackColorNames']) {
    this.updateFormState();
   }
  }
 
  private updateFormState(): void {
+  const defaultProfile = buildDefaultProfile(this.defaultBlackColorNames);
   if (this.profile) {
    const ub = this.profile.underbaseMeshes || defaultProfile.underbaseMeshes;
    let ubEnabled = this.profile.underbaseEnabled ?? defaultProfile.underbaseEnabled;
@@ -85,7 +87,7 @@ export class EditSeparationProfileModalComponent implements OnInit, OnChanges {
  }
 
  onInputChange(field: string, event: Event): void {
-  const value = (event.target as HTMLInputElement).value;
+  const value = (event.target as HTMLInputElement | HTMLTextAreaElement).value;
   (this.formState as any)[field] = value;
  }
 
@@ -130,5 +132,9 @@ export class EditSeparationProfileModalComponent implements OnInit, OnChanges {
  /** True when any "k/o black inks" checkbox is checked (show Black inks k/o'd section). */
  isAnyKnockoutBlackChecked(): boolean {
   return this.formState.underbaseKnockoutBlack.some(b => b);
+ }
+
+ trackByIndex(index: number): number {
+  return index;
  }
 }

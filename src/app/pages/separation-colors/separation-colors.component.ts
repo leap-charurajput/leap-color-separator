@@ -726,6 +726,91 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   return lowerName.includes('white ub') || lowerName.includes('whiteub');
  }
 
+ private getRequiredWhiteUbCountFromProfile(): number {
+  const meta = this.documentProfileMetadata || {};
+  const isEnabled = (value: any): boolean => {
+   if (value === true) return true;
+   if (typeof value === 'string') {
+    const v = value.trim().toUpperCase();
+    return v === 'Y' || v === 'YES' || v === 'TRUE' || v === '1';
+   }
+   return value === 1;
+  };
+  const enabled = Array.isArray(meta.underbaseEnabled) ? meta.underbaseEnabled : [];
+
+  if (enabled.length > 0) {
+   const ub1 = enabled[0] !== false;
+   const ub2 = !!enabled[1];
+   const ub3 = !!enabled[2];
+   if (ub3) return 3;
+   if (ub2) return 2;
+   return ub1 ? 1 : 1;
+  }
+
+  const ub3 = isEnabled(meta.underbase3Enabled) || isEnabled(meta.ub3Enabled) || isEnabled(meta.underbase3) || isEnabled(meta['Underbase 3']);
+  const ub2 = isEnabled(meta.underbase2Enabled) || isEnabled(meta.ub2Enabled) || isEnabled(meta.underbase2) || isEnabled(meta['Underbase 2']);
+
+  if (ub3) return 3;
+  if (ub2) return 2;
+  return 1;
+ }
+
+ private getProfileUnderbaseMeshes(): string[] {
+  const meta = this.documentProfileMetadata || {};
+  if (Array.isArray(meta.underbaseMeshes)) {
+   return meta.underbaseMeshes.map((m: any) => (m == null ? '' : String(m).trim()));
+  }
+
+  return [
+   meta.ub1Mesh != null ? String(meta.ub1Mesh).trim() : '',
+   meta.ub2Mesh != null ? String(meta.ub2Mesh).trim() : '',
+   meta.ub3Mesh != null ? String(meta.ub3Mesh).trim() : ''
+  ];
+ }
+
+ private buildTableRowsWithRequiredWhiteUb(activeRows: ColorRow[]): ColorRow[] {
+  const whiteRows = activeRows.filter((row) => this.isWhiteUB(row.colorName));
+  if (whiteRows.length === 0) {
+   return activeRows;
+  }
+
+  const requiredWhiteCount = this.getRequiredWhiteUbCountFromProfile();
+  const underbaseMeshes = this.getProfileUnderbaseMeshes();
+  const expandedCount = Math.max(requiredWhiteCount, whiteRows.length);
+
+  const sortedWhiteRows = [...whiteRows].sort((a, b) =>
+   (a.colorName || '').localeCompare(b.colorName || '', undefined, { numeric: true, sensitivity: 'base' })
+  );
+  const whiteTemplate = sortedWhiteRows[0];
+  const baseWhiteName = (whiteTemplate.colorName || 'White UB').replace(/\s+\d+$/g, '').trim();
+
+  const expandedWhiteRows: ColorRow[] = [];
+  for (let i = 0; i < expandedCount; i++) {
+   const sourceRow = sortedWhiteRows[i] || whiteTemplate;
+   const meshFromProfile = underbaseMeshes[i] || '';
+   expandedWhiteRows.push({
+    ...sourceRow,
+    colorName: i === 0 ? baseWhiteName : `${baseWhiteName} ${i + 1}`,
+    mesh: meshFromProfile || sourceRow.mesh
+   });
+  }
+
+  const mergedRows: ColorRow[] = [];
+  let hasInsertedWhiteRows = false;
+  for (const row of activeRows) {
+   if (this.isWhiteUB(row.colorName)) {
+    if (!hasInsertedWhiteRows) {
+     mergedRows.push(...expandedWhiteRows);
+     hasInsertedWhiteRows = true;
+    }
+    continue;
+   }
+   mergedRows.push(row);
+  }
+
+  return hasInsertedWhiteRows ? mergedRows : [...activeRows, ...expandedWhiteRows];
+ }
+
  handleGraphicMenuClick(item: string): void {
   console.log('[SEPARATION] Graphic menu clicked:', item);
 
@@ -1377,7 +1462,8 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
    return;
   }
 
-  const separationData = activeRows.map((row, index) => ({
+  const tableRows = this.buildTableRowsWithRequiredWhiteUb(activeRows);
+  const separationData = tableRows.map((row, index) => ({
    seq: index + 1,
    colorName: row.colorName,
    mesh: row.mesh,

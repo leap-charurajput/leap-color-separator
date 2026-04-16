@@ -52,3 +52,14 @@
  color: #ff8a80;
  font-size: 11px;
 }
+
+.confirm-dialog-checkboxes {
+ display: flex;
+ flex-direction: column;
+ gap: 10px;
+}
+
+.confirm-dialog-checkboxes .checkbox-component {
+ width: 100%;
+ align-items: flex-start;
+}

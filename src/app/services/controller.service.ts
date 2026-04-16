@@ -792,28 +792,28 @@ export class ControllerService {
      resolvedPpdName
     );
     return evalScript(script)
-    .then(async (res: unknown) => {
-     const str = typeof res === 'string' ? res : '';
-     const result = str ? JSON.parse(str) : { success: false, error: 'No result' };
+     .then(async (res: unknown) => {
+      const str = typeof res === 'string' ? res : '';
+      const result = str ? JSON.parse(str) : { success: false, error: 'No result' };
 
-     if (result?.success && result?.filePath) {
-      console.log('[exportPostscript] PS exported:', result.filePath);
-      const distiller = await this.launchDistiller(result.filePath);
-      console.log('[exportPostscript] Distiller launch result:', distiller);
-      return {
-       ...result,
-       distiller,
-       note: distiller.success
-        ? 'Adobe Distiller launched to process PostScript.'
-        : 'PostScript exported, but Adobe Distiller could not be launched automatically.'
-      };
-     }
+      if (result?.success && result?.filePath) {
+       console.log('[exportPostscript] PS exported:', result.filePath);
+       const distiller = await this.launchDistiller(result.filePath);
+       console.log('[exportPostscript] Distiller launch result:', distiller);
+       return {
+        ...result,
+        distiller,
+        note: distiller.success
+         ? 'Adobe Distiller launched to process PostScript.'
+         : 'PostScript exported, but Adobe Distiller could not be launched automatically.'
+       };
+      }
 
-     return result;
-    })
-    .catch((err: any) => {
-     throw err;
-    });
+      return result;
+     })
+     .catch((err: any) => {
+      throw err;
+     });
    });
   });
  }
@@ -898,11 +898,11 @@ export class ControllerService {
   }
  }
 
-private buildExportPostscriptScript(inks: string[], printPresetFsPath: string, ppdName: string): string {
+ private buildExportPostscriptScript(inks: string[], printPresetFsPath: string, ppdName: string): string {
   const safeInks = Array.isArray(inks) ? inks : [];
   const inksLiteral = JSON.stringify(safeInks);
   const presetPathLiteral = JSON.stringify(printPresetFsPath);
- const ppdNameLiteral = JSON.stringify(ppdName || 'IBlock v2');
+  const ppdNameLiteral = JSON.stringify(ppdName || 'IBlock v2');
   return `
 (function() {
   try {
@@ -918,20 +918,6 @@ private buildExportPostscriptScript(inks: string[], printPresetFsPath: string, p
     var docFolder = docFile.parent;
     var docName = docFile.name.replace(/\\.[^\\.]+$/, "");
     var outputPath = docFolder.fsName + "/" + docName + ".ps";
-
-    // Flattener
-    var flatOptions = new PrintFlattenerOptions();
-    flatOptions.clipComplexRegions = false;
-    flatOptions.convertStrokesToOutlines = false;
-    flatOptions.convertTextToOutlines = false;
-    flatOptions.flatteningBalance = 100;
-    flatOptions.gradientResolution = 300;
-    flatOptions.rasterizationResolution = 300;
-
-     // Font options
-    var fontOptions = new PrintFontOptions();
-    fontOptions.downloadFonts = PrintFontDownloadMode.DOWNLOADSUBSET;
-
 
     // Job options for the print job
     var jobOptions = new PrintJobOptions();
@@ -952,10 +938,6 @@ private buildExportPostscriptScript(inks: string[], printPresetFsPath: string, p
 
      // Color separation options
     var colorSepOptions = new PrintColorSeparationOptions();
-    colorSepOptions.colorSeparationMode = PrintColorSeparationMode.HOSTBASEDSEPARATION;
-    colorSepOptions.convertSpotColors = false;
-    colorSepOptions.overprintBlack = false;
-
     var _inkList = doc.inkList;
     var printInks = [];
     var inksLookup = {};
@@ -968,48 +950,13 @@ private buildExportPostscriptScript(inks: string[], printPresetFsPath: string, p
       // ink.inkInfo.printingStatus = inksLookup[inkName] ? true : false;
       printInks.push(ink);
     }
-
     colorSepOptions.inkList = printInks;
-
-
- 		// Page marks options
-    var marksOptions = new PrintPageMarksOptions();
-    marksOptions.trimMarks = false;
-    marksOptions.registrationMarks = false;
-    marksOptions.colorBars = false;
-    marksOptions.pageInformationMarks = false;
-
-    // PostScript
-		var psOptions = new PrintPostScriptOptions();
-		psOptions.postScriptLevel = PrinterPostScriptLevelEnum.PSLEVEL2;
-		psOptions.binaryPrinting = false;
-		psOptions.imageCompression = PostScriptImageCompressionType.IMAGECOMPRESSIONNONE
-
-    var printCoordinateOptions = new PrintCoordinateOptions();
-    printCoordinateOptions.fitToPage = true;
 
     // Print options
 		var printOptions = new PrintOptions();
-    printOptions.colorSeparationOptions = colorSepOptions;
-    // printOptions.file = new File(outputPath);
-    printOptions.flattenerOptions = flatOptions;
-    printOptions.fontOptions = fontOptions;
+    printOptions.printPreset = 'LEAP_SEPS_POSTSCRIPT';
+    //  printOptions.colorSeparationOptions = colorSepOptions;
     printOptions.jobOptions = jobOptions;
-    printOptions.pageMarksOptions = marksOptions;
-    // printOptions.paperOptions = paperOptions;
-    printOptions.coordinateOptions = printCoordinateOptions;
-    printOptions.postScriptOptions = psOptions;
-    var _printPresetFile = new File(${presetPathLiteral});
-    if (!_printPresetFile.exists) {
-      return JSON.stringify({
-        success: false,
-        error: "Print preset file not found: " + _printPresetFile.fsName
-      });
-    }
-    printOptions.printerName = 'Adobe PostScript File';
-    printOptions.PPDName = ${ppdNameLiteral};
-    printOptions.printPreset = 'Print PostScript';
-    // app.activeDocument.importPrintPreset('Print PostScript', _printPresetFile);
 
     app.activeDocument.print(printOptions);
 
@@ -1266,9 +1213,16 @@ private buildExportPostscriptScript(inks: string[], printPresetFsPath: string, p
   * Recreate plates in the active (separated) document.
   * Call after deleteAllPlatesInSeparationDoc when the user clicks "Recreate All Plates".
   */
- recreatePlatesInActiveDocument(graphicName: string): Promise<any> {
+ recreatePlatesInActiveDocument(
+  graphicName: string,
+  cleanup?: { deleteUnpaintedPaths: boolean; deleteLeftoverPaths: boolean }
+ ): Promise<any> {
   return this.ensureSession().then(() => {
-   const params = { graphicName: graphicName };
+   const params: Record<string, unknown> = { graphicName };
+   if (cleanup) {
+    params['deleteUnpaintedPaths'] = cleanup.deleteUnpaintedPaths === true;
+    params['deleteLeftoverPaths'] = cleanup.deleteLeftoverPaths === true;
+   }
    return (window as any).leap
     .scriptLoader()
     .evalScript('handleRecreatePlatesInActiveDocument', params)
@@ -1438,7 +1392,7 @@ private buildExportPostscriptScript(inks: string[], printPresetFsPath: string, p
   addUnderbase?: boolean;
   artistName?: string;
   artistInitials?: string;
- ppdName?: string;
+  ppdName?: string;
   chokeStrokeColorSwatch?: string;
   koDarkColorNames?: string;
  }): Promise<{ success: boolean; error?: string }> {
