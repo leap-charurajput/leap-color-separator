@@ -49,7 +49,7 @@ class ScriptLoader {
   return { reason, data };
  }
 
- log(val) {}
+ log(val) { }
 
  get name() {
   return 'ScriptLoader:: ';
@@ -81,7 +81,7 @@ function getServerBasePath() {
     return parsed.basePath;
    }
   }
- } catch (error) {}
+ } catch (error) { }
 
  return null;
 }
@@ -760,11 +760,14 @@ async function getProfileInformation(profileCode) {
    throw new Error('Profiles.json does not contain an array');
   }
 
-  const matchedProfile = profilesData.find(
-   (profile) =>
-    profile['Profile Code'] &&
-    String(profile['Profile Code']).trim().toUpperCase() === profileCode.trim().toUpperCase()
-  );
+  const normalizedLookup = String(profileCode).trim().toUpperCase();
+  const matchedProfile = profilesData.find((profile) => {
+   const codeValue =
+    profile && profile['Profile Code'] != null ? String(profile['Profile Code']).trim().toUpperCase() : '';
+   const nameValue =
+    profile && profile['Profile Name'] != null ? String(profile['Profile Name']).trim().toUpperCase() : '';
+   return codeValue === normalizedLookup || nameValue === normalizedLookup;
+  });
 
   if (!matchedProfile) {
    console.warn('[LEAP][UB_DEBUG] Profile not found in Profiles.json for code:', profileCode);
@@ -1272,7 +1275,7 @@ class Leap {
   }
  }
 
- log(val) {}
+ log(val) { }
 
  get name() {
   return 'LEAP:: ';

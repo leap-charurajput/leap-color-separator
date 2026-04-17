@@ -2515,25 +2515,49 @@ function getProfileCodeFromName(profileName) {
   if (!parsed || !(parsed instanceof Array)) {
    return null;
   }
-  var searchName = profileName.toString().trim().toLowerCase();
+  function normalizeProfileName(value) {
+   // Normalize whitespace/dash variants so names from Excel/JSON compare consistently.
+   var text = value == null ? "" : String(value);
+   return text
+    .replace(/[\u2010-\u2015]/g, "-")
+    .replace(/\s+/g, " ")
+    .replace(/^\s+|\s+$/g, "")
+    .toLowerCase();
+  }
+
+  function compactProfileName(value) {
+   return normalizeProfileName(value).replace(/[^a-z0-9]/g, "");
+  }
+
+  var searchName = normalizeProfileName(profileName);
+  var searchNameCompact = compactProfileName(profileName);
   for (var i = 0; i < parsed.length; i++) {
    var profile = parsed[i];
    var profileNameInFile = profile['Profile Name'] || profile.profileName || '';
-   var normalizedNameInFile = profileNameInFile.toString().trim().toLowerCase();
+   var normalizedNameInFile = normalizeProfileName(profileNameInFile);
    if (normalizedNameInFile === searchName) {
     var profileCode = profile['Profile Code'] || profile.code || '';
     if (profileCode) {
      return profileCode.toString().trim();
     }
    }
-   if (normalizedNameInFile && searchName &&
-    (normalizedNameInFile.indexOf(searchName) !== -1 || searchName.indexOf(normalizedNameInFile) !== -1)) {
-    var profileCode = profile['Profile Code'] || profile.code || '';
+  }
+
+  // Secondary safe match only for punctuation/spacing differences.
+  for (var j = 0; j < parsed.length; j++) {
+   var profile2 = parsed[j];
+   var profileNameInFile2 = profile2['Profile Name'] || profile2.profileName || '';
+   var compactNameInFile = compactProfileName(profileNameInFile2);
+   if (compactNameInFile && searchNameCompact && compactNameInFile === searchNameCompact) {
+    var profileCode = profile2['Profile Code'] || profile2.code || '';
     if (profileCode) {
      return profileCode.toString().trim();
     }
    }
   }
+
+  // Avoid broad substring matching because names like
+  // "Fanatics-Plastisol" and "Fanatics-Plastisol-Blocker" can conflict.
   return null;
  } catch (e) {
   return null;
