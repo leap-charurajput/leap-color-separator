@@ -25,7 +25,7 @@ export class TabNavigatorComponent {
  @Output() onMenuOptionClick = new EventEmitter<string>();
  @Output() onRemoveSeparationData = new EventEmitter<void>();
 
- constructor(private controller: ControllerService) {}
+ constructor(private controller: ControllerService) { }
 
  tabs: Tab[] = [
   { title: 'Graphics', component: GraphicsComponent },
@@ -33,7 +33,10 @@ export class TabNavigatorComponent {
   { title: 'Plates', icon: 'icon-ColorVar', component: SeparationColorsComponent }
  ];
 
- menuOptions = [{ title: 'Settings', component: SettingsComponent }];
+ menuOptions = [
+  { title: 'General Settings', component: SettingsComponent },
+  { title: 'Manage Profiles', component: SettingsComponent }
+ ];
 
  //  get headerMenuItems(): string[] {
  //  const menuItems = [
@@ -55,6 +58,18 @@ export class TabNavigatorComponent {
 
  handleTabClick(index: number): void {
   this.onTabChange.emit(index);
+ }
+
+ handleSettingsMenuClick(item: string): void {
+  const menuOption = this.menuOptions.find((option) => option.title === item);
+  if (!menuOption) {
+   return;
+  }
+  this.onMenuOptionClick.emit(item);
+ }
+
+ getSettingsSection(selectedOption: string | null): string {
+  return selectedOption === 'General Settings' ? 'General Settings' : 'Separation Profiles';
  }
 
  //  handleHeaderMenuClick(item: string): void {

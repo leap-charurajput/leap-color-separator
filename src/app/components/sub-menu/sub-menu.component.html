@@ -1,18 +1,18 @@
 <span class="submenuOpener" #openerRef cdkOverlayOrigin #submenuOrigin="cdkOverlayOrigin"
-    (mousedown)="handleToggle($event)" (dragstart)="handleDragStart($event)">
-    <span [class]="iconClass"></span>
+ (mousedown)="handleToggle($event)" (dragstart)="handleDragStart($event)">
+ <span [class]="iconClass">{{iconText}}</span>
 </span>
 
 <ng-template cdkConnectedOverlay [cdkConnectedOverlayOrigin]="submenuOrigin" [cdkConnectedOverlayOpen]="isOpen"
-    [cdkConnectedOverlayPositions]="positions" [cdkConnectedOverlayHasBackdrop]="true"
-    [cdkConnectedOverlayBackdropClass]="'cdk-overlay-transparent-backdrop'" (backdropClick)="onBackdropClick()">
-    <div [class.subMenu]="true" [class.show]="isOpen" class="overlay-submenu" (mousedown)="handleMouseDown($event)"
-        (dragstart)="handleDragStart($event)">
-        <ul>
-            <li *ngFor="let item of items" (click)="handleItemClick(item, $event)" (mousedown)="handleMouseDown($event)"
-                (dragstart)="handleDragStart($event)">
-                {{item}}
-            </li>
-        </ul>
-    </div>
+ [cdkConnectedOverlayPositions]="positions" [cdkConnectedOverlayHasBackdrop]="true"
+ [cdkConnectedOverlayBackdropClass]="'cdk-overlay-transparent-backdrop'" (backdropClick)="onBackdropClick()">
+ <div [class.subMenu]="true" [class.show]="isOpen" class="overlay-submenu" (mousedown)="handleMouseDown($event)"
+  (dragstart)="handleDragStart($event)">
+  <ul>
+   <li *ngFor="let item of items" (click)="handleItemClick(item, $event)" (mousedown)="handleMouseDown($event)"
+    (dragstart)="handleDragStart($event)">
+    {{item}}
+   </li>
+  </ul>
+ </div>
 </ng-template>

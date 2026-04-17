@@ -1,6 +1,6 @@
 <div class="settings-page">
  <div class="page-header">
-  <div class="page-title">Settings</div>
+  <div class="page-title">{{pageTitle}}</div>
  </div>
 
  <div *ngIf="isLoading" class="settings-panels">
@@ -8,14 +8,6 @@
  </div>
 
  <div *ngIf="!isLoading" class="settings-panels">
-  <!-- Section selector -->
-  <div class="settings-dropdown-wrapper">
-   <span class="material-icons" aria-hidden="true">settings</span>
-   <app-dropdown [value]="selectedSection" [items]="['Separation Profiles', 'General Settings']"
-    (onChange)="selectedSection = $event" placeholder="Select section..."></app-dropdown>
-  </div>
-
-
 
   <app-separation-profiles-panel *ngIf="selectedSection === 'Separation Profiles'" title="Separation Profiles"
    description="Template presets for separation runs" [profiles]="profiles" (addProfile)="handleAddProfile()"
@@ -29,7 +21,7 @@
     <app-dropdown [value]="selectedEnvironmentKey" [items]="environmentKeys" (onChange)="onEnvironmentChange($event)"
      placeholder="Select environment..."></app-dropdown>
    </div>
-   <div class="settings-field">
+   <div class="settings-field settings-field-inline-input">
     <label class="settings-field-label">Default mesh</label>
     <input type="text" class="settings-field-input" [(ngModel)]="defaultMesh" (ngModelChange)="saveGeneralSettings()" />
    </div>
@@ -39,19 +31,19 @@
      (change)="addUnderbase = $event.target.checked; saveGeneralSettings()"></app-checkbox>
    </div>
 
-   <div class="settings-field">
+   <div class="settings-field settings-field-inline-input">
     <label class="settings-field-label">Artist Name</label>
     <input type="text" class="settings-field-input" [(ngModel)]="artistName" (ngModelChange)="saveGeneralSettings()"
      placeholder="Artist name" />
    </div>
 
-   <div class="settings-field">
+   <div class="settings-field settings-field-inline-input">
     <label class="settings-field-label">Artist Initials</label>
     <input type="text" class="settings-field-input" [(ngModel)]="artistInitials" (ngModelChange)="saveGeneralSettings()"
      placeholder="e.g. JR" />
    </div>
 
-   <div class="settings-field">
+   <div class="settings-field settings-field-inline-input">
     <label class="settings-field-label">PPD Name</label>
     <input type="text" class="settings-field-input" [(ngModel)]="ppdName" (ngModelChange)="saveGeneralSettings()"
      placeholder="IBlock v2" />

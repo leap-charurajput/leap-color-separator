@@ -9,6 +9,7 @@ import { GraphicsDataService } from './services/graphics-data.service';
  styleUrls: ['./app.component.css']
 })
 export class AppComponent implements OnInit, OnDestroy {
+ private readonly panelVersion = '1.0.0';
  activeTab: number | null = 0;
  selectedMenuOption: string | null = null;
  documentRefreshKey = 0;
@@ -17,14 +18,22 @@ export class AppComponent implements OnInit, OnDestroy {
  showConfirmDialog = false;
  confirmError: string | null = null;
 
+ get panelBuildStamp(): string {
+  const now = new Date();
+  const month = now.toLocaleString('en-US', { month: 'short' });
+  const day = String(now.getDate()).padStart(2, '0');
+  const year = now.getFullYear();
+  return `${month} ${day}, ${year} | v${this.panelVersion}`;
+ }
+
  constructor(private controller: ControllerService, private cdr: ChangeDetectorRef, private graphicsDataService: GraphicsDataService) { }
 
  ngOnInit(): void {
   document.body.classList.add('dark');
 
-    checkForJSXUpdates((window as any).location.href).then((res) => {
-      console.log('check update status ref', res);
-    });
+  checkForJSXUpdates((window as any).location.href).then((res) => {
+   console.log('check update status ref', res);
+  });
 
   this.waitForSession()
    .then(() => {
@@ -220,10 +229,6 @@ export class AppComponent implements OnInit, OnDestroy {
       this.openRemoveConfirmation();
       break;
 
-     case 'settings':
-      this.onMenuOptionClick('Settings');
-      break;
-
      case 'markAsReg':
       break;
 
@@ -248,8 +253,6 @@ export class AppComponent implements OnInit, OnDestroy {
 				<Menu> \
 					<MenuItem Id="markAsReg" Label="Mark as Reg mark" Enabled="true"/> \
 					<MenuItem Id="removeSeparationDataFromTeamVersion" Label="Remove separation data from team version" Enabled="true"/> \
-					<MenuItem Label="---" /> \
-					<MenuItem Id="settings" Label="Settings" Enabled="true"/> \
 				</Menu>';
    csInterface.setPanelFlyoutMenu(flyoutXML);
 

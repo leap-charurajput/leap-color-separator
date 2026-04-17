@@ -1,4 +1,4 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, Input, OnChanges, OnInit, SimpleChanges } from '@angular/core';
 import { csInterface } from '../../../libs/helper';
 import { ControllerService } from '../../services/controller.service';
 
@@ -21,7 +21,8 @@ interface Profile {
  templateUrl: './settings.component.html',
  styleUrls: ['./settings.component.css']
 })
-export class SettingsComponent implements OnInit {
+export class SettingsComponent implements OnInit, OnChanges {
+ @Input() selectedSectionFromMenu: 'Separation Profiles' | 'General Settings' = 'Separation Profiles';
  profiles: Profile[] = [];
  isLoading = true;
  editModalOpen = false;
@@ -50,7 +51,18 @@ export class SettingsComponent implements OnInit {
 
  constructor(private controller: ControllerService) { }
 
+ get pageTitle(): string {
+  return this.selectedSection === 'General Settings' ? 'General Settings' : 'Manage Profiles';
+ }
+
+ ngOnChanges(changes: SimpleChanges): void {
+  if (changes['selectedSectionFromMenu']?.currentValue) {
+   this.selectedSection = changes['selectedSectionFromMenu'].currentValue;
+  }
+ }
+
  async ngOnInit(): Promise<void> {
+  this.selectedSection = this.selectedSectionFromMenu || 'Separation Profiles';
   this.loadProfiles();
   this.loadLeapServerPath();
   this.loadGeneralSettings();
