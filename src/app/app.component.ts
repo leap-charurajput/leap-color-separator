@@ -1,310 +1,320 @@
-import { Component, OnInit, OnDestroy, ChangeDetectorRef } from '@angular/core';
+import { ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
+import { checkForJSXUpdates } from '../libs/helper';
 import { ControllerService } from './services/controller.service';
+import { GraphicsDataService } from './services/graphics-data.service';
 
 @Component({
-	selector: 'app-root',
-	templateUrl: './app.component.html',
-	styleUrls: ['./app.component.css']
+ selector: 'app-root',
+ templateUrl: './app.component.html',
+ styleUrls: ['./app.component.css']
 })
 export class AppComponent implements OnInit, OnDestroy {
-	activeTab: number | null = 0;
-	selectedMenuOption: string | null = null;
-	documentRefreshKey = 0;
-	private documentActivateListener: any;
-	private flyoutMenuListener: any;
-	showConfirmDialog = false;
-	confirmError: string | null = null;
+ private readonly panelVersion = '1.0.0';
+ activeTab: number | null = 0;
+ selectedMenuOption: string | null = null;
+ documentRefreshKey = 0;
+ private documentActivateListener: any;
+ private flyoutMenuListener: any;
+ showConfirmDialog = false;
+ confirmError: string | null = null;
 
-	constructor(
-		private controller: ControllerService,
-		private cdr: ChangeDetectorRef
-	) { }
+ get panelBuildStamp(): string {
+  const now = new Date();
+  const month = now.toLocaleString('en-US', { month: 'short' });
+  const day = String(now.getDate()).padStart(2, '0');
+  const year = now.getFullYear();
+  return `${month} ${day}, ${year} | v${this.panelVersion}`;
+ }
 
-	ngOnInit(): void {
-		document.body.classList.add('dark');
+ constructor(private controller: ControllerService, private cdr: ChangeDetectorRef, private graphicsDataService: GraphicsDataService) { }
 
-		this.waitForSession().then(() => {
-			this.registerDocumentActivateListener();
-			this.registerFlyoutMenu();
+ ngOnInit(): void {
+  document.body.classList.add('dark');
 
-			(window as any).__LEAP_TAB_NAVIGATION__ = {
-				navigateToTab: (index: number) => {
-					this.activeTab = index;
-					this.selectedMenuOption = null;
-					this.cdr.detectChanges();
-				}
-			};
-		}).catch(() => {
-			(window as any).__LEAP_TAB_NAVIGATION__ = {
-				navigateToTab: (index: number) => {
-					this.activeTab = index;
-					this.selectedMenuOption = null;
-					this.cdr.detectChanges();
-				}
-			};
-		});
-	}
+  checkForJSXUpdates((window as any).location.href).then((res) => {
+   console.log('check update status ref', res);
+  });
 
-	private waitForSession(maxRetries: number = 50, delayMs: number = 100): Promise<void> {
-		return new Promise((resolve, reject) => {
-			let retries = 0;
-			const isInCEP = !!(window as any).__adobe_cep__;
+  this.waitForSession()
+   .then(() => {
+    this.registerDocumentActivateListener();
+    this.registerFlyoutMenu();
 
-			const checkSession = () => {
-				if ((window as any).leap) {
+    (window as any).__LEAP_TAB_NAVIGATION__ = {
+     navigateToTab: (index: number) => {
+      this.activeTab = index;
+      this.selectedMenuOption = null;
+      this.cdr.detectChanges();
+     }
+    };
+   })
+   .catch(() => {
+    (window as any).__LEAP_TAB_NAVIGATION__ = {
+     navigateToTab: (index: number) => {
+      this.activeTab = index;
+      this.selectedMenuOption = null;
+      this.cdr.detectChanges();
+     }
+    };
+   });
+ }
 
-					resolve();
-				} else if (retries < maxRetries) {
-					retries++;
-					setTimeout(checkSession, delayMs);
-				} else {
-					if (isInCEP) {
+ private waitForSession(maxRetries: number = 50, delayMs: number = 100): Promise<void> {
+  return new Promise((resolve, reject) => {
+   let retries = 0;
+   const isInCEP = !!(window as any).__adobe_cep__;
 
+   const checkSession = () => {
+    if ((window as any).leap) {
+     resolve();
+    } else if (retries < maxRetries) {
+     retries++;
+     setTimeout(checkSession, delayMs);
+    } else {
+     if (isInCEP) {
+     }
+     reject(new Error('Leap not available after retries'));
+    }
+   };
+   checkSession();
+  });
+ }
 
+ ngOnDestroy(): void {
+  if (this.documentActivateListener) {
+   this.documentActivateListener();
+  }
+  if (this.flyoutMenuListener) {
+   this.flyoutMenuListener();
+  }
+  delete (window as any).__LEAP_TAB_NAVIGATION__;
+  delete (window as any).__LEAP_DOCUMENT_EVENT__;
+  delete (window as any)._LEAP_FLYOUT_MENU_EVENT__;
+ }
 
-					}
-					reject(new Error('Leap not available after retries'));
-				}
-			};
-			checkSession();
-		});
-	}
+ onTabChange(index: number): void {
+  this.activeTab = index;
+  this.selectedMenuOption = null;
+  // Refetch document/XMP when switching to Separations tab so UI shows correct hasVersionDocument / isSeparatedDoc
+  if (index === 1) {
+   this.documentRefreshKey++;
+   this.cdr.detectChanges();
+  }
+ }
 
-	ngOnDestroy(): void {
-		if (this.documentActivateListener) {
-			this.documentActivateListener();
-		}
-		if (this.flyoutMenuListener) {
-			this.flyoutMenuListener();
-		}
-		delete (window as any).__LEAP_TAB_NAVIGATION__;
-		delete (window as any).__LEAP_DOCUMENT_EVENT__;
-		delete (window as any)._LEAP_FLYOUT_MENU_EVENT__;
-	}
+ onMenuOptionClick(title: string): void {
+  this.selectedMenuOption = title;
+  this.activeTab = null;
+ }
 
-	onTabChange(index: number): void {
-		this.activeTab = index;
-		this.selectedMenuOption = null;
-	}
+ private selectTabByName(tabName: string): void {
+  this.selectedMenuOption = null;
+  switch (tabName) {
+   case 'Graphics':
+    this.activeTab = 0;
+    break;
+   case 'Separations':
+    this.activeTab = 1;
+    break;
+   case 'SeparationColors':
+    this.activeTab = 2;
+    break;
+   default:
+    if (typeof this.activeTab !== 'number') {
+     this.activeTab = 0;
+    }
+    break;
+  }
+  this.cdr.detectChanges();
+ }
 
-	onMenuOptionClick(title: string): void {
-		this.selectedMenuOption = title;
-		this.activeTab = null;
-	}
+ private async autoSelectTabForActiveDocument(): Promise<void> {
+  // If session not ready, skip quietly
+  if (!this.controller.hasSession || !this.controller.hasSession()) {
+   return;
+  }
 
-	private selectTabByName(tabName: string): void {
-		this.selectedMenuOption = null;
-		switch (tabName) {
-			case 'Graphics':
-				this.activeTab = 0;
-				break;
-			case 'Separations':
-				this.activeTab = 1;
-				break;
-			case 'SeparationColors':
-				this.activeTab = 2;
-				break;
-			default:
-				if (typeof this.activeTab !== 'number') {
-					this.activeTab = 0;
-				}
-				break;
-		}
-		this.cdr.detectChanges();
-	}
+  try {
+   // First, check if this is a separation document (DocumentType == "Separation Document")
+   const sepResult = await this.controller.checkSeparatedDocument();
+   if (sepResult && sepResult.success && sepResult.data && sepResult.data.isSeparatedDoc) {
+    this.selectTabByName('SeparationColors');
+    return;
+   }
 
-	private async autoSelectTabForActiveDocument(): Promise<void> {
-		// If session not ready, skip quietly
-		if (!this.controller.hasSession || !this.controller.hasSession()) {
-			return;
-		}
+   // Not a separation doc: check GraphicsOrganizationData
+   const gfxResult = await this.controller.loadGraphicsData();
+   if (
+    gfxResult &&
+    gfxResult.success &&
+    Array.isArray(gfxResult.graphicsData) &&
+    gfxResult.graphicsData.length > 0
+   ) {
+    this.selectTabByName('Separations');
+   } else {
+    // Team version without organization data -> default to Graphics
+    this.selectTabByName('Graphics');
+   }
+  } catch (err) {
+   // On failure, leave current tab unchanged
+   console.error('[APP] Error auto-selecting tab on document activate:', err);
+  }
+ }
 
-		try {
-			// First, check if this is a separation document (DocumentType == "Separation Document")
-			const sepResult = await this.controller.checkSeparatedDocument();
-			if (sepResult && sepResult.success && sepResult.data && sepResult.data.isSeparatedDoc) {
-				this.selectTabByName('SeparationColors');
-				return;
-			}
+ private registerDocumentActivateListener(): void {
+  if (!(window as any).leap) {
+   return;
+  }
 
-			// Not a separation doc: check GraphicsOrganizationData
-			const gfxResult = await this.controller.loadGraphicsData();
-			if (gfxResult && gfxResult.success && Array.isArray(gfxResult.graphicsData) && gfxResult.graphicsData.length > 0) {
-				this.selectTabByName('Separations');
-			} else {
-				// Team version without organization data -> default to Graphics
-				this.selectTabByName('Graphics');
-			}
-		} catch (err) {
-			// On failure, leave current tab unchanged
-			console.error('[APP] Error auto-selecting tab on document activate:', err);
-		}
-	}
+  try {
+   const scriptLoader = (window as any).leap.scriptLoader();
+   if (!scriptLoader || !scriptLoader.cs) {
+    return;
+   }
 
-	private registerDocumentActivateListener(): void {
-		if (!(window as any).leap) {
+   const csInterface = scriptLoader.cs;
+   if (typeof csInterface.addEventListener !== 'function') {
+    return;
+   }
 
-			return;
-		}
+   const EVENT_DOCUMENT_ACTIVATE = 'documentAfterActivate';
 
-		try {
-			const scriptLoader = (window as any).leap.scriptLoader();
-			if (!scriptLoader || !scriptLoader.cs) {
+   const handleDocumentActivate = () => {
+    this.documentRefreshKey++;
+    this.cdr.detectChanges();
+    this.autoSelectTabForActiveDocument();
+   };
 
-				return;
-			}
+   csInterface.addEventListener(EVENT_DOCUMENT_ACTIVATE, handleDocumentActivate);
 
-			const csInterface = scriptLoader.cs;
-			if (typeof csInterface.addEventListener !== 'function') {
+   (window as any).__LEAP_DOCUMENT_EVENT__ = {
+    csInterface,
+    eventName: EVENT_DOCUMENT_ACTIVATE,
+    handler: handleDocumentActivate
+   };
 
-				return;
-			}
+   // Run once on init to set correct tab for the current front document
+   this.autoSelectTabForActiveDocument();
 
-			const EVENT_DOCUMENT_ACTIVATE = 'documentAfterActivate';
+   this.documentActivateListener = () => {
+    if (typeof csInterface.removeEventListener === 'function') {
+     csInterface.removeEventListener(EVENT_DOCUMENT_ACTIVATE, handleDocumentActivate);
+    }
+   };
+  } catch (err) { }
+ }
 
-			const handleDocumentActivate = () => {
+ private registerFlyoutMenu(): void {
+  if (!(window as any).leap) {
+   return;
+  }
 
-				this.documentRefreshKey++;
-				this.cdr.detectChanges();
-				this.autoSelectTabForActiveDocument();
-			};
+  try {
+   const scriptLoader = (window as any).leap.scriptLoader();
+   const csInterface = scriptLoader?.cs;
 
-			csInterface.addEventListener(EVENT_DOCUMENT_ACTIVATE, handleDocumentActivate);
+   if (
+    !csInterface ||
+    typeof csInterface.addEventListener !== 'function' ||
+    typeof csInterface.setPanelFlyoutMenu !== 'function'
+   ) {
+    return;
+   }
 
-			(window as any).__LEAP_DOCUMENT_EVENT__ = {
-				csInterface,
-				eventName: EVENT_DOCUMENT_ACTIVATE,
-				handler: handleDocumentActivate
-			};
+   const EVENT_FLYOUT_MENU_CLICKED = 'com.adobe.csxs.events.flyoutMenuClicked';
 
-			// Run once on init to set correct tab for the current front document
-			this.autoSelectTabForActiveDocument();
+   const handleFlyoutMenuClicked = (event: any) => {
+    switch (event?.data?.menuId) {
+     case 'removeSeparationDataFromTeamVersion':
+      this.openRemoveConfirmation();
+      break;
 
-			this.documentActivateListener = () => {
+     case 'markAsReg':
+      break;
 
-				if (typeof csInterface.removeEventListener === 'function') {
-					csInterface.removeEventListener(EVENT_DOCUMENT_ACTIVATE, handleDocumentActivate);
-				}
-			};
-		} catch (err) {
+     case 'leapServerSettings':
+      this.controller.selectAndSaveLeapSettings().then((result: any) => {
+       if (result.success) {
+        console.log(`Leap path updated successfully`);
+       } else if (!result.cancelled) {
+        console.error(`Error updating LEAP Data path: ${result.error}`);
+       }
+      });
+      break;
 
-		}
-	}
+     default:
+      break;
+    }
+    this.cdr.detectChanges();
+   };
 
-	private registerFlyoutMenu(): void {
-		if (!(window as any).leap) {
-			return;
-		}
-
-		try {
-			const scriptLoader = (window as any).leap.scriptLoader();
-			const csInterface = scriptLoader?.cs;
-
-			if (!csInterface || typeof csInterface.addEventListener !== 'function' || typeof csInterface.setPanelFlyoutMenu !== 'function') {
-				return;
-			}
-
-			const EVENT_FLYOUT_MENU_CLICKED = 'com.adobe.csxs.events.flyoutMenuClicked';
-
-			const handleFlyoutMenuClicked = (event: any) => {
-				switch (event?.data?.menuId) {
-					case 'removeSeparationDataFromTeamVersion':
-						this.openRemoveConfirmation();
-						break;
-
-					case 'settings':
-						this.onMenuOptionClick('Settings');
-						break;
-
-					case 'markAsReg':
-						break;
-
-					case 'leapServerSettings':
-						this.controller.selectAndSaveLeapSettings().then((result: any) => {
-							if (result.success) {
-								console.log(`Leap path updated successfully`);
-							} else if (!result.cancelled) {
-								console.error(`Error updating LEAP Data path: ${result.error}`);
-							}
-						});
-						break;
-
-					default:
-						break;
-				}
-				this.cdr.detectChanges();
-			};
-
-			const flyoutXML = '\
+   const flyoutXML =
+    '\
 				<Menu> \
 					<MenuItem Id="markAsReg" Label="Mark as Reg mark" Enabled="true"/> \
 					<MenuItem Id="removeSeparationDataFromTeamVersion" Label="Remove separation data from team version" Enabled="true"/> \
-					<MenuItem Label="---" /> \
-					<MenuItem Id="leapServerSettings" Label="Leap Server Settings" Enabled="true"/> \
-					<MenuItem Id="settings" Label="Settings" Enabled="true"/> \
 				</Menu>';
-			csInterface.setPanelFlyoutMenu(flyoutXML);
+   csInterface.setPanelFlyoutMenu(flyoutXML);
 
-			csInterface.addEventListener(EVENT_FLYOUT_MENU_CLICKED, handleFlyoutMenuClicked);
+   csInterface.addEventListener(EVENT_FLYOUT_MENU_CLICKED, handleFlyoutMenuClicked);
 
-			(window as any)._LEAP_FLYOUT_MENU_EVENT__ = {
-				csInterface,
-				eventName: EVENT_FLYOUT_MENU_CLICKED,
-				handler: handleFlyoutMenuClicked
-			};
+   (window as any)._LEAP_FLYOUT_MENU_EVENT__ = {
+    csInterface,
+    eventName: EVENT_FLYOUT_MENU_CLICKED,
+    handler: handleFlyoutMenuClicked
+   };
 
-			this.flyoutMenuListener = () => {
-				if (typeof csInterface.removeEventListener === 'function') {
-					csInterface.removeEventListener(EVENT_FLYOUT_MENU_CLICKED, handleFlyoutMenuClicked);
-				}
-			};
-		} catch (err) {
+   this.flyoutMenuListener = () => {
+    if (typeof csInterface.removeEventListener === 'function') {
+     csInterface.removeEventListener(EVENT_FLYOUT_MENU_CLICKED, handleFlyoutMenuClicked);
+    }
+   };
+  } catch (err) { }
+ }
 
-		}
-	}
+ openRemoveConfirmation(): void {
+  this.confirmError = null;
+  this.showConfirmDialog = true;
+ }
 
-	openRemoveConfirmation(): void {
-		this.confirmError = null;
-		this.showConfirmDialog = true;
-	}
+ handleCancelRemove(): void {
+  this.showConfirmDialog = false;
+  this.confirmError = null;
+  this.cdr.detectChanges();
+ }
 
-	handleCancelRemove(): void {
-		this.showConfirmDialog = false;
-		this.confirmError = null;
-		this.cdr.detectChanges();
-	}
+ async handleConfirmRemove(): Promise<void> {
+  this.confirmError = null;
 
-	async handleConfirmRemove(): Promise<void> {
-		this.confirmError = null;
+  if (!this.controller || !this.controller.hasSession || !this.controller.hasSession()) {
+   this.confirmError = 'Session not available.';
+   this.cdr.detectChanges();
+   return;
+  }
 
-		if (!this.controller || !this.controller.hasSession || !this.controller.hasSession()) {
-			this.confirmError = 'Session not available.';
-			this.cdr.detectChanges();
-			return;
-		}
+  try {
+   const result = await this.controller.removeSeparationData();
+   this.showConfirmDialog = false;
 
-		try {
-			const result = await this.controller.removeSeparationData();
-			this.showConfirmDialog = false;
-
-			if (result?.success) {
-				this.documentRefreshKey++;
-				if ((window as any).__LEAP_DOCUMENT_EVENT__?.handler) {
-					(window as any).__LEAP_DOCUMENT_EVENT__.handler();
-				}
-			} else {
-				const msg = 'Error removing separation data: ' + (result?.error || 'Unknown error');
-				console.error('[APP] removeSeparationData failed', result);
-				this.confirmError = msg;
-				this.showConfirmDialog = true;
-			}
-		} catch (err: any) {
-			const msg = 'Error removing separation data: ' + (err?.message || 'Unknown error');
-			console.error('[APP] removeSeparationData exception', err);
-			this.confirmError = msg;
-			this.showConfirmDialog = true;
-		} finally {
-			this.cdr.detectChanges();
-		}
-	}
+   if (result?.success) {
+    this.documentRefreshKey++;
+    this.graphicsDataService.resetData();
+    if ((window as any).__LEAP_DOCUMENT_EVENT__?.handler) {
+     (window as any).__LEAP_DOCUMENT_EVENT__.handler();
+    }
+   } else {
+    const msg = 'Error removing separation data: ' + (result?.error || 'Unknown error');
+    console.error('[APP] removeSeparationData failed', result);
+    this.confirmError = msg;
+    this.showConfirmDialog = true;
+   }
+  } catch (err: any) {
+   const msg = 'Error removing separation data: ' + (err?.message || 'Unknown error');
+   console.error('[APP] removeSeparationData exception', err);
+   this.confirmError = msg;
+   this.showConfirmDialog = true;
+  } finally {
+   this.cdr.detectChanges();
+  }
+ }
 }

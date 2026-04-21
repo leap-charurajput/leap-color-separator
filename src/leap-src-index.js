@@ -49,7 +49,7 @@ class ScriptLoader {
   return { reason, data };
  }
 
- log(val) {}
+ log(val) { }
 
  get name() {
   return 'ScriptLoader:: ';
@@ -81,7 +81,7 @@ function getServerBasePath() {
     return parsed.basePath;
    }
   }
- } catch (error) {}
+ } catch (error) { }
 
  return null;
 }
@@ -151,8 +151,20 @@ function findExcelFileInBatchFolder(documentPath) {
    return null;
   }
 
+  console.log(
+   '[Separations] findExcelFileInBatchFolder – documentPath:',
+   documentPath,
+   '| excelFilePath:',
+   excelFilePath
+  );
   return excelFilePath;
  } catch (error) {
+  console.log(
+   '[Separations] findExcelFileInBatchFolder – no Excel found for documentPath:',
+   documentPath,
+   '| error:',
+   error?.message ?? error
+  );
   return null;
  }
 }
@@ -264,15 +276,8 @@ async function getStyleCodesFromExcel(teamCode, documentPath) {
     throw new Error('Excel file not found in BATCH folder');
    }
   } else {
-   const serverBasePath = getServerBasePath();
-   if (!serverBasePath) {
-    throw new Error('Server base path not found and document path not provided');
-   }
-   const normalizedBasePath = serverBasePath.replace(/\/$/, '');
-   excelFilePath = path.join(normalizedBasePath, 'SETTINGS', 'LEAP_SEPS', 'Data', 'CL0.xlsx');
-   if (!fs.existsSync(excelFilePath)) {
-    throw new Error(`Excel file not found at: ${excelFilePath}`);
-   }
+   console.log('[Separations] getStyleCodesFromExcel – document path not provided');
+   throw new Error('Document path not provided');
   }
 
   let workbook;
@@ -292,6 +297,7 @@ async function getStyleCodesFromExcel(teamCode, documentPath) {
   const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
   if (data.length === 0) {
+   console.log('[Separations] getStyleCodesFromExcel – Excel sheet empty, teamCode:', teamCode);
    return [];
   }
 
@@ -300,6 +306,10 @@ async function getStyleCodesFromExcel(teamCode, documentPath) {
   const styleCodeColIndex = headerRow.findIndex((col) => col === 'Lineup Style Code');
 
   if (teamCodeColIndex === -1 || styleCodeColIndex === -1) {
+   console.log(
+    '[Separations] getStyleCodesFromExcel – required columns missing. headerRow:',
+    headerRow
+   );
    throw new Error('Required columns not found in Excel file');
   }
 
@@ -320,7 +330,16 @@ async function getStyleCodesFromExcel(teamCode, documentPath) {
    }
   }
 
-  return Array.from(styleSet).sort();
+  const styleCodes = Array.from(styleSet).sort();
+  console.log(
+   '[Separations] getStyleCodesFromExcel – teamCode:',
+   teamCode,
+   '| styleCodes count:',
+   styleCodes.length,
+   '| styleCodes:',
+   styleCodes
+  );
+  return styleCodes;
  } catch (error) {
   throw new Error(`Failed to read Excel file: ${error.message}`);
  }
@@ -407,9 +426,226 @@ async function getProfileNamesFromExcel(styleCodes) {
    }
   }
 
+  const withProfile = Object.keys(profileMap);
+  const missing = styleCodes.filter((sc) => !profileMap[sc]);
+  console.log(
+   '[Separations] getProfileNamesFromExcel – styleCodes requested:',
+   styleCodes.length,
+   '| found in Styles.xlsx:',
+   withProfile.length,
+   '| profileMap:',
+   profileMap
+  );
+  if (missing.length) {
+   console.log(
+    '[Separations] getProfileNamesFromExcel – style codes NOT in Styles.xlsx (will show as Unknown Profile):',
+    missing
+   );
+  }
   return profileMap;
  } catch (error) {
   throw new Error(`Failed to read Excel file: ${error.message}`);
+ }
+}
+
+/**
+ * Get full style information from Styles.xlsx (Icon, Style Desc, and all columns)
+ * Returns styleInfoMap: { [styleCode]: { Icon, Style Desc, ... } }
+ */
+async function getStyleInformation(styleCodes) {
+ try {
+  console.log('[getStyleInformation] Called with styleCodes:', styleCodes);
+  if (!styleCodes || !Array.isArray(styleCodes) || styleCodes.length === 0) {
+   throw new Error('Style codes array is required');
+  }
+
+  const serverBasePath = getServerBasePath();
+  console.log('[getStyleInformation] serverBasePath:', serverBasePath || '(null)');
+  if (!serverBasePath) {
+   throw new Error('Server base path not found');
+  }
+
+  const normalizedBasePath = serverBasePath.replace(/\/$/, '');
+  const excelFilePath = path.join(
+   normalizedBasePath,
+   'SETTINGS',
+   'LEAP_SEPS',
+   'Data',
+   'Styles.xlsx'
+  );
+
+  if (!fs.existsSync(excelFilePath)) {
+   console.error('[getStyleInformation] File not found at:', excelFilePath);
+   throw new Error(`Excel file not found at: ${excelFilePath}`);
+  }
+  console.log('[getStyleInformation] Reading Excel from:', excelFilePath);
+
+  let workbook;
+  try {
+   const fileBuffer = fs.readFileSync(excelFilePath);
+   workbook = XLSX.read(fileBuffer, { type: 'buffer' });
+   console.log('[getStyleInformation] Read Excel via buffer, size:', fileBuffer.length);
+  } catch (bufferError) {
+   console.log('[getStyleInformation] Buffer read failed, trying readFile:', bufferError.message);
+   workbook = XLSX.readFile(excelFilePath);
+  }
+
+  const sheetName = workbook.SheetNames[0];
+  const worksheet = workbook.Sheets[sheetName];
+  const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+  if (data.length === 0) {
+   console.log('[getStyleInformation] Sheet is empty');
+   return { success: true, styleInfoMap: {} };
+  }
+
+  const headerRow = data[0];
+  const styleCodeColIndex = headerRow.findIndex((col) => col === 'Style Code');
+  if (styleCodeColIndex === -1) {
+   console.error('[getStyleInformation] No Style Code column. Headers:', headerRow);
+   throw new Error('Required columns not found in Excel file');
+  }
+
+  const styleCodesSet = new Set(styleCodes.map((sc) => String(sc).trim()));
+  const styleInfoMap = {};
+  for (let row = 1; row < data.length; row++) {
+   const rowData = data[row];
+   if (rowData && rowData[styleCodeColIndex]) {
+    const styleCode = String(rowData[styleCodeColIndex]).trim();
+    if (styleCodesSet.has(styleCode)) {
+     const styleInfo = {};
+     headerRow.forEach((columnName, colIndex) => {
+      if (columnName && rowData[colIndex] !== undefined && rowData[colIndex] !== null) {
+       styleInfo[columnName] = String(rowData[colIndex]).trim();
+      }
+     });
+     styleInfoMap[styleCode] = styleInfo;
+    }
+   }
+  }
+
+  console.log(
+   '[getStyleInformation] Found styleInfoMap for:',
+   Object.keys(styleInfoMap),
+   styleInfoMap
+  );
+  return { success: true, styleInfoMap };
+ } catch (error) {
+  console.error('[getStyleInformation] Error:', error.message, error);
+  return { success: false, error: error.message || 'Failed to read Excel file' };
+ }
+}
+
+/**
+ * Look up color by Code from COLOR_CODE_LOOKUP.xlsx (same folder as Styles.xlsx).
+ * Columns: Color Name, Code, Hex, R, G, B, C, M, Y, K
+ * @param {string} colorCode - Code to look up (e.g. "0042", "006R")
+ * @returns {Promise<{ success: boolean, color?: { hex, colorName, cmyk, rgb }, error?: string }>}
+ */
+async function getColorByCodeFromLookup(colorCode) {
+ try {
+  if (!colorCode || String(colorCode).trim() === '') {
+   return { success: false, error: 'Color code is required' };
+  }
+
+  const code = String(colorCode).trim();
+  const serverBasePath = getServerBasePath();
+  if (!serverBasePath) {
+   return { success: false, error: 'Server base path not found' };
+  }
+
+  const normalizedBasePath = serverBasePath.replace(/\/$/, '');
+  const excelFilePath = path.join(
+   normalizedBasePath,
+   'SETTINGS',
+   'LEAP_SEPS',
+   'Data',
+   'COLOR_CODE_LOOKUP.xlsx'
+  );
+
+  if (!fs.existsSync(excelFilePath)) {
+   return { success: false, error: `COLOR_CODE_LOOKUP.xlsx not found at: ${excelFilePath}` };
+  }
+
+  let workbook;
+  try {
+   const fileBuffer = fs.readFileSync(excelFilePath);
+   workbook = XLSX.read(fileBuffer, { type: 'buffer' });
+  } catch (bufferError) {
+   workbook = XLSX.readFile(excelFilePath);
+  }
+
+  const sheetName = workbook.SheetNames[0];
+  const worksheet = workbook.Sheets[sheetName];
+  const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+  if (!data || data.length < 2) {
+   return { success: false, error: 'COLOR_CODE_LOOKUP.xlsx has no data rows' };
+  }
+
+  const headerRow = data[0];
+  const codeColIndex = headerRow.findIndex((col) => String(col || '').trim() === 'Code');
+  const hexColIndex = headerRow.findIndex((col) => String(col || '').trim() === 'Hex');
+  const colorNameColIndex = headerRow.findIndex((col) => String(col || '').trim() === 'Color Name');
+  const rCol = headerRow.findIndex((col) => String(col || '').trim() === 'R');
+  const gCol = headerRow.findIndex((col) => String(col || '').trim() === 'G');
+  const bCol = headerRow.findIndex((col) => String(col || '').trim() === 'B');
+  const cCol = headerRow.findIndex((col) => String(col || '').trim() === 'C');
+  const mCol = headerRow.findIndex((col) => String(col || '').trim() === 'M');
+  const yCol = headerRow.findIndex((col) => String(col || '').trim() === 'Y');
+  const kCol = headerRow.findIndex((col) => String(col || '').trim() === 'K');
+
+  if (codeColIndex === -1) {
+   return { success: false, error: 'Code column not found in COLOR_CODE_LOOKUP.xlsx' };
+  }
+
+  const toNum = (v) => {
+   if (v == null || v === '') return 0;
+   const n = Number(v);
+   return isNaN(n) ? 0 : Math.max(0, Math.min(100, n));
+  };
+  const toNum255 = (v) => {
+   if (v == null || v === '') return 0;
+   const n = Number(v);
+   return isNaN(n) ? 0 : Math.max(0, Math.min(255, Math.round(n)));
+  };
+
+  for (let row = 1; row < data.length; row++) {
+   const rowData = data[row];
+   if (!rowData || rowData[codeColIndex] == null) continue;
+   const rowCode = String(rowData[codeColIndex]).trim();
+   if (rowCode !== code) continue;
+
+   let hex = hexColIndex >= 0 && rowData[hexColIndex] != null ? String(rowData[hexColIndex]).trim() : '';
+   if (hex && !hex.startsWith('#')) hex = '#' + hex;
+
+   const colorName =
+    colorNameColIndex >= 0 && rowData[colorNameColIndex] != null
+     ? String(rowData[colorNameColIndex]).trim()
+     : rowCode;
+
+   const c = cCol >= 0 ? toNum(rowData[cCol]) : 0;
+   const m = mCol >= 0 ? toNum(rowData[mCol]) : 0;
+   const y = yCol >= 0 ? toNum(rowData[yCol]) : 0;
+   const k = kCol >= 0 ? toNum(rowData[kCol]) : 0;
+
+   const r = rCol >= 0 ? toNum255(rowData[rCol]) : 0;
+   const g = gCol >= 0 ? toNum255(rowData[gCol]) : 0;
+   const b = bCol >= 0 ? toNum255(rowData[bCol]) : 0;
+
+   const color = {
+    hex: hex || '#000000',
+    colorName,
+    cmyk: { c, m, y, k },
+    rgb: { r, g, b }
+   };
+   return { success: true, color };
+  }
+
+  return { success: false, error: `No row with Code "${code}" in COLOR_CODE_LOOKUP.xlsx` };
+ } catch (error) {
+  console.error('[getColorByCodeFromLookup] Error:', error);
+  return { success: false, error: error.message || 'Failed to read COLOR_CODE_LOOKUP.xlsx' };
  }
 }
 
@@ -438,15 +674,7 @@ async function getGraphicPlacementOptions(documentPath) {
     throw new Error(`Cannot get file stats for Excel file: ${excelFilePath}`);
    }
   } else {
-   const serverBasePath = getServerBasePath();
-   if (!serverBasePath) {
-    throw new Error('Server base path not found and document path not provided');
-   }
-   const normalizedBasePath = serverBasePath.replace(/\/$/, '');
-   excelFilePath = path.join(normalizedBasePath, 'SETTINGS', 'LEAP_SEPS', 'Data', 'CL0.xlsx');
-   if (!fs.existsSync(excelFilePath)) {
-    throw new Error(`Excel file not found at: ${excelFilePath}`);
-   }
+   throw new Error('Document path not provided');
   }
 
   let workbook;
@@ -482,7 +710,7 @@ async function getGraphicPlacementOptions(documentPath) {
   const graphicPlacementColIndex = headerRow.findIndex((col) => col === 'Graphic Placement');
 
   if (graphicPlacementColIndex === -1) {
-   return ['Choose'];
+   return [];
   }
 
   const placementSet = new Set();
@@ -503,9 +731,9 @@ async function getGraphicPlacementOptions(documentPath) {
   }
 
   const placements = Array.from(placementSet).sort();
-  return ['Choose', ...placements];
+  return [...placements];
  } catch (error) {
-  return ['Choose'];
+  return [];
  }
 }
 
@@ -532,13 +760,17 @@ async function getProfileInformation(profileCode) {
    throw new Error('Profiles.json does not contain an array');
   }
 
-  const matchedProfile = profilesData.find(
-   (profile) =>
-    profile['Profile Code'] &&
-    String(profile['Profile Code']).trim().toUpperCase() === profileCode.trim().toUpperCase()
-  );
+  const normalizedLookup = String(profileCode).trim().toUpperCase();
+  const matchedProfile = profilesData.find((profile) => {
+   const codeValue =
+    profile && profile['Profile Code'] != null ? String(profile['Profile Code']).trim().toUpperCase() : '';
+   const nameValue =
+    profile && profile['Profile Name'] != null ? String(profile['Profile Name']).trim().toUpperCase() : '';
+   return codeValue === normalizedLookup || nameValue === normalizedLookup;
+  });
 
   if (!matchedProfile) {
+   console.warn('[LEAP][UB_DEBUG] Profile not found in Profiles.json for code:', profileCode);
    return {
     found: false,
     profileCode: profileCode,
@@ -548,6 +780,15 @@ async function getProfileInformation(profileCode) {
     wb: false
    };
   }
+
+  const toEnabled = (value) => {
+   if (value === true || value === 1) return true;
+   if (typeof value === 'string') {
+    const normalized = value.trim().toUpperCase();
+    return normalized === 'Y' || normalized === 'YES' || normalized === 'TRUE' || normalized === '1';
+   }
+   return false;
+  };
 
   const flashValue = matchedProfile['Flash']
    ? String(matchedProfile['Flash']).trim().toUpperCase()
@@ -562,6 +803,39 @@ async function getProfileInformation(profileCode) {
   const cool = coolValue === 'Y' || coolValue === 'YES';
   const wb = wbValue === 'Y' || wbValue === 'YES';
 
+  const ubEnabledArray = Array.isArray(matchedProfile.underbaseEnabled)
+   ? matchedProfile.underbaseEnabled
+   : null;
+  const ubKnockoutArray = Array.isArray(matchedProfile.underbaseKnockoutBlack)
+   ? matchedProfile.underbaseKnockoutBlack
+   : null;
+  const ub2Enabled = toEnabled(
+   matchedProfile['Underbase 2'] != null ? matchedProfile['Underbase 2'] : matchedProfile['UB 2']
+  ) || (ubEnabledArray ? !!ubEnabledArray[1] : false);
+  const ub3Enabled = toEnabled(
+   matchedProfile['Underbase 3'] != null ? matchedProfile['Underbase 3'] : matchedProfile['UB 3']
+  ) || (ubEnabledArray ? !!ubEnabledArray[2] : false);
+  const ub4Enabled = toEnabled(
+   matchedProfile['Underbase 4'] != null ? matchedProfile['Underbase 4'] : matchedProfile['UB 4']
+  ) || (ubEnabledArray ? !!ubEnabledArray[3] : false);
+
+  console.log('[LEAP][UB_DEBUG] Matched profile row:', {
+   profileCode,
+   profileName: matchedProfile['Profile Name'] || '',
+   underbase2Raw: matchedProfile['Underbase 2'] != null ? matchedProfile['Underbase 2'] : matchedProfile['UB 2'],
+   underbase3Raw: matchedProfile['Underbase 3'] != null ? matchedProfile['Underbase 3'] : matchedProfile['UB 3'],
+   underbase4Raw: matchedProfile['Underbase 4'] != null ? matchedProfile['Underbase 4'] : matchedProfile['UB 4'],
+   underbaseEnabledArray: ubEnabledArray,
+   underbaseKnockoutArray: ubKnockoutArray,
+   underbase2Enabled: ub2Enabled,
+   underbase3Enabled: ub3Enabled,
+   underbase4Enabled: ub4Enabled,
+   ub1Mesh: matchedProfile['UB 1 Mesh'] || '',
+   ub2Mesh: matchedProfile['UB 2 Mesh'] || '',
+   ub3Mesh: matchedProfile['UB 3 Mesh'] || '',
+   ub4Mesh: matchedProfile['UB 4 Mesh'] || ''
+  });
+
   return {
    found: true,
    profileCode: profileCode,
@@ -575,11 +849,25 @@ async function getProfileInformation(profileCode) {
    ub2Mesh: matchedProfile['UB 2 Mesh'] || '',
    ub3Mesh: matchedProfile['UB 3 Mesh'] || '',
    ub4Mesh: matchedProfile['UB 4 Mesh'] || '',
+   blackInksKnockoutDisplay:
+    matchedProfile.blackInksKnockoutDisplay != null
+     ? String(matchedProfile.blackInksKnockoutDisplay)
+     : '',
+   underbaseKnockoutBlack: [
+    ubKnockoutArray ? !!ubKnockoutArray[0] : false,
+    ubKnockoutArray ? !!ubKnockoutArray[1] : false,
+    ubKnockoutArray ? !!ubKnockoutArray[2] : false,
+    ubKnockoutArray ? !!ubKnockoutArray[3] : false
+   ],
+   underbase2Enabled: ub2Enabled,
+   underbase3Enabled: ub3Enabled,
+   underbase4Enabled: ub4Enabled,
    distress: matchedProfile['Distress'] || '',
    twoHits: matchedProfile['2 Hits'] || '',
    blocker: matchedProfile['Blocker'] || ''
   };
  } catch (error) {
+  console.error('[LEAP][UB_DEBUG] getProfileInformation failed:', profileCode, error.message);
   return {
    found: false,
    profileCode: profileCode,
@@ -885,6 +1173,31 @@ class Leap {
   }
  }
 
+ async getStyleInformation(styleCodes) {
+  try {
+   console.log('[Leap.getStyleInformation] Called with:', styleCodes);
+   const result = await getStyleInformation(styleCodes);
+   console.log('[Leap.getStyleInformation] Returning:', result);
+   return result;
+  } catch (error) {
+   console.error('[Leap.getStyleInformation] Error:', error);
+   return {
+    success: false,
+    error: error.message
+   };
+  }
+ }
+
+ async getColorByCodeFromLookup(colorCode) {
+  try {
+   const result = await getColorByCodeFromLookup(colorCode);
+   return result;
+  } catch (error) {
+   console.error('[Leap.getColorByCodeFromLookup] Error:', error);
+   return { success: false, error: error.message };
+  }
+ }
+
  async getGraphicPlacementOptions(documentPath) {
   try {
    if (!documentPath) {
@@ -962,7 +1275,7 @@ class Leap {
   }
  }
 
- log(val) {}
+ log(val) { }
 
  get name() {
   return 'LEAP:: ';

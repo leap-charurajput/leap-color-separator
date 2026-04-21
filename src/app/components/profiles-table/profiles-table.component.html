@@ -22,3 +22,14 @@
 		</div>
 	</div>
 </div>
+
+<app-confirm-dialog
+	[isOpen]="isDeleteDialogOpen"
+	title="Confirm"
+	message="Are you sure you want to delete this profile?"
+	confirmText="Delete"
+	cancelText="Cancel"
+	confirmVariant="danger"
+	(confirm)="onConfirmDelete()"
+	(cancel)="onCancelDelete()"
+></app-confirm-dialog>

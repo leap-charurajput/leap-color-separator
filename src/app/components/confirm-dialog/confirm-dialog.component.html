@@ -1,0 +1,19 @@
+<div *ngIf="isOpen" class="modal-overlay" (click)="onOverlayClick()">
+ <div class="confirm-dialog modal-container" (click)="$event.stopPropagation()">
+  <div class="modal-header">
+   <h3 class="modal-title">{{ title }}</h3>
+  </div>
+  <div class="modal-body">
+   <p>{{ message }}</p>
+   <div *ngIf="checkboxOptions?.length" class="confirm-dialog-checkboxes">
+    <app-checkbox *ngFor="let opt of checkboxOptions" [label]="opt.label" [checked]="!!checkboxState[opt.id]"
+     (change)="onDialogCheckboxChange(opt.id, $event)"></app-checkbox>
+   </div>
+   <p *ngIf="errorMessage" class="error-text">{{ errorMessage }}</p>
+  </div>
+  <div class="modal-footer">
+   <app-button variant="secondary" (onClick)="onCancel()">{{ cancelText }}</app-button>
+   <app-button [variant]="confirmVariant" (onClick)="onConfirm()">{{ confirmText }}</app-button>
+  </div>
+ </div>
+</div>

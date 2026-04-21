@@ -1,4 +1,5 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, Input, OnChanges, OnInit, SimpleChanges } from '@angular/core';
+import { csInterface } from '../../../libs/helper';
 import { ControllerService } from '../../services/controller.service';
 
 interface Profile {
@@ -7,6 +8,9 @@ interface Profile {
  code: string;
  colorMesh: string;
  underbaseMeshes: string[];
+ underbaseEnabled: boolean[];
+ underbaseKnockoutBlack?: boolean[];
+ blackInksKnockoutDisplay?: string;
  waterbaseInk: boolean;
  distress?: string;
  _jsonData?: any;
@@ -17,13 +21,19 @@ interface Profile {
  templateUrl: './settings.component.html',
  styleUrls: ['./settings.component.css']
 })
-export class SettingsComponent implements OnInit {
+export class SettingsComponent implements OnInit, OnChanges {
+ @Input() selectedSectionFromMenu: 'Separation Profiles' | 'General Settings' = 'Separation Profiles';
  profiles: Profile[] = [];
  isLoading = true;
  editModalOpen = false;
  selectedProfile: Profile | null = null;
  defaultMesh = '110';
  addUnderbase = true;
+ artistName = '';
+ artistInitials = '';
+ ppdName = 'IBlock v2';
+ chokeStrokeColorSwatch = '';
+ koDarkColorNames = 'Black, PANTONE PROCESS BLACK C';
  selectedSection = 'Separation Profiles';
 
  // 🔑 Environment config
@@ -37,10 +47,25 @@ export class SettingsComponent implements OnInit {
 
  selectedEnvironmentKey: keyof typeof this.environments = 'Production';
 
- constructor(private controller: ControllerService) {}
+ leapServerPath = '';
+
+ constructor(private controller: ControllerService) { }
+
+ get pageTitle(): string {
+  return this.selectedSection === 'General Settings' ? 'General Settings' : 'Manage Profiles';
+ }
+
+ ngOnChanges(changes: SimpleChanges): void {
+  if (changes['selectedSectionFromMenu']?.currentValue) {
+   this.selectedSection = changes['selectedSectionFromMenu'].currentValue;
+  }
+ }
 
  async ngOnInit(): Promise<void> {
+  this.selectedSection = this.selectedSectionFromMenu || 'Separation Profiles';
   this.loadProfiles();
+  this.loadLeapServerPath();
+  this.loadGeneralSettings();
 
   try {
    const result = await this.controller.getAppVersion();
@@ -66,10 +91,66 @@ export class SettingsComponent implements OnInit {
 
   this.controller.saveAppVersion(this.selectedEnvironmentUrl).then((result) => {
    if (result) {
-    alert('Restart Adobe Illustrator for this change to take effect');
     // console.log('Environment URL saved:', this.selectedEnvironmentUrl);
+    // This reloads the panel iframe correctly
+    csInterface.evalScript('app.redraw()');
+
+    // Reload HTML
+    window.location.reload();
+    alert('Restart Adobe Illustrator for this change to take effect');
    } else {
     alert('Failed to save environment URL');
+   }
+  });
+ }
+
+ loadGeneralSettings(): void {
+  this.controller.loadGeneralSettings().then((result) => {
+   if (result.success && result.data) {
+    this.defaultMesh = result.data.defaultMesh != null ? String(result.data.defaultMesh) : '110';
+    this.addUnderbase = result.data.addUnderbase !== undefined ? result.data.addUnderbase : true;
+    this.artistName = result.data.artistName != null ? String(result.data.artistName) : '';
+    this.artistInitials = result.data.artistInitials != null ? String(result.data.artistInitials) : '';
+    this.ppdName = result.data.ppdName != null ? String(result.data.ppdName) : 'IBlock v2';
+    this.chokeStrokeColorSwatch =
+     result.data.chokeStrokeColorSwatch != null ? String(result.data.chokeStrokeColorSwatch) : '';
+    this.koDarkColorNames =
+     result.data.koDarkColorNames !== undefined && result.data.koDarkColorNames !== null
+      ? String(result.data.koDarkColorNames)
+      : 'Black, PANTONE PROCESS BLACK C';
+   }
+  });
+ }
+
+ saveGeneralSettings(): void {
+  const settings = {
+   defaultMesh: this.defaultMesh,
+   addUnderbase: this.addUnderbase,
+   artistName: this.artistName,
+   artistInitials: this.artistInitials,
+   ppdName: this.ppdName,
+   chokeStrokeColorSwatch: this.chokeStrokeColorSwatch,
+   koDarkColorNames: this.koDarkColorNames
+  };
+  this.controller.saveGeneralSettings(settings).then((result) => {
+   if (!result.success) {
+    console.error('Failed to save general settings:', result.error);
+   }
+  });
+ }
+
+ loadLeapServerPath(): void {
+  this.controller.getLeapServerDataPath().then((path) => {
+   this.leapServerPath = path;
+  });
+ }
+
+ onChooseLeapPath(): void {
+  this.controller.selectAndSaveLeapSettings().then((result) => {
+   if (result.success && result.path) {
+    this.leapServerPath = result.path;
+   } else if (!result.cancelled) {
+    // console.error('Error updating LEAP Data path', result.error);
    }
   });
  }
@@ -106,18 +187,47 @@ export class SettingsComponent implements OnInit {
 
   const profileName = jsonProfile['Profile Name'] || '';
   const distress = jsonProfile['Distress'] || 'N';
+  const toEnabled = (value: any) => {
+   if (value === true || value === 1) return true;
+   if (typeof value === 'string') {
+    const v = value.trim().toUpperCase();
+    return v === 'Y' || v === 'YES' || v === 'TRUE' || v === '1';
+   }
+   return false;
+  };
+  const ubMeshes = [
+   meshToString(jsonProfile['UB 1 Mesh']),
+   meshToString(jsonProfile['UB 2 Mesh']),
+   meshToString(jsonProfile['UB 3 Mesh']),
+   meshToString(jsonProfile['UB 4 Mesh'])
+  ];
+  const savedEnabled = Array.isArray(jsonProfile.underbaseEnabled) ? jsonProfile.underbaseEnabled : null;
+  const savedKnockout = Array.isArray(jsonProfile.underbaseKnockoutBlack)
+   ? jsonProfile.underbaseKnockoutBlack
+   : null;
+  const underbaseEnabled = [
+   true,
+   savedEnabled ? !!savedEnabled[1] : toEnabled(jsonProfile['Underbase 2']) || ubMeshes[1] !== '',
+   savedEnabled ? !!savedEnabled[2] : toEnabled(jsonProfile['Underbase 3']) || ubMeshes[2] !== '',
+   savedEnabled ? !!savedEnabled[3] : toEnabled(jsonProfile['Underbase 4']) || ubMeshes[3] !== ''
+  ];
+  const underbaseKnockoutBlack = [
+   savedKnockout ? !!savedKnockout[0] : false,
+   savedKnockout ? !!savedKnockout[1] : false,
+   savedKnockout ? !!savedKnockout[2] : false,
+   savedKnockout ? !!savedKnockout[3] : false
+  ];
 
   return {
    id: jsonProfile.id || this.generateId(profileName, distress),
    name: profileName,
    code: jsonProfile['Profile Code'] || '',
    colorMesh: meshToString(jsonProfile['Color Mesh']),
-   underbaseMeshes: [
-    meshToString(jsonProfile['UB 1 Mesh']),
-    meshToString(jsonProfile['UB 2 Mesh']),
-    meshToString(jsonProfile['UB 3 Mesh']),
-    meshToString(jsonProfile['UB 4 Mesh'])
-   ],
+   underbaseMeshes: ubMeshes,
+   underbaseEnabled: underbaseEnabled,
+   underbaseKnockoutBlack: underbaseKnockoutBlack,
+   blackInksKnockoutDisplay:
+    jsonProfile.blackInksKnockoutDisplay != null ? String(jsonProfile.blackInksKnockoutDisplay) : '',
    waterbaseInk: jsonProfile['WB'] === 'Y' || jsonProfile['WB'] === true,
    distress: distress,
    _jsonData: jsonProfile
@@ -141,6 +251,25 @@ export class SettingsComponent implements OnInit {
    'UB 2 Mesh': stringToNumberOrEmpty(reactProfile.underbaseMeshes[1]),
    'UB 3 Mesh': stringToNumberOrEmpty(reactProfile.underbaseMeshes[2]),
    'UB 4 Mesh': stringToNumberOrEmpty(reactProfile.underbaseMeshes[3]),
+   'Underbase 2': reactProfile.underbaseEnabled && reactProfile.underbaseEnabled[1] ? 'Y' : 'N',
+   'Underbase 3': reactProfile.underbaseEnabled && reactProfile.underbaseEnabled[2] ? 'Y' : 'N',
+   'Underbase 4': reactProfile.underbaseEnabled && reactProfile.underbaseEnabled[3] ? 'Y' : 'N',
+   underbaseEnabled: [
+    true,
+    !!(reactProfile.underbaseEnabled && reactProfile.underbaseEnabled[1]),
+    !!(reactProfile.underbaseEnabled && reactProfile.underbaseEnabled[2]),
+    !!(reactProfile.underbaseEnabled && reactProfile.underbaseEnabled[3])
+   ],
+   underbaseKnockoutBlack: [
+    !!(reactProfile.underbaseKnockoutBlack && reactProfile.underbaseKnockoutBlack[0]),
+    !!(reactProfile.underbaseKnockoutBlack && reactProfile.underbaseKnockoutBlack[1]),
+    !!(reactProfile.underbaseKnockoutBlack && reactProfile.underbaseKnockoutBlack[2]),
+    !!(reactProfile.underbaseKnockoutBlack && reactProfile.underbaseKnockoutBlack[3])
+   ],
+   blackInksKnockoutDisplay:
+    reactProfile.blackInksKnockoutDisplay != null
+     ? String(reactProfile.blackInksKnockoutDisplay)
+     : '',
    WB: reactProfile.waterbaseInk ? 'Y' : 'N'
   };
 
@@ -150,14 +279,14 @@ export class SettingsComponent implements OnInit {
    jsonProfile.Blocker = reactProfile._jsonData.Blocker || 'N';
    jsonProfile.Flash =
     reactProfile._jsonData.Flash &&
-    reactProfile._jsonData.Flash !== null &&
-    !isNaN(reactProfile._jsonData.Flash)
+     reactProfile._jsonData.Flash !== null &&
+     !isNaN(reactProfile._jsonData.Flash)
      ? reactProfile._jsonData.Flash
      : '';
    jsonProfile.Cool =
     reactProfile._jsonData.Cool &&
-    reactProfile._jsonData.Cool !== null &&
-    !isNaN(reactProfile._jsonData.Cool)
+     reactProfile._jsonData.Cool !== null &&
+     !isNaN(reactProfile._jsonData.Cool)
      ? reactProfile._jsonData.Cool
      : '';
    jsonProfile.Micron = reactProfile._jsonData.Micron || 'XXX';

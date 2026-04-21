@@ -132,6 +132,12 @@ function createManifest() {
               <Height>600</Height>
             </MaxSize>
           </Geometry>
+          <Icons>
+						<Icon Type="Normal">./icon_light.png</Icon>
+						<Icon Type="RollOver">./icon_light.png</Icon>
+						<Icon Type="DarkNormal">./icon_dark.png</Icon>
+						<Icon Type="DarkRollOver">./icon_dark.png</Icon>
+					</Icons>
         </UI>
       </DispatchInfo>
     </Extension>
@@ -145,38 +151,53 @@ function createIndexHtml() {
  console.log('📝 Creating index.html...');
  const indexHtml = `<!DOCTYPE html>
 <html>
- <head>
-  <meta charset="utf-8" />
-  <title>LEAP Color Separator</title>
-  <base href="./" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <script type="text/javascript">
-   (function () {
-    // Node.js modules
-    var fs = window.require('fs');
-    var path = window.require('path');
-    var os = window.require('os');
+  <head>
+    <meta charset="utf-8" />
+    <title>LEAP Color Separator</title>
+    <base href="./" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script type="text/javascript">
+      (function () {
+        var fs = window.require('fs');
+        var path = window.require('path');
+        var os = window.require('os');
 
-    // Get user Documents folder path
-    var documentsPath = path.join(os.homedir(), 'Documents');
-    var jsonFilePath = path.join(documentsPath, 'LEAP Settings', 'ColorSep_Folder_Paths.json');
+        var documentsPath = path.join(os.homedir(), 'Documents');
+        var leapSettingsDir = path.join(documentsPath, 'LEAP Settings');
+        var leapSepsDir = path.join(documentsPath, 'LEAP Settings', 'LEAP_Seps');
+        var oldJsonFilePath = path.join(leapSettingsDir, 'ColorSep_Folder_Paths.json');
+        var newJsonFilePath = path.join(leapSepsDir, 'ColorSep_Folder_Paths.json');
 
-    try {
-     var jsonData = fs.readFileSync(jsonFilePath, 'utf8');
-     var parsedData = JSON.parse(jsonData);
+        // Ensure folders exist
+        if (!fs.existsSync(leapSettingsDir)) {
+          fs.mkdirSync(leapSettingsDir, { recursive: true });
+        }
+        if (!fs.existsSync(leapSepsDir)) {
+          fs.mkdirSync(leapSepsDir, { recursive: true });
+        }
 
-     var origin = parsedData?.origin; // optional chaining
-     window.location.href = origin ? origin : 'http://salesforce-connector.metadesign.org.in';
-    } catch (error) {
-     console.error('Error reading JSON file:', error);
-     window.location.href = 'http://salesforce-connector.metadesign.org.in';
-    }
-   })();
-  </script>
- </head>
- <body>
-  Redirecting to URL...
- </body>
+        // Migrate old file to new location if needed
+        if (fs.existsSync(oldJsonFilePath) && !fs.existsSync(newJsonFilePath)) {
+          fs.copyFileSync(oldJsonFilePath, newJsonFilePath);
+          fs.unlinkSync(oldJsonFilePath);
+        }
+
+        try {
+          var jsonData = fs.readFileSync(newJsonFilePath, 'utf8');
+          var parsedData = JSON.parse(jsonData);
+
+          var origin = parsedData?.origin;
+          window.location.href = origin ? origin : 'http://salesforce-connector.metadesign.org.in';
+        } catch (error) {
+          console.error('Error reading JSON file:', error);
+          window.location.href = 'http://salesforce-connector.metadesign.org.in';
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    Redirecting to URL...
+  </body>
 </html>`;
 
  fs.writeFileSync(path.join(CEP_PLUGIN_OUTPUT, 'index.html'), indexHtml);
@@ -264,6 +285,19 @@ try {
   console.error('   Please ensure src/jsx/ folder exists with JSX files');
   process.exit(1);
  }
+
+ // Copy icons
+ console.log('🖼️  Copying icons...');
+ ['icon_dark.png', 'icon_light.png'].forEach((icon) => {
+  const src = path.join(__dirname, icon);
+  const dest = path.join(CEP_PLUGIN_OUTPUT, icon);
+  if (fs.existsSync(src)) {
+   fs.copyFileSync(src, dest);
+   console.log(`   ${icon} copied.`);
+  } else {
+   console.warn(`⚠️  Warning: Icon not found: ${icon}`);
+  }
+ });
 
  // Create manifest and index.html
  createManifest();

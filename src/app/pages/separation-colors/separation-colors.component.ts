@@ -4,11 +4,13 @@ import {
  ChangeDetectorRef,
  Component,
  Input,
+ NgZone,
  OnChanges,
  OnDestroy,
  OnInit,
  SimpleChanges
 } from '@angular/core';
+import { checkForJSXUpdates } from '../../../libs/helper';
 import { ControllerService } from '../../services/controller.service';
 
 interface ColorRow {
@@ -54,6 +56,8 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  nextId = 3;
  hasUIChanges = false;
  documentProfileMetadata: any = null;
+ bodyColorFromDocument: string | null = null;
+ bodyColorNameFromDocument: string = '';
 
  isSeparationModalOpen = false;
  isCompoundModalOpen = false;
@@ -71,7 +75,11 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  visibilityMode: 'allVisible' | 'singleVisible' | 'noneVisible' | 'other' = 'allVisible';
  activeSingleInk: string | null = null;
 
- constructor(private controller: ControllerService, private cdr: ChangeDetectorRef) {
+ constructor(
+  private controller: ControllerService,
+  private cdr: ChangeDetectorRef,
+  private ngZone: NgZone
+ ) {
   this.isRunningInBrowser = !(window as any).__adobe_cep__ && !(window as any).leap;
   // Don't initialize with default rows - wait for actual data from document
   this.colorRows = [];
@@ -89,14 +97,30 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  ngOnChanges(changes: SimpleChanges): void {
   if (changes['documentRefreshKey'] && !changes['documentRefreshKey'].firstChange) {
    console.log('[SEPARATION] Refresh triggered by App (refreshKey changed)');
+   checkForJSXUpdates((window as any).location.href).then((res) => {
+    console.log('check update status ref', res);
+   });
    // Reset state when document changes
    this.colorRows = [];
    this.graphicSwatches = [];
-   this.checkIfSeparatedDocument();
+
+   if (this.refreshCheckTimeoutId != null) {
+    clearTimeout(this.refreshCheckTimeoutId);
+   }
+   this.refreshCheckTimeoutId = setTimeout(() => {
+    this.refreshCheckTimeoutId = null;
+    this.checkIfSeparatedDocument();
+   }, 250);
   }
  }
 
+ private refreshCheckTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
  ngOnDestroy(): void {
+  if (this.refreshCheckTimeoutId != null) {
+   clearTimeout(this.refreshCheckTimeoutId);
+   this.refreshCheckTimeoutId = null;
+  }
   delete (window as any).__LEAP_SEPARATION_COLORS_REFRESH__;
  }
 
@@ -228,103 +252,162 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   this.controller
    .checkSeparatedDocument()
    .then((result) => {
-    console.log('[SEPARATION] ========================================');
-    console.log('[SEPARATION] checkSeparatedDocument - Complete Result:');
-    console.log('[SEPARATION] ========================================');
-    console.log('[SEPARATION] Full result object:', JSON.stringify(result.data, null, 2));
-    console.log('[SEPARATION] result.success:', result.success);
+    this.ngZone.run(() => {
+     console.log('[SEPARATION] ========================================');
+     console.log('[SEPARATION] checkSeparatedDocument - Complete Result:');
+     console.log('[SEPARATION] ========================================');
+     console.log('[SEPARATION] Full result object:', JSON.stringify(result.data, null, 2));
+     console.log('[SEPARATION] result.success:', result.success);
 
-    if (!result.success || !result.data || !result.data.hasDocument) {
-     console.log('[SEPARATION] No data structure found or request failed');
-     this.setUIForNonSeparatedDocument();
-     return;
-    }
-
-    const data = result.data;
-
-    if (data.isSeparatedDoc) {
-     this.isSeparatedDoc = true;
-     this.cdr.detectChanges(); // Force change detection to update template
-     if (data.profileMetaData) {
-      console.log('[SEPARATION] Setting profile metadata from XMP:', data.profileMetaData);
-      this.documentProfileMetadata = data.profileMetaData;
-      this.selectedGraphic = data.profileMetaData.graphicName || '';
-      this.graphicNameFromPath = data.profileMetaData.graphicName || '';
-
-      setTimeout(() => {
-       this.handleRefreshList();
-       this.hasUIChanges = false;
-      }, 500);
-     } else {
-      console.log('[SEPARATION] No profile metadata found in XMP');
-      this.documentProfileMetadata = null;
-      this.selectedGraphic = data.graphicName || '';
-      this.graphicNameFromPath = data.graphicName || '';
+     if (!result.success || !result.data || !result.data.hasDocument) {
+      console.log('[SEPARATION] No data structure found or request failed');
+      this.setUIForNonSeparatedDocument();
+      return;
      }
 
-     // Load color rows from XMP if available (priority 1)
-     if (
-      data.leapSeparationColorsData &&
-      Array.isArray(data.leapSeparationColorsData) &&
-      data.leapSeparationColorsData.length > 0
-     ) {
-      console.log(
-       '[SEPARATION] Found LEAPSeparationColorsData in XMP:',
-       data.leapSeparationColorsData.length,
-       'rows'
-      );
-      this.isLoadingSwatches = true;
-      // Clear existing rows before loading new data
-      this.colorRows = [];
-      const colorRowsFromXMP = this.convertXMPDataToColorRows(data.leapSeparationColorsData);
-      if (colorRowsFromXMP && colorRowsFromXMP.length > 0) {
-       this.colorRows = colorRowsFromXMP;
-       this.nextId = colorRowsFromXMP.length + 1;
-       this.hasUIChanges = false;
-       this.isLoadingSwatches = false;
-       this.cdr.detectChanges(); // Force change detection after loading color rows
+     const data = result.data;
+
+     if (data.isSeparatedDoc) {
+      this.isSeparatedDoc = true;
+      const bodyColorData = data.bodyColor;
+      this.bodyColorFromDocument =
+       bodyColorData && (bodyColorData as any).bodyColor ? (bodyColorData as any).bodyColor : null;
+      this.bodyColorNameFromDocument =
+       bodyColorData && (bodyColorData as any).colorName ? (bodyColorData as any).colorName : '';
+      if (data.profileMetaData) {
+       console.log('[SEPARATION] Setting profile metadata from XMP:', data.profileMetaData);
+       const profileMetaData = data.profileMetaData;
+       const existingStyleInfo = profileMetaData.styleInfo;
+       const styleCodes = profileMetaData.styleCodes;
+
+       if (existingStyleInfo) {
+        console.log('[SEPARATION] Using existing styleInfo from XMP');
+        this.documentProfileMetadata = profileMetaData;
+       } else if (
+        styleCodes &&
+        Array.isArray(styleCodes) &&
+        styleCodes.length > 0 &&
+        this.controller.getStyleInformation
+       ) {
+        console.log('[SEPARATION] Fetching styleInfo for styleCodes:', styleCodes);
+        this.documentProfileMetadata = profileMetaData;
+        this.controller
+         .getStyleInformation(styleCodes)
+         .then((styleInfoResult: any) => {
+          console.log('[SEPARATION] getStyleInformation result:', styleInfoResult);
+          this.ngZone.run(() => {
+           if (styleInfoResult && styleInfoResult.success && styleInfoResult.styleInfoMap) {
+            const firstStyleCode = styleCodes[0];
+            const styleInfo = styleInfoResult.styleInfoMap[firstStyleCode] || null;
+            console.log('[SEPARATION] Merged styleInfo for', firstStyleCode, ':', styleInfo);
+            this.documentProfileMetadata = styleInfo
+             ? { ...profileMetaData, styleInfo }
+             : profileMetaData;
+           } else {
+            console.warn(
+             '[SEPARATION] getStyleInformation: no success or styleInfoMap',
+             styleInfoResult
+            );
+           }
+           this.cdr.detectChanges();
+          });
+         })
+         .catch((err: any) => {
+          console.error('[SEPARATION] getStyleInformation failed:', err);
+          this.ngZone.run(() => this.cdr.detectChanges());
+         });
+       } else {
+        console.log(
+         '[SEPARATION] Skip getStyleInformation: styleCodes=',
+         styleCodes,
+         'hasGetStyleInfo=',
+         !!this.controller.getStyleInformation
+        );
+        this.documentProfileMetadata = profileMetaData;
+       }
+
+       this.selectedGraphic = profileMetaData.graphicName || '';
+       this.graphicNameFromPath = profileMetaData.graphicName || '';
+
+       setTimeout(() => {
+        this.handleRefreshList();
+        this.hasUIChanges = false;
+       }, 500);
+      } else {
+       console.log('[SEPARATION] No profile metadata found in XMP');
+       this.documentProfileMetadata = null;
+       this.selectedGraphic = data.graphicName || '';
+       this.graphicNameFromPath = data.graphicName || '';
+      }
+
+      // Load color rows from XMP if available (priority 1)
+      if (
+       data.leapSeparationColorsData &&
+       Array.isArray(data.leapSeparationColorsData) &&
+       data.leapSeparationColorsData.length > 0
+      ) {
        console.log(
-        '[SEPARATION] Loaded color rows from XMP data on document check:',
-        colorRowsFromXMP.length,
+        '[SEPARATION] Found LEAPSeparationColorsData in XMP:',
+        data.leapSeparationColorsData.length,
         'rows'
        );
-       console.log('[SEPARATION] Color rows array:', this.colorRows);
-       console.log('[SEPARATION] isLoadingSwatches:', this.isLoadingSwatches);
-       console.log('[SEPARATION] isSeparatedDoc:', this.isSeparatedDoc);
-       console.log('[SEPARATION] isLoadingGraphics:', this.isLoadingGraphics);
-       console.log('[SEPARATION] graphicOptions.length:', this.graphicOptions.length);
-       console.log(
-        '[SEPARATION] Should show table?',
-        !this.isLoadingSwatches &&
-         (this.isSeparatedDoc || (!this.isLoadingGraphics && this.graphicOptions.length > 0))
-       );
-      } else {
-       console.log('[SEPARATION] Failed to convert XMP data, will use SeparatedLayerNames + Excel');
+       this.isLoadingSwatches = true;
+       // Clear existing rows before loading new data
        this.colorRows = [];
-       this.isLoadingSwatches = false;
+       const colorRowsFromXMP = this.convertXMPDataToColorRows(data.leapSeparationColorsData);
+       if (colorRowsFromXMP && colorRowsFromXMP.length > 0) {
+        this.colorRows = colorRowsFromXMP;
+        this.nextId = colorRowsFromXMP.length + 1;
+        this.hasUIChanges = false;
+        this.isLoadingSwatches = false;
+        this.cdr.detectChanges(); // Force change detection after loading color rows
+        console.log(
+         '[SEPARATION] Loaded color rows from XMP data on document check:',
+         colorRowsFromXMP.length,
+         'rows'
+        );
+        console.log('[SEPARATION] Color rows array:', this.colorRows);
+        console.log('[SEPARATION] isLoadingSwatches:', this.isLoadingSwatches);
+        console.log('[SEPARATION] isSeparatedDoc:', this.isSeparatedDoc);
+        console.log('[SEPARATION] isLoadingGraphics:', this.isLoadingGraphics);
+        console.log('[SEPARATION] graphicOptions.length:', this.graphicOptions.length);
+        console.log(
+         '[SEPARATION] Should show table?',
+         !this.isLoadingSwatches &&
+         (this.isSeparatedDoc || (!this.isLoadingGraphics && this.graphicOptions.length > 0))
+        );
+       } else {
+        console.log(
+         '[SEPARATION] Failed to convert XMP data, will use SeparatedLayerNames + Excel'
+        );
+        this.colorRows = [];
+        this.isLoadingSwatches = false;
+       }
+      } else {
+       console.log(
+        '[SEPARATION] No LEAPSeparationColorsData found in XMP, will use SeparatedLayerNames + Excel'
+       );
+       const separatedLayerNames = data.separatedLayerNames;
+       if (
+        separatedLayerNames &&
+        Array.isArray(separatedLayerNames) &&
+        separatedLayerNames.length > 0
+       ) {
+        this.isLoadingSwatches = true;
+        this.loadColorRowsFromSeparatedLayerNames();
+       } else {
+        console.log('[SEPARATION] No SeparatedLayerNames found either, cannot load color data');
+        this.colorRows = [];
+        this.isLoadingSwatches = false;
+        this.cdr.detectChanges();
+       }
       }
      } else {
-      console.log(
-       '[SEPARATION] No LEAPSeparationColorsData found in XMP, will use SeparatedLayerNames + Excel'
-      );
-      const separatedLayerNames = data.separatedLayerNames;
-      if (
-       separatedLayerNames &&
-       Array.isArray(separatedLayerNames) &&
-       separatedLayerNames.length > 0
-      ) {
-       this.isLoadingSwatches = true;
-       this.loadColorRowsFromSeparatedLayerNames();
-      } else {
-       console.log('[SEPARATION] No SeparatedLayerNames found either, cannot load color data');
-       this.isLoadingSwatches = false;
-      }
+      this.isSeparatedDoc = false;
+      this.cdr.detectChanges();
+      this.setUIForNonSeparatedDocument();
      }
-    } else {
-     this.isSeparatedDoc = false;
-     this.cdr.detectChanges(); // Force change detection
-     this.setUIForNonSeparatedDocument();
-    }
+    });
    })
    .catch((err) => {
     console.error('[SEPARATION] Error checking separated document:', err);
@@ -338,6 +421,8 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   this.isSeparatedDoc = false;
   this.graphicNameFromPath = '';
   this.documentProfileMetadata = null;
+  this.bodyColorFromDocument = null;
+  this.bodyColorNameFromDocument = '';
   this.colorRows = [];
   this.graphicSwatches = [];
   this.selectedGraphic = '';
@@ -472,9 +557,9 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
     return fallbackProfilePromise.then((fallbackProfileResult: any) => {
      const fallbackProfile =
       fallbackProfileResult &&
-      fallbackProfileResult.success &&
-      fallbackProfileResult.profileInfo &&
-      fallbackProfileResult.profileInfo.found
+       fallbackProfileResult.success &&
+       fallbackProfileResult.profileInfo &&
+       fallbackProfileResult.profileInfo.found
        ? fallbackProfileResult.profileInfo
        : null;
 
@@ -524,7 +609,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
      console.log(
       '[SEPARATION] Should show table?',
       !this.isLoadingSwatches &&
-       (this.isSeparatedDoc || (!this.isLoadingGraphics && this.graphicOptions.length > 0))
+      (this.isSeparatedDoc || (!this.isLoadingGraphics && this.graphicOptions.length > 0))
      );
     });
    })
@@ -622,6 +707,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  }
 
  private sortColorRowsWithWhiteUBAtBottom(rows: ColorRow[]): ColorRow[] {
+  // Currently sorting is disabled as per request, but this function can be re-enabled if needed
   if (!rows || rows.length === 0) return rows;
 
   const sorted = [...rows].sort((a, b) => {
@@ -638,6 +724,91 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   if (!colorName) return false;
   const lowerName = colorName.toLowerCase();
   return lowerName.includes('white ub') || lowerName.includes('whiteub');
+ }
+
+ private getRequiredWhiteUbCountFromProfile(): number {
+  const meta = this.documentProfileMetadata || {};
+  const isEnabled = (value: any): boolean => {
+   if (value === true) return true;
+   if (typeof value === 'string') {
+    const v = value.trim().toUpperCase();
+    return v === 'Y' || v === 'YES' || v === 'TRUE' || v === '1';
+   }
+   return value === 1;
+  };
+  const enabled = Array.isArray(meta.underbaseEnabled) ? meta.underbaseEnabled : [];
+
+  if (enabled.length > 0) {
+   const ub1 = enabled[0] !== false;
+   const ub2 = !!enabled[1];
+   const ub3 = !!enabled[2];
+   if (ub3) return 3;
+   if (ub2) return 2;
+   return ub1 ? 1 : 1;
+  }
+
+  const ub3 = isEnabled(meta.underbase3Enabled) || isEnabled(meta.ub3Enabled) || isEnabled(meta.underbase3) || isEnabled(meta['Underbase 3']);
+  const ub2 = isEnabled(meta.underbase2Enabled) || isEnabled(meta.ub2Enabled) || isEnabled(meta.underbase2) || isEnabled(meta['Underbase 2']);
+
+  if (ub3) return 3;
+  if (ub2) return 2;
+  return 1;
+ }
+
+ private getProfileUnderbaseMeshes(): string[] {
+  const meta = this.documentProfileMetadata || {};
+  if (Array.isArray(meta.underbaseMeshes)) {
+   return meta.underbaseMeshes.map((m: any) => (m == null ? '' : String(m).trim()));
+  }
+
+  return [
+   meta.ub1Mesh != null ? String(meta.ub1Mesh).trim() : '',
+   meta.ub2Mesh != null ? String(meta.ub2Mesh).trim() : '',
+   meta.ub3Mesh != null ? String(meta.ub3Mesh).trim() : ''
+  ];
+ }
+
+ private buildTableRowsWithRequiredWhiteUb(activeRows: ColorRow[]): ColorRow[] {
+  const whiteRows = activeRows.filter((row) => this.isWhiteUB(row.colorName));
+  if (whiteRows.length === 0) {
+   return activeRows;
+  }
+
+  const requiredWhiteCount = this.getRequiredWhiteUbCountFromProfile();
+  const underbaseMeshes = this.getProfileUnderbaseMeshes();
+  const expandedCount = Math.max(requiredWhiteCount, whiteRows.length);
+
+  const sortedWhiteRows = [...whiteRows].sort((a, b) =>
+   (a.colorName || '').localeCompare(b.colorName || '', undefined, { numeric: true, sensitivity: 'base' })
+  );
+  const whiteTemplate = sortedWhiteRows[0];
+  const baseWhiteName = (whiteTemplate.colorName || 'White UB').replace(/\s+\d+$/g, '').trim();
+
+  const expandedWhiteRows: ColorRow[] = [];
+  for (let i = 0; i < expandedCount; i++) {
+   const sourceRow = sortedWhiteRows[i] || whiteTemplate;
+   const meshFromProfile = underbaseMeshes[i] || '';
+   expandedWhiteRows.push({
+    ...sourceRow,
+    colorName: i === 0 ? baseWhiteName : `${baseWhiteName} ${i + 1}`,
+    mesh: meshFromProfile || sourceRow.mesh
+   });
+  }
+
+  const mergedRows: ColorRow[] = [];
+  let hasInsertedWhiteRows = false;
+  for (const row of activeRows) {
+   if (this.isWhiteUB(row.colorName)) {
+    if (!hasInsertedWhiteRows) {
+     mergedRows.push(...expandedWhiteRows);
+     hasInsertedWhiteRows = true;
+    }
+    continue;
+   }
+   mergedRows.push(row);
+  }
+
+  return hasInsertedWhiteRows ? mergedRows : [...activeRows, ...expandedWhiteRows];
  }
 
  handleGraphicMenuClick(item: string): void {
@@ -660,7 +831,18 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  }
 
  handleExportProcess(): void {
-  this.isExportModalOpen = true;
+  this.ngZone.run(() => {
+   this.isExportModalOpen = true;
+   this.cdr.detectChanges();
+  });
+ }
+
+ handleExportModalClose(): void {
+  // ← Add this new method
+  this.ngZone.run(() => {
+   this.isExportModalOpen = false;
+   this.cdr.detectChanges();
+  });
  }
 
  handleExportSeparations(exportOptions: any): void {
@@ -691,10 +873,11 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 
   // Export Postscript
   if (exportOptions.exportPostscript) {
+   const postscriptInks = this.getAvailableColors();
    setTimeout(
     () => {
      this.controller
-      .exportPostscript()
+      .exportPostscript(postscriptInks)
       .then((result) => {
        if (result && result.success) {
         exportResults.push('PostScript');
@@ -710,6 +893,11 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
     },
     exportOptions.exportPrintGuide ? 500 : 0
    );
+
+   this.ngZone.run(() => {
+    this.isExportModalOpen = false;
+    this.cdr.detectChanges();
+   });
   }
 
   // Export Separations Preview PDF (requires PostScript to be exported first)
@@ -797,12 +985,14 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   console.log('[SEPARATION] Opening modal to add separation color');
   this.editingRow = null;
   this.isSeparationModalOpen = true;
+  this.cdr.detectChanges(); // Ensure modal opens with fresh state
  }
 
  handleAddCompoundPlate(): void {
   console.log('[SEPARATION] Opening modal to add compound plate');
   this.editingRow = null;
   this.isCompoundModalOpen = true;
+  this.cdr.detectChanges(); // Ensure modal opens with fresh state
  }
 
  handleSaveSeparationColor(plateData: any): void {
@@ -810,14 +1000,14 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
    const updatedRows = this.colorRows.map((row) =>
     row.id === this.editingRow!.id
      ? {
-        ...row,
-        colorName: plateData.colorName,
-        mesh: plateData.mesh,
-        micron: plateData.micron,
-        flashEnabled: plateData.flashEnabled,
-        coolEnabled: plateData.coolEnabled,
-        wbEnabled: plateData.wbEnabled
-       }
+      ...row,
+      colorName: plateData.colorName,
+      mesh: plateData.mesh,
+      micron: plateData.micron,
+      flashEnabled: plateData.flashEnabled,
+      coolEnabled: plateData.coolEnabled,
+      wbEnabled: plateData.wbEnabled
+     }
      : row
    );
    this.colorRows = updatedRows;
@@ -853,19 +1043,19 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
    const updatedRows = this.colorRows.map((row) =>
     row.id === this.editingRow!.id
      ? {
-        ...row,
-        colorName: plateData.colorName,
-        components: plateData.components,
-        mesh: plateData.mesh,
-        micron: plateData.micron,
-        flashEnabled: plateData.flashEnabled,
-        coolEnabled: plateData.coolEnabled,
-        wbEnabled: plateData.wbEnabled,
-        specialInk: plateData.specialInk,
-        specialInkValue: plateData.specialInkValue,
-        generateChoke: plateData.generateChoke,
-        chokeColor: plateData.chokeColor
-       }
+      ...row,
+      colorName: plateData.colorName,
+      components: plateData.components,
+      mesh: plateData.mesh,
+      micron: plateData.micron,
+      flashEnabled: plateData.flashEnabled,
+      coolEnabled: plateData.coolEnabled,
+      wbEnabled: plateData.wbEnabled,
+      specialInk: plateData.specialInk,
+      specialInkValue: plateData.specialInkValue,
+      generateChoke: plateData.generateChoke,
+      chokeColor: plateData.chokeColor
+     }
      : row
    );
    this.colorRows = updatedRows;
@@ -890,14 +1080,22 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
     chokeColor: plateData.chokeColor,
     removed: false
    };
-   this.colorRows = [...this.colorRows, newRow];
+   this.colorRows = [newRow, ...this.colorRows];
    this.nextId++;
    this.hasUIChanges = true;
    console.log('[SEPARATION] New compound plate added:', newRow);
   }
+  setTimeout(() => {
+   this.hasUIChanges = false;
+   this.handleRefreshList();
+  }, 500);
   this.isCompoundModalOpen = false;
   this.editingRow = null;
   this.cdr.detectChanges();
+ }
+
+ getColorRowMenuItems(row: ColorRow): string[] {
+  return ['Edit', `Add second hit of ${row.colorName}`, 'Remove color'];
  }
 
  handleColorRowMenuClick(item: string, rowId: number): void {
@@ -907,7 +1105,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
    this.handleRemoveColor(rowId);
   } else if (item === 'Edit') {
    this.handleEditSeparation(rowId);
-  } else if (item === 'Add second hit...') {
+  } else if (item.startsWith('Add second hit')) {
    console.log('[HIT THE DROPDOWN]', rowId);
    this.handleAddSecondHit(rowId);
   }
@@ -949,6 +1147,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
    })
    .finally(() => {
     this.handleRefreshList(); // ✅ update SEP TABLE after underbase generation
+    this.cdr.detectChanges();
    });
  }
 
@@ -1090,7 +1289,6 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  }
 
  getAvailableColors(): string[] {
-  console.log('[SEPARATION] Getting available separation colors', this.colorRows);
   return this.colorRows
    .filter((row) => row.type === 'separation' && !/ub/i.test(row.colorName))
    .map((row) => row.colorName);
@@ -1229,6 +1427,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
    row.id === rowId ? { ...row, flashEnabled: !row.flashEnabled } : row
   );
   this.hasUIChanges = true;
+  this.cdr.detectChanges();
  }
 
  handleToggleCool(rowId: number): void {
@@ -1236,6 +1435,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
    row.id === rowId ? { ...row, coolEnabled: !row.coolEnabled } : row
   );
   this.hasUIChanges = true;
+  this.cdr.detectChanges();
  }
 
  handleToggleWb(rowId: number): void {
@@ -1243,6 +1443,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
    row.id === rowId ? { ...row, wbEnabled: !row.wbEnabled } : row
   );
   this.hasUIChanges = true;
+  this.cdr.detectChanges();
  }
 
  isMeshEditing(rowId: number): boolean {
@@ -1261,7 +1462,8 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
    return;
   }
 
-  const separationData = activeRows.map((row, index) => ({
+  const tableRows = this.buildTableRowsWithRequiredWhiteUb(activeRows);
+  const separationData = tableRows.map((row, index) => ({
    seq: index + 1,
    colorName: row.colorName,
    mesh: row.mesh,

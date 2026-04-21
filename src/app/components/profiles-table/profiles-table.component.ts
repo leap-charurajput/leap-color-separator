@@ -10,6 +10,8 @@ export class ProfilesTableComponent {
 	@Output() editProfile = new EventEmitter<any>();
 	@Output() duplicateProfile = new EventEmitter<any>();
 	@Output() deleteProfile = new EventEmitter<any>();
+	pendingDeleteProfile: any = null;
+	isDeleteDialogOpen = false;
 
 	onRowAction(action: string, profile: any): void {
 		if (action === 'edit') {
@@ -17,8 +19,22 @@ export class ProfilesTableComponent {
 		} else if (action === 'duplicate') {
 			this.duplicateProfile.emit(profile);
 		} else if (action === 'delete') {
-			this.deleteProfile.emit(profile);
+			this.pendingDeleteProfile = profile;
+			this.isDeleteDialogOpen = true;
 		}
+	}
+
+	onConfirmDelete(): void {
+		if (this.pendingDeleteProfile) {
+			this.deleteProfile.emit(this.pendingDeleteProfile);
+		}
+		this.pendingDeleteProfile = null;
+		this.isDeleteDialogOpen = false;
+	}
+
+	onCancelDelete(): void {
+		this.pendingDeleteProfile = null;
+		this.isDeleteDialogOpen = false;
 	}
 
 	getUniqueKey(profile: any): string {

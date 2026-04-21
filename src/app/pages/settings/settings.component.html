@@ -1,6 +1,6 @@
 <div class="settings-page">
  <div class="page-header">
-  <div class="page-title">Settings</div>
+  <div class="page-title">{{pageTitle}}</div>
  </div>
 
  <div *ngIf="isLoading" class="settings-panels">
@@ -8,59 +8,76 @@
  </div>
 
  <div *ngIf="!isLoading" class="settings-panels">
-  <!-- Section selector -->
-  <div class="settings-dropdown-wrapper">
-   <span class="material-icons" aria-hidden="true">settings</span>
-   <app-dropdown
-    [value]="selectedSection"
-    [items]="['Separation Profiles', 'General Settings']"
-    (onChange)="selectedSection = $event"
-    placeholder="Select section..."
-   ></app-dropdown>
-  </div>
 
-  <!-- Environment selector -->
-  <div class="settings-dropdown-wrapper">
-   <span aria-hidden="true">Version</span>
-   <app-dropdown
-    [value]="selectedEnvironmentKey"
-    [items]="environmentKeys"
-    (onChange)="onEnvironmentChange($event)"
-    placeholder="Select environment..."
-   ></app-dropdown>
-  </div>
-
-  <app-separation-profiles-panel
-   *ngIf="selectedSection === 'Separation Profiles'"
-   title="Separation Profiles"
-   description="Template presets for separation runs"
-   [profiles]="profiles"
-   (addProfile)="handleAddProfile()"
-   (editProfile)="handleEditProfile($event)"
-   (duplicateProfile)="handleDuplicateProfile($event)"
-   (deleteProfile)="handleDeleteProfile($event)"
-  ></app-separation-profiles-panel>
+  <app-separation-profiles-panel *ngIf="selectedSection === 'Separation Profiles'" title="Separation Profiles"
+   description="Template presets for separation runs" [profiles]="profiles" (addProfile)="handleAddProfile()"
+   (editProfile)="handleEditProfile($event)" (duplicateProfile)="handleDuplicateProfile($event)"
+   (deleteProfile)="handleDeleteProfile($event)"></app-separation-profiles-panel>
 
   <div *ngIf="selectedSection === 'General Settings'" class="general-settings-content">
-   <div class="settings-field">
+   <!-- Environment selector -->
+   <div class="settings-dropdown-wrapper">
+    <label class="settings-field-label">Version</label>
+    <app-dropdown [value]="selectedEnvironmentKey" [items]="environmentKeys" (onChange)="onEnvironmentChange($event)"
+     placeholder="Select environment..."></app-dropdown>
+   </div>
+   <div class="settings-field settings-field-inline-input">
     <label class="settings-field-label">Default mesh</label>
-    <input type="text" class="settings-field-input" [(ngModel)]="defaultMesh" />
+    <input type="text" class="settings-field-input" [(ngModel)]="defaultMesh" (ngModelChange)="saveGeneralSettings()" />
    </div>
 
    <div class="settings-field">
-    <app-checkbox
-     [checked]="addUnderbase"
-     [label]="'Add underbase'"
-     (change)="addUnderbase = $event.target.checked"
-    ></app-checkbox>
+    <app-checkbox [checked]="addUnderbase" [label]="'Add underbase'"
+     (change)="addUnderbase = $event.target.checked; saveGeneralSettings()"></app-checkbox>
+   </div>
+
+   <div class="settings-field settings-field-inline-input">
+    <label class="settings-field-label">Artist Name</label>
+    <input type="text" class="settings-field-input" [(ngModel)]="artistName" (ngModelChange)="saveGeneralSettings()"
+     placeholder="Artist name" />
+   </div>
+
+   <div class="settings-field settings-field-inline-input">
+    <label class="settings-field-label">Artist Initials</label>
+    <input type="text" class="settings-field-input" [(ngModel)]="artistInitials" (ngModelChange)="saveGeneralSettings()"
+     placeholder="e.g. JR" />
+   </div>
+
+   <div class="settings-field settings-field-inline-input">
+    <label class="settings-field-label">PPD Name</label>
+    <input type="text" class="settings-field-input" [(ngModel)]="ppdName" (ngModelChange)="saveGeneralSettings()"
+     placeholder="IBlock v2" />
+   </div>
+
+   <div class="settings-field">
+    <div class="settings-field-label">Data Folder Path:</div>
+    <div class="settings-path-display">
+     <div class="path-text" title="{{ leapServerPath }}">
+      {{ leapServerPath || 'Not set' }}
+     </div>
+     <button class="settings-action-link" (click)="onChooseLeapPath()">Choose...</button>
+    </div>
+   </div>
+
+   <div class="settings-field">
+    <label class="settings-field-label" for="chokeStrokeSwatch">Choke stroke color swatch</label>
+    <input id="chokeStrokeSwatch" type="text" class="settings-field-input settings-field-input-wide"
+     [(ngModel)]="chokeStrokeColorSwatch" (ngModelChange)="saveGeneralSettings()"
+     placeholder="Swatch name (e.g. GARMENT)" />
+   </div>
+
+   <div class="settings-field settings-field-textarea-row">
+    <div class="settings-field-label-stack">
+     <label class="settings-field-label" for="koDarkColorNames">Default Black color names</label>
+     <span class="settings-field-sublabel">(Comma separated)</span>
+    </div>
+    <textarea id="koDarkColorNames" class="settings-field-textarea" rows="4" [(ngModel)]="koDarkColorNames"
+     (ngModelChange)="saveGeneralSettings()" placeholder="Black, PANTONE PROCESS BLACK C"></textarea>
    </div>
   </div>
  </div>
 
- <app-edit-separation-profile-modal
-  [isOpen]="editModalOpen"
-  [profile]="selectedProfile"
-  (close)="handleModalClose()"
-  (save)="handleModalSave($event)"
- ></app-edit-separation-profile-modal>
+ <app-edit-separation-profile-modal [isOpen]="editModalOpen" [profile]="selectedProfile"
+  [defaultBlackColorNames]="koDarkColorNames" (close)="handleModalClose()"
+  (save)="handleModalSave($event)"></app-edit-separation-profile-modal>
 </div>
