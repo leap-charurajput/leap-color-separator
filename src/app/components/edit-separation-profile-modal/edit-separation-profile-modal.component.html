@@ -1,80 +1,125 @@
 <div *ngIf="isOpen" class="modal-overlay" (mousedown)="onOverlayInteraction($event)"
  (click)="onOverlayInteraction($event)">
  <div class="profile-modal-container" (mousedown)="onOverlayInteraction($event)" (click)="onOverlayInteraction($event)">
-  <div class="modal-header">
-   <h3 class="modal-title">Edit Separation Profile</h3>
+  <div class="modal-header profile-modal-header">
+   <h3 class="modal-title profile-modal-title">Edit Separation Profile</h3>
   </div>
 
   <form (submit)="onSubmit($event)">
-   <div class="modal-body settings-style">
-    <!-- Profile information -->
-    <div class="settings-field">
+   <div class="modal-body settings-style profile-modal-body">
+    <div class="settings-field profile-field-row">
      <label class="settings-field-label">Name:</label>
      <input type="text" class="settings-field-input settings-field-input-wide" [value]="formState.name"
       (input)="onInputChange('name', $event)" />
     </div>
-    <div class="settings-field">
+    <div class="settings-field profile-field-row">
      <label class="settings-field-label">Code:</label>
      <input type="text" class="settings-field-input settings-field-input-wide" [value]="formState.code"
       (input)="onInputChange('code', $event)" />
     </div>
-    <div class="settings-field">
+    <div class="settings-field profile-field-row profile-field-row--mesh">
      <label class="settings-field-label">Color Mesh:</label>
      <input type="text" class="settings-field-input" [value]="formState.colorMesh"
       (input)="onInputChange('colorMesh', $event)" />
     </div>
 
-    <!-- Ink properties -->
-    <div class="settings-field">
-     <app-checkbox [checked]="formState.waterbaseInk" [label]="'Waterbase Ink'"
-      (change)="onCheckboxChange('waterbaseInk', $event)"></app-checkbox>
-    </div>
-    <div class="settings-field">
-     <app-checkbox [checked]="formState.overprintAllInks" [label]="'Overprint all inks'"
-      (change)="onCheckboxChange('overprintAllInks', $event)"></app-checkbox>
-    </div>
-    <div class="profile-modal-compact-rows">
-     <div class="settings-field settings-field-inline">
-      <app-checkbox [checked]="formState.blocker" [label]="'Blocker'"
-       (change)="onCheckboxChange('blocker', $event)"></app-checkbox>
-      <label class="settings-field-label-inline">Mesh</label>
-      <input type="text" class="settings-field-input settings-field-input-mesh" [value]="formState.blockerMesh"
-       (input)="onInputChange('blockerMesh', $event)" />
-     </div>
-
-     <!-- Underbase 1-4: Underbase 1 always checked and disabled -->
-     <div *ngFor="let mesh of formState.underbaseMeshes; let i = index; trackBy: trackByIndex"
-      class="settings-field settings-field-inline">
-      <app-checkbox [checked]="formState.underbaseEnabled[i]" [label]="'Underbase ' + (i + 1)" [disabled]="i === 0"
-       (change)="onUnderbaseEnabledChange(i, $event)"></app-checkbox>
-      <label class="settings-field-label-inline">Mesh</label>
-      <input type="text" class="settings-field-input settings-field-input-mesh" [value]="formState.underbaseMeshes[i]"
-       (input)="onMeshChange(i, $event)" />
-      <app-checkbox [checked]="formState.underbaseKnockoutBlack[i]" [label]="'k/o black inks'"
-       [disabled]="!formState.underbaseEnabled[i]" (change)="onUnderbaseKnockoutChange(i, $event)"></app-checkbox>
-     </div>
-    </div>
-
-    <!-- Format ink name label -->
-    <div class="settings-field settings-field-inline">
+    <div class="settings-field settings-field-inline settings-field-format-row">
      <app-checkbox [checked]="formState.formatInkNameLabel" [label]="'Format ink name label'"
       (change)="onCheckboxChange('formatInkNameLabel', $event)"></app-checkbox>
      <input type="text" class="settings-field-input settings-field-input-format"
       [value]="formState.colorNameLabelFormat" (input)="onInputChange('colorNameLabelFormat', $event)"
-      placeholder="Color name label format" />
+      placeholder="Color name label format" aria-label="Color name label format" />
     </div>
 
-    <!-- Black inks k/o'd (read-only): show only when any k/o black inks is checked -->
+    <div class="settings-field settings-field-inline settings-field-twin-checks">
+     <app-checkbox [checked]="formState.waterbaseInk" [label]="'Waterbase Ink'"
+      (change)="onCheckboxChange('waterbaseInk', $event)"></app-checkbox>
+     <app-checkbox [checked]="formState.overprintAllInks" [label]="'Overprint all inks'"
+      (change)="onCheckboxChange('overprintAllInks', $event)"></app-checkbox>
+    </div>
+
+    <div class="settings-field settings-field-inline settings-field-underbase-swatch">
+     <label class="settings-field-label">Underbase swatch</label>
+     <select class="settings-field-input profile-underbase-swatch-select" [ngModelOptions]="{standalone: true}"
+      [ngModel]="formState.underbaseSwatch" (ngModelChange)="onUnderbaseSwatchChange($event)">
+      <option *ngFor="let opt of underbaseSwatchOptions(); trackBy: trackBySwatchOption" [value]="opt">{{ opt }}
+      </option>
+     </select>
+    </div>
+
+    <div class="profile-ub-grid" role="group" aria-label="Underbase configuration">
+     <div class="profile-ub-grid-header">
+      <span class="profile-ub-h-cell profile-ub-h-underbase">Underbase</span>
+      <span class="profile-ub-h-cell profile-ub-h-mesh">Mesh</span>
+      <span class="profile-ub-h-cell profile-ub-h-dark">Dark inks</span>
+     </div>
+
+     <div *ngFor="let mesh of formState.underbaseMeshes; let i = index; trackBy: trackByIndex"
+      class="profile-ub-grid-row">
+      <div class="profile-ub-cell profile-ub-cell-underbase">
+       <app-checkbox [checked]="formState.underbaseEnabled[i]" [label]="'UB ' + (i + 1)" [disabled]="i === 0"
+        (change)="onUnderbaseEnabledChange(i, $event)"></app-checkbox>
+      </div>
+      <div class="profile-ub-cell profile-ub-cell-mesh">
+       <input type="text" class="settings-field-input profile-ub-mesh-input" [value]="formState.underbaseMeshes[i]"
+        (input)="onMeshChange(i, $event)" />
+      </div>
+      <div class="profile-ub-cell profile-ub-cell-dark">
+       <div class="profile-ub-radios" role="radiogroup" [attr.aria-label]="'Dark inks UB ' + (i + 1)">
+        <label class="profile-ub-radio" [class.profile-ub-radio-muted]="!formState.underbaseEnabled[i]">
+         <input type="radio" class="profile-ub-radio-input" [attr.name]="'ub-dark-' + i"
+          [checked]="!formState.underbaseKnockoutBlack[i]" [disabled]="!formState.underbaseEnabled[i]"
+          (change)="setUnderbaseDarkInkKnockout(i, false)" />
+         <span>OP</span>
+        </label>
+        <label class="profile-ub-radio" [class.profile-ub-radio-muted]="!formState.underbaseEnabled[i]">
+         <input type="radio" class="profile-ub-radio-input" [attr.name]="'ub-dark-' + i"
+          [checked]="formState.underbaseKnockoutBlack[i]" [disabled]="!formState.underbaseEnabled[i]"
+          (change)="setUnderbaseDarkInkKnockout(i, true)" />
+         <span>k/o</span>
+        </label>
+       </div>
+      </div>
+     </div>
+
+     <div class="profile-ub-grid-row profile-ub-grid-row-blocker">
+      <div class="profile-ub-cell profile-ub-cell-underbase">
+       <app-checkbox [checked]="formState.blocker" [label]="'Blocker'"
+        (change)="onCheckboxChange('blocker', $event)"></app-checkbox>
+      </div>
+      <div class="profile-ub-cell profile-ub-cell-mesh">
+       <input type="text" class="settings-field-input profile-ub-mesh-input" [value]="formState.blockerMesh"
+        (input)="onInputChange('blockerMesh', $event)" />
+      </div>
+      <div class="profile-ub-cell profile-ub-cell-dark">
+       <div class="profile-ub-radios" role="radiogroup" aria-label="Dark inks Blocker">
+        <label class="profile-ub-radio" [class.profile-ub-radio-muted]="!formState.blocker">
+         <input type="radio" class="profile-ub-radio-input" name="ub-dark-blocker"
+          [checked]="!formState.blockerKnockoutBlack" [disabled]="!formState.blocker"
+          (change)="setBlockerDarkInkKnockout(false)" />
+         <span>OP</span>
+        </label>
+        <label class="profile-ub-radio" [class.profile-ub-radio-muted]="!formState.blocker">
+         <input type="radio" class="profile-ub-radio-input" name="ub-dark-blocker"
+          [checked]="formState.blockerKnockoutBlack" [disabled]="!formState.blocker"
+          (change)="setBlockerDarkInkKnockout(true)" />
+         <span>k/o</span>
+        </label>
+       </div>
+      </div>
+     </div>
+    </div>
+
     <div *ngIf="isAnyKnockoutBlackChecked()" class="settings-field settings-field-vertical">
-     <label class="settings-field-label">Black inks k/o'd:</label>
+     <label class="settings-field-label profile-ko-textarea-label">Dark inks k/o'd from Underbase and Blocker:</label>
      <textarea class="settings-field-input settings-field-input-wide" [value]="formState.blackInksKnockoutDisplay"
       (input)="onInputChange('blackInksKnockoutDisplay', $event)"></textarea>
     </div>
    </div>
 
-   <div class="modal-footer">
-    <app-button type="button" variant="secondary" (click)="onCancel()">Cancel</app-button>
-    <app-button type="button" variant="primary" (click)="onSubmit($event)">OK</app-button>
+   <div class="modal-footer profile-modal-footer">
+    <app-button type="button" variant="secondary" (onClick)="onCancel()">Cancel</app-button>
+    <app-button type="button" variant="primary" (onClick)="onSubmit($event)">OK</app-button>
    </div>
   </form>
  </div>

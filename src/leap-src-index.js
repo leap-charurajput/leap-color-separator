@@ -49,7 +49,7 @@ class ScriptLoader {
   return { reason, data };
  }
 
- log(val) { }
+ log(val) {}
 
  get name() {
   return 'ScriptLoader:: ';
@@ -57,6 +57,11 @@ class ScriptLoader {
 }
 
 var scriptLoader = new ScriptLoader();
+let cachedServerBasePath = null;
+
+function sleep(ms) {
+ return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function getServerBasePath() {
  // commment this
@@ -78,10 +83,36 @@ function getServerBasePath() {
    const content = fs.readFileSync(settingsPath, 'utf8');
    const parsed = JSON.parse(content);
    if (parsed && parsed.basePath) {
-    return parsed.basePath;
+    const resolvedBasePath = String(parsed.basePath).trim();
+    if (resolvedBasePath !== '' && fs.existsSync(resolvedBasePath)) {
+     cachedServerBasePath = resolvedBasePath;
+     return resolvedBasePath;
+    }
    }
   }
- } catch (error) { }
+ } catch (error) {}
+
+ if (cachedServerBasePath && fs.existsSync(cachedServerBasePath)) {
+  return cachedServerBasePath;
+ }
+
+ return null;
+}
+
+async function getServerBasePathWithRetry() {
+ const retryDelaysMs = [0, 300, 1000, 2000];
+
+ for (let i = 0; i < retryDelaysMs.length; i++) {
+  const delayMs = retryDelaysMs[i];
+  if (delayMs > 0) {
+   await sleep(delayMs);
+  }
+
+  const basePath = getServerBasePath();
+  if (basePath) {
+   return basePath;
+  }
+ }
 
  return null;
 }
@@ -351,7 +382,7 @@ async function getProfileNamesFromExcel(styleCodes) {
    throw new Error('Style codes array is required');
   }
 
-  const serverBasePath = getServerBasePath();
+  const serverBasePath = await getServerBasePathWithRetry();
   if (!serverBasePath) {
    throw new Error('Server base path not found');
   }
@@ -459,7 +490,7 @@ async function getStyleInformation(styleCodes) {
    throw new Error('Style codes array is required');
   }
 
-  const serverBasePath = getServerBasePath();
+  const serverBasePath = await getServerBasePathWithRetry();
   console.log('[getStyleInformation] serverBasePath:', serverBasePath || '(null)');
   if (!serverBasePath) {
    throw new Error('Server base path not found');
@@ -549,7 +580,7 @@ async function getColorByCodeFromLookup(colorCode) {
   }
 
   const code = String(colorCode).trim();
-  const serverBasePath = getServerBasePath();
+  const serverBasePath = await getServerBasePathWithRetry();
   if (!serverBasePath) {
    return { success: false, error: 'Server base path not found' };
   }
@@ -743,7 +774,7 @@ async function getProfileInformation(profileCode) {
    throw new Error('Profile code is required');
   }
 
-  const serverBasePath = getServerBasePath();
+  const serverBasePath = await getServerBasePathWithRetry();
   if (!serverBasePath) {
    throw new Error('Server base path not found');
   }
@@ -809,6 +840,16 @@ async function getProfileInformation(profileCode) {
   const ubKnockoutArray = Array.isArray(matchedProfile.underbaseKnockoutBlack)
    ? matchedProfile.underbaseKnockoutBlack
    : null;
+  const defaultUbSwatches = ['White UB', 'White UB', 'White UB', 'White UB'];
+  const savedUbSwatches = Array.isArray(matchedProfile.underbaseKnockoutSwatches)
+   ? matchedProfile.underbaseKnockoutSwatches
+   : null;
+  const underbaseKnockoutSwatches = [0, 1, 2, 3].map((j) => {
+   if (savedUbSwatches && savedUbSwatches[j] != null && String(savedUbSwatches[j]).trim() !== '') {
+    return String(savedUbSwatches[j]).trim();
+   }
+   return defaultUbSwatches[j];
+  });
   const ub2Enabled = toEnabled(
    matchedProfile['Underbase 2'] != null ? matchedProfile['Underbase 2'] : matchedProfile['UB 2']
   ) || (ubEnabledArray ? !!ubEnabledArray[1] : false);
@@ -853,18 +894,35 @@ async function getProfileInformation(profileCode) {
     matchedProfile.blackInksKnockoutDisplay != null
      ? String(matchedProfile.blackInksKnockoutDisplay)
      : '',
+   underbaseSwatch:
+    matchedProfile.underbaseSwatch != null && String(matchedProfile.underbaseSwatch).trim() !== ''
+     ? String(matchedProfile.underbaseSwatch).trim()
+     : (
+      matchedProfile['Underbase Swatch'] != null && String(matchedProfile['Underbase Swatch']).trim() !== ''
+       ? String(matchedProfile['Underbase Swatch']).trim()
+       : 'White UB'
+      ),
    underbaseKnockoutBlack: [
     ubKnockoutArray ? !!ubKnockoutArray[0] : false,
     ubKnockoutArray ? !!ubKnockoutArray[1] : false,
     ubKnockoutArray ? !!ubKnockoutArray[2] : false,
     ubKnockoutArray ? !!ubKnockoutArray[3] : false
    ],
+   underbaseKnockoutSwatches,
    underbase2Enabled: ub2Enabled,
    underbase3Enabled: ub3Enabled,
    underbase4Enabled: ub4Enabled,
    distress: matchedProfile['Distress'] || '',
    twoHits: matchedProfile['2 Hits'] || '',
-   blocker: matchedProfile['Blocker'] || ''
+   blocker: matchedProfile['Blocker'] || '',
+   blockerMesh:
+    matchedProfile.blockerMesh != null
+     ? String(matchedProfile.blockerMesh)
+     : (
+      matchedProfile['Blocker Mesh'] != null
+       ? String(matchedProfile['Blocker Mesh'])
+       : ''
+      )
   };
  } catch (error) {
   console.error('[LEAP][UB_DEBUG] getProfileInformation failed:', profileCode, error.message);
@@ -886,7 +944,7 @@ async function getInkInformation(inkName, profileName) {
    throw new Error('Ink name is required');
   }
 
-  const serverBasePath = getServerBasePath();
+  const serverBasePath = await getServerBasePathWithRetry();
   if (!serverBasePath) {
    throw new Error('Server base path not found');
   }
@@ -1275,7 +1333,7 @@ class Leap {
   }
  }
 
- log(val) { }
+ log(val) {}
 
  get name() {
   return 'LEAP:: ';

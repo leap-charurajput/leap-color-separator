@@ -592,6 +592,70 @@ export class ControllerService {
   });
  }
 
+ deleteSeparationFile(params: {
+  graphicName: string;
+  profileName: string;
+  filePath?: string;
+ }): Promise<any> {
+  this.log('deleteSeparationFile called');
+
+  return this.ensureSession().then(() => {
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleDeleteSeparationFile', params)
+    .then((res: string) => {
+     return JSON.parse(res);
+    })
+    .catch((err: any) => {
+     throw err;
+    });
+  });
+ }
+
+ updateSeparationProfileDataEntry(params: {
+  graphicName: string;
+  matchProfileName: string;
+  profileName: string;
+  styleCodes: string[];
+  profileCode?: string | null;
+  duplicateAiFile?: boolean;
+  scaleEnabled?: boolean;
+  scalePercent?: number | null;
+ }): Promise<any> {
+  this.log('updateSeparationProfileDataEntry called');
+
+  return this.ensureSession().then(() => {
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleUpdateSeparationProfileDataEntry', params)
+    .then((res: string) => {
+     return JSON.parse(res);
+    })
+    .catch((err: any) => {
+     throw err;
+    });
+  });
+ }
+
+ addSeparationProfileDataEntry(params: {
+  graphicName: string;
+  profileName: string;
+  styleCodes: string[];
+  profileCode?: string | null;
+ }): Promise<any> {
+  this.log('addSeparationProfileDataEntry called');
+
+  return this.ensureSession().then(() => {
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleAddSeparationProfileDataEntry', params)
+    .then((res: string) => JSON.parse(res))
+    .catch((err: any) => {
+     throw err;
+    });
+  });
+ }
+
  checkGraphicFolderExists(graphicName: string): Promise<any> {
   this.log('checkGraphicFolderExists called for: ' + graphicName);
 

@@ -202,6 +202,61 @@ function getEnabledUnderbaseIndices(profileMetadata) {
  }
 }
 
+/** Normalize profile swatch list: true Array, or object map from XMP/JSON bridge. */
+function getUnderbaseKnockoutSwatchesArray(profileMetadata) {
+ try {
+  var raw = profileMetadata && profileMetadata.underbaseKnockoutSwatches;
+  if (raw instanceof Array) {
+   return raw;
+  }
+  if (raw && typeof raw === "object") {
+   var arr = [];
+   for (var i = 0; i < 4; i++) {
+    var v = raw[i];
+    if (v == null) v = raw[String(i)];
+    if (v != null) arr[i] = v;
+   }
+   if (arr.length > 0) return arr;
+  }
+ } catch (e) { }
+ return [];
+}
+
+function setStrokeOverprintOnContainer(container, overprintValue) {
+ if (!container) return;
+ try {
+  if (container.typename === "PathItem") {
+   if (typeof container.strokeOverprint !== "undefined") {
+    container.strokeOverprint = overprintValue;
+   }
+   return;
+  }
+  if (container.typename === "CompoundPathItem") {
+   if (container.pathItems && container.pathItems.length > 0) {
+    for (var p = 0; p < container.pathItems.length; p++) {
+     if (typeof container.pathItems[p].strokeOverprint !== "undefined") {
+      container.pathItems[p].strokeOverprint = overprintValue;
+     }
+    }
+   }
+   return;
+  }
+  if (container.typename === "PlacedItem") {
+   try {
+    if (typeof container.overprint !== "undefined") {
+     container.overprint = overprintValue;
+    }
+   } catch (opErr) { }
+   return;
+  }
+  if (container.pageItems && container.pageItems.length > 0) {
+   for (var i = 0; i < container.pageItems.length; i++) {
+    setStrokeOverprintOnContainer(container.pageItems[i], overprintValue);
+   }
+  }
+ } catch (e) { }
+}
+
 function clearLayerPageItems(layer) {
  try {
   if (!layer || !layer.pageItems) return;
@@ -215,14 +270,33 @@ function duplicateLayerItems(sourceLayer, targetLayer) {
  try {
   if (!sourceLayer || !targetLayer) return 0;
   var duplicated = 0;
-  for (var i = sourceLayer.pageItems.length - 1; i >= 0; i--) {
+
+  function duplicateFromLayer(layer) {
+   if (!layer) return;
+
    try {
-    sourceLayer.pageItems[i].duplicate(targetLayer, ElementPlacement.PLACEATBEGINNING);
-    duplicated++;
-   } catch (e) { }
+    for (var i = layer.pageItems.length - 1; i >= 0; i--) {
+     var item = layer.pageItems[i];
+     if (!item) continue;
+     // Duplicate only top-level items in this layer; grouped children come with their parent group.
+     if (item.parent !== layer) continue;
+     try {
+      item.duplicate(targetLayer, ElementPlacement.PLACEATBEGINNING);
+      duplicated++;
+     } catch (dupErr) { }
+    }
+   } catch (e1) { }
+
+   try {
+    for (var l = layer.layers.length - 1; l >= 0; l--) {
+     duplicateFromLayer(layer.layers[l]);
+    }
+   } catch (e2) { }
   }
+
+  duplicateFromLayer(sourceLayer);
   return duplicated;
- } catch (e2) {
+ } catch (e3) {
   return 0;
  }
 }
@@ -232,13 +306,88 @@ function getUnderbaseLayerNameForIndex(index) {
  return CONSTANTS.LAYER_NAMES.WHITE_UB + " " + (index + 1);
 }
 
-function finalizeUnderbaseLayer(underbaseLayer, runLeftoverUb) {
+function getProfileUnderbaseSwatchName(profileMetadata) {
  try {
+  var raw = profileMetadata && profileMetadata.underbaseSwatch != null
+   ? String(profileMetadata.underbaseSwatch).replace(/^\s+|\s+$/g, "")
+   : "";
+  return raw || CONSTANTS.SWATCH_NAMES.WHITE_UB;
+ } catch (e) {
+  return CONSTANTS.SWATCH_NAMES.WHITE_UB;
+ }
+}
+
+function ensureSwatchExistsFromSource(sourceSwatchName, newSwatchName, fallbackCmyk) {
+ try {
+  var doc = app.activeDocument;
+  try {
+   var existing = doc.swatches.getByName(newSwatchName);
+   if (existing) return true;
+  } catch (existsErr) { }
+
+  var sourceSwatch = null;
+  try {
+   sourceSwatch = doc.swatches.getByName(sourceSwatchName);
+  } catch (sourceErr) { }
+
+  if (!sourceSwatch || !sourceSwatch.color) {
+   if (fallbackCmyk) {
+    var fallbackSpot = doc.spots.add();
+    fallbackSpot.name = newSwatchName;
+    var fallbackColor = new CMYKColor();
+    fallbackColor.cyan = Math.max(0, Math.min(100, Number(fallbackCmyk.c) || 0));
+    fallbackColor.magenta = Math.max(0, Math.min(100, Number(fallbackCmyk.m) || 0));
+    fallbackColor.yellow = Math.max(0, Math.min(100, Number(fallbackCmyk.y) || 0));
+    fallbackColor.black = Math.max(0, Math.min(100, Number(fallbackCmyk.k) || 0));
+    fallbackSpot.color = fallbackColor;
+    return true;
+   }
+   return false;
+  }
+
+  var sourceColor = sourceSwatch.color;
+  if (sourceColor.typename === "SpotColor" && sourceColor.spot) {
+   var newSpot = doc.spots.add();
+   newSpot.name = newSwatchName;
+   try { newSpot.colorType = sourceColor.spot.colorType; } catch (ctErr) { }
+   newSpot.color = sourceColor.spot.color;
+   return true;
+  }
+
+  var newSwatch = doc.swatches.add();
+  newSwatch.name = newSwatchName;
+  newSwatch.color = sourceColor;
+  return true;
+ } catch (e) {
+  return false;
+ }
+}
+
+function isBlockerEnabled(profileMetadata) {
+ try {
+  var raw = profileMetadata ? profileMetadata.blocker : null;
+  if (raw === true || raw === 1) return true;
+  if (typeof raw === "string") {
+   var normalized = raw.replace(/^\s+|\s+$/g, "").toUpperCase();
+   return normalized === "Y" || normalized === "YES" || normalized === "TRUE" || normalized === "1";
+  }
+  return false;
+ } catch (e) {
+  return false;
+ }
+}
+
+function finalizeUnderbaseLayer(underbaseLayer, runLeftoverUb, swatchName) {
+ try {
+  // Use the provided swatch name; fall back to the default White UB constant if not supplied.
+  var resolvedSwatch = (swatchName && String(swatchName).replace(/^\s+|\s+$/g, "") !== "")
+   ? String(swatchName)
+   : CONSTANTS.SWATCH_NAMES.WHITE_UB;
   app.selection = null;
   app.activeDocument.activeLayer = underbaseLayer;
   app.activeDocument.activeLayer.hasSelectedArtwork = true;
   app.redraw();
-  applySwatchToFill(app.activeDocument, CONSTANTS.SWATCH_NAMES.WHITE_UB);
+  applySwatchToFill(app.activeDocument, resolvedSwatch);
   app.executeMenuCommand('sendToBack');
   pathFinderAdd();
   if (runLeftoverUb) {
@@ -275,14 +424,31 @@ function generateUnderbase(_graphicName, cleanupOpts, profileMetadata) {
   }
 
   var enabledUnderbaseIndices = getEnabledUnderbaseIndices(profileMetadata);
+  var profileUnderbaseSwatch = getProfileUnderbaseSwatchName(profileMetadata);
   for (var ub = 0; ub < enabledUnderbaseIndices.length; ub++) {
    var ubIndex = enabledUnderbaseIndices[ub];
    var ubLayerName = getUnderbaseLayerNameForIndex(ubIndex);
    var ubLayer = getOrCreateLayer(app.activeDocument, ubLayerName, _separatedArtLayer);
+   // Match React behavior:
+   // - UB1 uses selected profile underbase swatch
+   // - UB2+ remain White UB flow
+   var ubSwatchName = ubIndex === 0 ? profileUnderbaseSwatch : CONSTANTS.SWATCH_NAMES.WHITE_UB;
    clearLayerPageItems(ubLayer);
    duplicateLayerItems(tempWhiteUBLayer, ubLayer);
    removeKnockoutFilledItemsFromUnderbaseLayer(ubLayer, profileMetadata, ubIndex);
-   finalizeUnderbaseLayer(ubLayer, runLeftoverUb);
+   finalizeUnderbaseLayer(ubLayer, runLeftoverUb, ubSwatchName);
+  }
+
+  if (isBlockerEnabled(profileMetadata)) {
+   ensureSwatchExistsFromSource(
+    CONSTANTS.SWATCH_NAMES.WHITE_UB,
+    CONSTANTS.SWATCH_NAMES.BLOCKER,
+    { c: 0, m: 0, y: 0, k: 0 }
+   );
+   var blockerLayer = getOrCreateLayer(app.activeDocument, CONSTANTS.LAYER_NAMES.BLOCKER, _separatedArtLayer);
+   clearLayerPageItems(blockerLayer);
+   duplicateLayerItems(tempWhiteUBLayer, blockerLayer);
+   finalizeUnderbaseLayer(blockerLayer, runLeftoverUb, CONSTANTS.SWATCH_NAMES.BLOCKER);
   }
 
   // Generate Choke
@@ -301,21 +467,47 @@ function generateUnderbase(_graphicName, cleanupOpts, profileMetadata) {
 function generateChoke(sourceLayer, separatedArtLayer) {
 
  var chokeLayer = getOrCreateLayer(app.activeDocument, CONSTANTS.LAYER_NAMES.CHOKE, separatedArtLayer);
+ try {
+  var topMostWhiteUbLayer = null;
+  var topMostWhiteUbIndex = 999999;
+  for (var layerIndex = 0; layerIndex < separatedArtLayer.layers.length; layerIndex++) {
+   var candidateLayer = separatedArtLayer.layers[layerIndex];
+   if (candidateLayer && candidateLayer.name && candidateLayer.name.indexOf(CONSTANTS.LAYER_NAMES.WHITE_UB) === 0) {
+    if (layerIndex < topMostWhiteUbIndex) {
+     topMostWhiteUbIndex = layerIndex;
+     topMostWhiteUbLayer = candidateLayer;
+    }
+   }
+  }
+
+  if (topMostWhiteUbLayer) {
+   chokeLayer.move(topMostWhiteUbLayer, ElementPlacement.PLACEBEFORE);
+  } else {
+   chokeLayer.move(separatedArtLayer, ElementPlacement.PLACEATBEGINNING);
+  }
+ } catch (layerMoveErr) {
+  chokeLayer.move(separatedArtLayer, ElementPlacement.PLACEATBEGINNING);
+ }
  clearLayerPageItems(chokeLayer);
- chokeLayer.move(separatedArtLayer, ElementPlacement.PLACEATBEGINNING);
 
  app.activeDocument.activeLayer = sourceLayer;
  app.activeDocument.activeLayer.hasSelectedArtwork = true;
- if (app.selection && app.selection.length > 0) {
-  for (var i = app.selection.length - 1; i >= 0; i--) {
-   try { app.selection[i].duplicate(chokeLayer, ElementPlacement.PLACEATBEGINNING); } catch (dupErr) { }
-  }
- }
+ pathFinderAdd();
+ app.executeMenuCommand('ungroup');
+ app.redraw();
+ var sourceItemCount = 0;
+ try { sourceItemCount = sourceLayer.pageItems ? sourceLayer.pageItems.length : 0; } catch (srcCountErr) { }
+ var duplicatedCount = duplicateLayerItems(sourceLayer, chokeLayer);
+ var chokeItemCount = 0;
+ try { chokeItemCount = chokeLayer.pageItems ? chokeLayer.pageItems.length : 0; } catch (chokeCountErr) { }
+ // alert("[Choke Debug]\nSource items: " + sourceItemCount + "\nDuplicated: " + duplicatedCount + "\nChoke items: " + chokeItemCount);
 
+ app.redraw();
  app.selection = null;
  app.activeDocument.activeLayer = chokeLayer;
  app.activeDocument.activeLayer.hasSelectedArtwork = true;
-
+ deleteLeftoverPathsInLayer(chokeLayer);
+ setFillOverprintOnContainer(chokeLayer, false);
 
  var noneSwatch = getSwatchByName(app.activeDocument, CONSTANTS.SWATCH_NAMES.NONE);
  if (noneSwatch) {
@@ -326,6 +518,7 @@ function generateChoke(sourceLayer, separatedArtLayer) {
 
 
  applyChokeStroke(app.activeDocument, CONSTANTS.STYLES.CHOKE_STROKE_WIDTH);
+ setStrokeOverprintOnContainer(chokeLayer, true);
 }
 
 

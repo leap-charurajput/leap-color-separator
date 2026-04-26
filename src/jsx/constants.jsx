@@ -5,10 +5,12 @@ var CONSTANTS = {
   SEPARATED_ART: "SEPARATED_ART",
   LIVE_ART: "LIVE_ART",
   WHITE_UB: "White UB",
+  BLOCKER: "Blocker",
   CHOKE: "Choke"
  },
  SWATCH_NAMES: {
   WHITE_UB: "White UB",
+  BLOCKER: "Blocker",
   GARMENT: "GARMENT",
   NONE: "[None]"
  },

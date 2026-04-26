@@ -57,6 +57,24 @@
   (confirm)="confirmRecreateAllPlates($event)" (cancel)="cancelRecreateAllPlates()">
  </app-confirm-dialog>
 
+ <app-confirm-dialog [isOpen]="showDeleteSeparationFileConfirm" title="Confirm"
+  message="Are you sure you want to delete the separation file?" confirmText="OK" cancelText="Cancel"
+  confirmVariant="danger" (confirm)="confirmDeleteSeparationFile()" (cancel)="cancelDeleteSeparationFile()">
+ </app-confirm-dialog>
+
+ <app-separation-profile-action-dialog [isOpen]="separationActionDialogOpen" [mode]="separationActionDialogMode"
+  [styleCodeOptions]="separationActionDialogStyleCodes" [initialProfileName]="separationActionDialogInitialProfile"
+  [initialSelectedStyleCodes]="separationActionDialogInitialStyles" [hasSeparationFile]="separationActionDialogHasFile"
+  [initialDuplicateAiFile]="separationActionDialogInitialDuplicateAi"
+  [initialScaleEnabled]="separationActionDialogInitialScaleEnabled"
+  [initialScalePercent]="separationActionDialogInitialScalePercent" (cancel)="cancelSeparationActionDialog()"
+  (confirm)="confirmSeparationActionDialog($event)">
+ </app-separation-profile-action-dialog>
+
+ <app-add-separation-dialog [isOpen]="addSeparationDialogOpen" [graphicName]="addSeparationDialogGraphicName"
+  [isLoading]="isLoadingAddSeparationDialog" [styleOptions]="styleCatalogOptions" (cancel)="cancelAddSeparationDialog()"
+  (confirm)="confirmAddSeparationDialog($event)"></app-add-separation-dialog>
+
  <div *ngIf="!hasVersionDocument && !isSeparatedDoc && !isCheckingDocument" class="organize-graphics-content">
   <div class="panelTitle mx-5" style="text-align: center; padding: 40px 20px;">
    <span *ngIf="isRunningInBrowser">Please run this in Illustrator</span>
@@ -95,7 +113,8 @@
      <div class="graphic-title">Graphic: <span class="graphic-name">{{ graphic }}</span></div>
     </div>
     <div class="">
-     <button class="add-separation-link">Add Separation...</button>
+     <button type="button" class="add-separation-link"
+      (click)="$event.stopPropagation(); handleAddSeparation(graphic)">Add Separation...</button>
     </div>
    </div>
 
@@ -115,7 +134,7 @@
        <div class="separation-profile-right">
         <!-- <div class="separation-profile-actions">
 									<app-sub-menu [items]="['Duplicate', 'Edit']"
-										(onItemClick)="handleSeparationMenuClick($event, separation.id)"
+										(onItemClick)="handleSeparationMenuClick($event, separation.id, graphic)"
 										iconClass="openerImage icon-ellipsis"></app-sub-menu>
 								</div> -->
         <div class="separation-profile-content">
@@ -125,8 +144,8 @@
             title="Click to open separation document">
             {{ getFileNameFromPath(getSeparationPath(separation, graphic)!) }}
            </button>
-           <app-sub-menu [items]="['Duplicate', 'Edit']"
-            (onItemClick)="handleSeparationMenuClick($event, separation.id)"
+           <app-sub-menu [items]="['Delete Separation File','Duplicate', 'Edit']"
+            (onItemClick)="handleSeparationMenuClick($event, separation.id, graphic)"
             iconClass="openerImage icon-ellipsis"></app-sub-menu>
           </div>
          </div>
@@ -134,7 +153,7 @@
           <div class="separation-profile-actions">
            <div class="sep-not-created">Separation not created</div>
            <app-sub-menu [items]="['Duplicate', 'Edit']"
-            (onItemClick)="handleSeparationMenuClick($event, separation.id)"
+            (onItemClick)="handleSeparationMenuClick($event, separation.id, graphic)"
             iconClass="openerImage icon-ellipsis"></app-sub-menu>
           </div>
          </div>

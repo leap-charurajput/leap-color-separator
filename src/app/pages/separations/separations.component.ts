@@ -9,6 +9,8 @@ import {
 } from '@angular/core';
 import { Subscription } from 'rxjs';
 import { ConfirmDialogCheckboxOption } from '../../components/confirm-dialog/confirm-dialog.component';
+import { SeparationProfileActionDialogResult } from '../../components/separation-profile-action-dialog/separation-profile-action-dialog.component';
+import { AddSeparationDialogResult, AddSeparationDialogStyleOption } from '../../components/add-separation-dialog/add-separation-dialog.component';
 import { ControllerService } from '../../services/controller.service';
 import { GraphicsDataService } from '../../services/graphics-data.service';
 
@@ -19,6 +21,11 @@ interface Separation {
  colors: string[];
  sepFileName: string;
  isCreated: boolean;
+}
+
+interface XmpSeparationGroup {
+ profile: string;
+ styles: string[];
 }
 
 @Component({
@@ -68,6 +75,39 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
  showDeleteAllConfirm = false;
  /** Show confirmation before recreating plates (optional cleanup checkboxes) */
  showRecreateAllConfirm = false;
+ /** All style codes from team Batch Excel (for New separation dialog). */
+ allTeamStyleCodes: string[] = [];
+ /** Confirm delete separation .ai file + clear XMP path */
+ showDeleteSeparationFileConfirm = false;
+ deleteSeparationFileContext: {
+  graphicName: string;
+  separationId: number;
+  profileName: string;
+  filePath: string;
+ } | null = null;
+ /** Duplicate / Edit-New separation dialog */
+ separationActionDialogOpen = false;
+ separationActionDialogMode: 'duplicate' | 'edit-new' = 'edit-new';
+ separationActionDialogIsNew = false;
+ separationActionDialogContext: {
+  graphicName: string;
+  separationId: number;
+  originalProfileName: string;
+ } | null = null;
+ separationActionDialogStyleCodes: string[] = [];
+ separationActionDialogInitialProfile = '';
+ separationActionDialogInitialStyles: string[] = [];
+ separationActionDialogHasFile = false;
+ separationActionDialogInitialDuplicateAi = true;
+ separationActionDialogInitialScaleEnabled = false;
+ separationActionDialogInitialScalePercent: number | null = 100;
+ /** Add separation dialog */
+ addSeparationDialogOpen = false;
+ addSeparationDialogGraphicName = '';
+ isLoadingAddSeparationDialog = false;
+ styleCatalogOptions: AddSeparationDialogStyleOption[] = [];
+ /** Groups read from XMP LEAPSeparationProfileData to persist manual additions across reopen. */
+ xmpSeparationGroups: XmpSeparationGroup[] = [];
  recreatePlateCheckboxOptions: ConfirmDialogCheckboxOption[] = [
   {
    id: 'deleteUnpaintedPaths',
@@ -123,12 +163,10 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
   try {
    await this.checkVersionDocument();
    if (this.hasVersionDocument) {
-    await Promise.all([
-     this.loadGraphicsList(),
-     this.loadTeamCode(),
-     this.loadGraphicsData(),
-     this.loadSeparationPaths()
-    ]);
+    await this.loadGraphicsList();
+    await this.loadGraphicsData();
+    await this.loadSeparationPaths();
+    await this.loadTeamCode();
    } else if (!this.isSeparatedDoc) {
     this.graphicOptions = [];
     this.teamCode = '';
@@ -248,13 +286,11 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
     this.versionDocumentPath = result.documentPath || null;
 
     if (this.hasVersionDocument) {
-     await Promise.all([
-      this.loadProfileNamesFromSettings(),
-      this.loadGraphicsList(),
-      this.loadTeamCode(),
-      this.loadGraphicsData(),
-      this.loadSeparationPaths()
-     ]);
+     await this.loadProfileNamesFromSettings();
+     await this.loadGraphicsList();
+     await this.loadGraphicsData();
+     await this.loadSeparationPaths();
+     await this.loadTeamCode();
     }
    } else {
     this.hasVersionDocument = false;
@@ -407,12 +443,32 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 
    if (result.success && result.separationPaths) {
     this.separationPaths = result.separationPaths;
+    const entries = Array.isArray(result.separationEntries) ? result.separationEntries : [];
+    const grouped: { [profile: string]: Set<string> } = {};
+    entries.forEach((entry: any) => {
+     const profile = String(entry?.profileName || '').trim();
+     if (!profile) return;
+     const styles = Array.isArray(entry?.styleCodes)
+      ? entry.styleCodes.map((s: any) => String(s || '').trim()).filter(Boolean)
+      : [];
+     if (!grouped[profile]) grouped[profile] = new Set<string>();
+     styles.forEach((s: string) => grouped[profile].add(s));
+    });
+    this.xmpSeparationGroups = Object.keys(grouped).map((profile) => ({
+     profile,
+     styles: Array.from(grouped[profile]).sort()
+    }));
+    if (this.hasVersionDocument && this.teamCode) {
+     this.loadSeparations();
+    }
    } else {
     this.separationPaths = {};
+    this.xmpSeparationGroups = [];
    }
   } catch (err) {
    console.error('[Separations] loadSeparationPaths error:', err);
    this.separationPaths = {};
+   this.xmpSeparationGroups = [];
   } finally {
    this.cdr.detectChanges();
   }
@@ -486,6 +542,48 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
   }
  }
 
+ private upsertSeparationGroupInList(
+  list: Separation[],
+  profileName: string,
+  styleCode: string
+ ): Separation[] {
+  const normalizedProfile = String(profileName || '').trim() || 'Unknown Profile';
+  const normalizedStyle = String(styleCode || '').trim();
+  if (!normalizedStyle) return list;
+  const existingIndex = list.findIndex((s) => String(s.profile || '').trim() === normalizedProfile);
+  if (existingIndex >= 0) {
+   return list.map((item, idx) => {
+    if (idx !== existingIndex) return item;
+    const nextStyles = Array.from(new Set([...(item.styles || []), normalizedStyle])).sort();
+    return { ...item, styles: nextStyles };
+   });
+  }
+  const nextId = list.length === 0 ? 1 : Math.max(...list.map((s) => s.id || 0)) + 1;
+  return [
+   ...list,
+   {
+    id: nextId,
+    profile: normalizedProfile,
+    styles: [normalizedStyle],
+    colors: [],
+    sepFileName: '',
+    isCreated: false
+   }
+  ];
+ }
+
+ private mergeSeparationGroups(base: Separation[], groups: XmpSeparationGroup[]): Separation[] {
+  let merged = [...(base || [])];
+  (groups || []).forEach((group) => {
+   const profile = String(group?.profile || '').trim();
+   const styles = Array.isArray(group?.styles) ? group.styles : [];
+   styles.forEach((styleCode) => {
+    merged = this.upsertSeparationGroupInList(merged, profile, styleCode);
+   });
+  });
+  return merged;
+ }
+
  loadSeparations(): void {
   const logPrefix = '[Separations] Profile generation:';
   if (this.isRunningInBrowser) {
@@ -495,6 +593,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
   if (!this.teamCode || this.teamCode === '') {
    console.log(logPrefix, 'Skipped – missing teamCode:', this.teamCode || '(empty)');
    this.separations = [];
+   this.allTeamStyleCodes = [];
    this.cdr.detectChanges();
    return;
   }
@@ -508,24 +607,32 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
     if (!styleResult.success || !styleResult.styleCodes || styleResult.styleCodes.length === 0) {
      console.warn(logPrefix, 'Step 1 – Style codes: missing or failed. success:', styleResult?.success, '| count:', styleResult?.styleCodes?.length ?? 0, '| error:', styleResult?.error ?? 'none');
      this.separations = [];
+     this.allTeamStyleCodes = [];
+     this.styleCatalogOptions = [];
      this.isLoadingSeparations = false;
      this.cdr.detectChanges();
      return;
     }
 
     const styleCodes = styleResult.styleCodes;
+    this.allTeamStyleCodes = [...styleCodes];
     console.log(logPrefix, 'Step 1 – Style codes from Excel:', styleCodes.length, 'codes:', styleCodes);
 
     return this.controller.getProfileNamesFromExcel(styleCodes).then((profileResult) => {
      if (!profileResult.success || !profileResult.profileMap) {
       console.warn(logPrefix, 'Step 2 – Profile names: missing or failed. success:', profileResult?.success, '| error:', profileResult?.error ?? 'none');
       this.separations = [];
+      this.styleCatalogOptions = [];
       this.isLoadingSeparations = false;
       this.cdr.detectChanges();
       return;
      }
 
      const profileMap = profileResult.profileMap;
+     this.styleCatalogOptions = styleCodes.map((styleCode: string) => ({
+      styleCode: String(styleCode || '').trim(),
+      profileName: String(profileMap[styleCode] || 'Unknown Profile').trim()
+     }));
      const styleCodesWithProfile: string[] = [];
      const styleCodesMissingProfile: string[] = [];
      styleCodes.forEach((sc: string) => {
@@ -561,7 +668,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
      }));
 
      console.log(logPrefix, 'Step 4 – Generated separations:', separationsList.length, 'profiles:', separationsList.map((s) => ({ id: s.id, profile: s.profile, styles: s.styles })));
-     this.separations = separationsList;
+     this.separations = this.mergeSeparationGroups(separationsList, this.xmpSeparationGroups);
      this.isLoadingSeparations = false;
      this.cdr.detectChanges();
     });
@@ -569,6 +676,8 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
    .catch((err) => {
     console.error(logPrefix, 'Error loading separations:', err);
     this.separations = [];
+    this.allTeamStyleCodes = [];
+    this.styleCatalogOptions = [];
     this.isLoadingSeparations = false;
     this.cdr.detectChanges();
    });
@@ -682,6 +791,14 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
     position: position
    };
    if (profileInfo && profileInfo.found) {
+    const toEnabled = (value: any) => {
+     if (value === true || value === 1) return true;
+     if (typeof value === 'string') {
+      const normalized = value.trim().toUpperCase();
+      return normalized === 'Y' || normalized === 'YES' || normalized === 'TRUE' || normalized === '1';
+     }
+     return false;
+    };
     profileMetadata.underbaseEnabled = [
      true,
      !!profileInfo.underbase2Enabled,
@@ -702,16 +819,42 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
       !!profileInfo.underbaseKnockoutBlack[3]
      ]
      : [false, false, false, false];
+    const defaultUbSwatches = ['White UB', 'White UB', 'White UB', 'White UB'];
+    const srcUbSwatches = (profileInfo as any).underbaseKnockoutSwatches;
+    profileMetadata.underbaseKnockoutSwatches = Array.isArray(srcUbSwatches)
+     ? [0, 1, 2, 3].map((j) =>
+      srcUbSwatches[j] != null && String(srcUbSwatches[j]).trim() !== ''
+       ? String(srcUbSwatches[j]).trim()
+       : defaultUbSwatches[j]
+     )
+     : [...defaultUbSwatches];
     profileMetadata.blackInksKnockoutDisplay =
      profileInfo.blackInksKnockoutDisplay != null
       ? String(profileInfo.blackInksKnockoutDisplay)
       : '';
+    profileMetadata.underbaseSwatch =
+     (profileInfo as any).underbaseSwatch != null && String((profileInfo as any).underbaseSwatch).trim() !== ''
+      ? String((profileInfo as any).underbaseSwatch).trim()
+      : ((profileInfo as any)['Underbase Swatch'] != null && String((profileInfo as any)['Underbase Swatch']).trim() !== ''
+       ? String((profileInfo as any)['Underbase Swatch']).trim()
+       : 'White UB');
+    profileMetadata.blocker = toEnabled((profileInfo as any).blocker);
+    profileMetadata.blockerMesh =
+     (profileInfo as any).blockerMesh != null
+      ? String((profileInfo as any).blockerMesh)
+      : (
+       (profileInfo as any)['Blocker Mesh'] != null
+        ? String((profileInfo as any)['Blocker Mesh'])
+        : ''
+      );
     console.log('[SEPARATIONS][UB_DEBUG] profileMetadata underbase flags/meshes:', {
      profileName,
      profileCode,
      underbaseEnabled: profileMetadata.underbaseEnabled,
      underbaseMeshes: profileMetadata.underbaseMeshes,
      underbaseKnockoutBlack: profileMetadata.underbaseKnockoutBlack,
+     underbaseKnockoutSwatches: profileMetadata.underbaseKnockoutSwatches,
+     underbaseSwatch: profileMetadata.underbaseSwatch,
      blackInksKnockoutDisplay: profileMetadata.blackInksKnockoutDisplay
     });
    } else {
@@ -786,21 +929,257 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
    .catch((err) => { });
  }
 
- handleSeparationMenuClick(item: string, separationId: number): void {
+ handleSeparationMenuClick(item: string, separationId: number, graphicName: string): void {
+  if (this.isRunningInBrowser) {
+   return;
+  }
+  const separation = this.separations.find((s) => s.id === separationId);
+  if (!separation) {
+   return;
+  }
+
+  if (item === 'Delete Separation File') {
+   const filePath = this.getSeparationPath(separation, graphicName);
+   if (!filePath) {
+    return;
+   }
+   this.deleteSeparationFileContext = {
+    graphicName,
+    separationId,
+    profileName: separation.profile,
+    filePath
+   };
+   this.showDeleteSeparationFileConfirm = true;
+   this.cdr.detectChanges();
+   return;
+  }
+
   if (item === 'Duplicate') {
-   const separation = this.separations.find((s) => s.id === separationId);
-   if (separation) {
-    const newSeparation = {
-     ...separation,
-     id: Math.max(...this.separations.map((s) => s.id)) + 1,
+   this.openSeparationActionDialog('duplicate', graphicName, separation, false);
+   return;
+  }
+
+  if (item === 'Edit') {
+   this.openSeparationActionDialog('edit-new', graphicName, separation, false);
+  }
+ }
+
+ handleAddSeparation(graphicName: string): void {
+  if (!graphicName) {
+   return;
+  }
+  this.addSeparationDialogGraphicName = graphicName;
+  this.addSeparationDialogOpen = true;
+  this.cdr.detectChanges();
+ }
+
+ cancelAddSeparationDialog(): void {
+  this.addSeparationDialogOpen = false;
+  this.addSeparationDialogGraphicName = '';
+  this.cdr.detectChanges();
+ }
+
+ async confirmAddSeparationDialog(result: AddSeparationDialogResult): Promise<void> {
+  const profileName = String(result?.profileName || '').trim();
+  const styleCodes = Array.isArray(result?.styleCodes)
+   ? result.styleCodes.map((s) => String(s || '').trim()).filter(Boolean)
+   : [];
+  if (!profileName || styleCodes.length === 0) {
+   this.cancelAddSeparationDialog();
+   return;
+  }
+
+  const upsertMany = (codes: string[]) => {
+   let next = [...this.separations];
+   codes.forEach((styleCode) => {
+    next = this.upsertSeparationGroupInList(next, profileName, styleCode);
+   });
+   this.separations = next;
+  };
+
+  if (this.isRunningInBrowser) {
+   upsertMany(styleCodes);
+   this.cancelAddSeparationDialog();
+   return;
+  }
+
+  if (!this.controller.addSeparationProfileDataEntry) {
+   this.cancelAddSeparationDialog();
+   return;
+  }
+
+  this.isLoadingAddSeparationDialog = true;
+  this.cdr.detectChanges();
+  try {
+   let profileCode: string | null = null;
+   try {
+    const codeRes = await this.controller.getProfileCodeFromName(profileName);
+    if (codeRes?.success && codeRes.profileCode) {
+     profileCode = String(codeRes.profileCode);
+    }
+   } catch (_) {
+    profileCode = null;
+   }
+
+   const saveResult = await this.controller.addSeparationProfileDataEntry({
+    graphicName: this.addSeparationDialogGraphicName,
+    profileName,
+    styleCodes,
+    profileCode
+   });
+   if (saveResult?.success) {
+    upsertMany(styleCodes);
+    // Refresh XMP-derived groups to ensure reopen consistency.
+    await this.loadSeparationPaths();
+   } else {
+    console.warn('[Separations] Failed to add separation profile entry:', saveResult?.error);
+   }
+  } catch (err) {
+   console.error('[Separations] Error adding separation profile entry:', err);
+  } finally {
+   this.isLoadingAddSeparationDialog = false;
+   this.cancelAddSeparationDialog();
+  }
+ }
+
+ private openSeparationActionDialog(
+  mode: 'duplicate' | 'edit-new',
+  graphicName: string,
+  separation: Separation,
+  isNew: boolean
+ ): void {
+  const profileOpts = isNew
+   ? [...this.profileNamesFromSettings]
+   : this.profileNamesFromSettings.indexOf(separation.profile) >= 0
+    ? [...this.profileNamesFromSettings]
+    : [...this.profileNamesFromSettings, separation.profile];
+
+  this.separationActionDialogMode = mode;
+  this.separationActionDialogIsNew = isNew;
+  this.separationActionDialogContext = isNew
+   ? { graphicName, separationId: -1, originalProfileName: '' }
+   : {
+    graphicName,
+    separationId: separation.id,
+    originalProfileName: separation.profile
+   };
+  this.separationActionDialogStyleCodes = isNew ? [...this.allTeamStyleCodes] : [...(separation.styles || [])];
+  this.separationActionDialogInitialProfile =
+   isNew && profileOpts.length > 0 ? profileOpts[0] : separation.profile || (profileOpts[0] || '');
+  this.separationActionDialogInitialStyles = isNew ? [] : [...(separation.styles || [])];
+  const path = isNew ? null : this.getSeparationPath(separation, graphicName);
+  this.separationActionDialogHasFile = !!path;
+  this.separationActionDialogInitialDuplicateAi = true;
+  this.separationActionDialogInitialScaleEnabled = false;
+  this.separationActionDialogInitialScalePercent = 100;
+  this.separationActionDialogOpen = true;
+  this.cdr.detectChanges();
+ }
+
+ cancelDeleteSeparationFile(): void {
+  this.showDeleteSeparationFileConfirm = false;
+  this.deleteSeparationFileContext = null;
+  this.cdr.detectChanges();
+ }
+
+ confirmDeleteSeparationFile(): void {
+  const ctx = this.deleteSeparationFileContext;
+  this.showDeleteSeparationFileConfirm = false;
+  this.deleteSeparationFileContext = null;
+  this.cdr.detectChanges();
+  if (!ctx || this.isRunningInBrowser) {
+   return;
+  }
+  this.controller
+   .deleteSeparationFile({
+    graphicName: ctx.graphicName,
+    profileName: ctx.profileName,
+    filePath: ctx.filePath
+   })
+   .then((res) => {
+    if (res?.success) {
+     this.loadSeparationPaths();
+    }
+   })
+   .catch(() => { });
+ }
+
+ cancelSeparationActionDialog(): void {
+  this.separationActionDialogOpen = false;
+  this.separationActionDialogContext = null;
+  this.cdr.detectChanges();
+ }
+
+ async confirmSeparationActionDialog(result: SeparationProfileActionDialogResult): Promise<void> {
+  const ctx = this.separationActionDialogContext;
+  if (!ctx || this.isRunningInBrowser) {
+   this.cancelSeparationActionDialog();
+   return;
+  }
+
+  if (this.separationActionDialogIsNew) {
+   const nextId =
+    this.separations.length === 0 ? 1 : Math.max(...this.separations.map((s) => s.id)) + 1;
+   this.separations = [
+    ...this.separations,
+    {
+     id: nextId,
+     profile: result.profileName,
+     styles: [...result.styleCodes],
+     colors: [],
      sepFileName: '',
      isCreated: false
-    };
-    this.separations = [...this.separations, newSeparation];
-    this.cdr.detectChanges();
-   }
-  } else if (item === 'Edit') {
+    }
+   ];
+   this.separationActionDialogOpen = false;
+   this.separationActionDialogContext = null;
+   this.cdr.detectChanges();
+   return;
   }
+
+  const separation = this.separations.find((s) => s.id === ctx.separationId);
+  if (!separation) {
+   this.cancelSeparationActionDialog();
+   return;
+  }
+
+  let profileCode: string | null | undefined = undefined;
+  if (result.profileName !== ctx.originalProfileName) {
+   try {
+    const codeRes = await this.controller.getProfileCodeFromName(result.profileName);
+    if (codeRes?.success && codeRes.profileCode) {
+     profileCode = String(codeRes.profileCode);
+    }
+   } catch {
+    profileCode = null;
+   }
+  }
+
+  const patch: any = {
+   graphicName: ctx.graphicName,
+   matchProfileName: ctx.originalProfileName,
+   profileName: result.profileName,
+   styleCodes: result.styleCodes,
+   duplicateAiFile: result.duplicateAiFile === true,
+   scaleEnabled: result.scaleEnabled === true,
+   scalePercent: result.scalePercent
+  };
+  if (profileCode != null) {
+   patch.profileCode = profileCode;
+  }
+
+  this.controller
+   .updateSeparationProfileDataEntry(patch)
+   .then((res) => {
+    if (res?.success) {
+     separation.profile = result.profileName;
+     separation.styles = [...result.styleCodes];
+     this.separationActionDialogOpen = false;
+     this.separationActionDialogContext = null;
+     this.loadSeparationPaths();
+    }
+   })
+   .catch(() => { });
  }
 
  checkAllGraphicFolders(): void {

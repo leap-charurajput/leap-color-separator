@@ -77,7 +77,7 @@
   </div>
  </div>
 
- <app-edit-separation-profile-modal [isOpen]="editModalOpen" [profile]="selectedProfile"
+ <app-edit-separation-profile-modal [isOpen]="editModalOpen" [profile]="duplicateProfileDraft || selectedProfile"
   [defaultBlackColorNames]="koDarkColorNames" (close)="handleModalClose()"
   (save)="handleModalSave($event)"></app-edit-separation-profile-modal>
 </div>

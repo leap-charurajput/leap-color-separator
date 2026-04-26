@@ -807,7 +807,7 @@ function copyBlackLayersToUnderbaseTargets(profileMetadata) {
  }
 }
 
-function ensureSwatchExistsFromSource(sourceSwatchName, newSwatchName) {
+function ensureSwatchExistsFromSource(sourceSwatchName, newSwatchName, fallbackCmyk) {
  try {
   var doc = app.activeDocument;
   try {
@@ -818,8 +818,23 @@ function ensureSwatchExistsFromSource(sourceSwatchName, newSwatchName) {
    }
   } catch (existingErr) { }
 
-  var sourceSwatch = doc.swatches.getByName(sourceSwatchName);
+  var sourceSwatch = null;
+  try {
+   sourceSwatch = doc.swatches.getByName(sourceSwatchName);
+  } catch (sourceErr) { }
   if (!sourceSwatch || !sourceSwatch.color) {
+   if (fallbackCmyk) {
+    var fallbackSpot = doc.spots.add();
+    fallbackSpot.name = newSwatchName;
+    var fallbackColor = new CMYKColor();
+    fallbackColor.cyan = Math.max(0, Math.min(100, Number(fallbackCmyk.c) || 0));
+    fallbackColor.magenta = Math.max(0, Math.min(100, Number(fallbackCmyk.m) || 0));
+    fallbackColor.yellow = Math.max(0, Math.min(100, Number(fallbackCmyk.y) || 0));
+    fallbackColor.black = Math.max(0, Math.min(100, Number(fallbackCmyk.k) || 0));
+    fallbackSpot.color = fallbackColor;
+    $.writeln("[SEPARATION][UB_DEBUG] Created fallback spot swatch: " + newSwatchName);
+    return true;
+   }
    $.writeln("[SEPARATION][UB_DEBUG] Source swatch not found for duplication: " + sourceSwatchName);
    return false;
   }
@@ -844,6 +859,20 @@ function ensureSwatchExistsFromSource(sourceSwatchName, newSwatchName) {
   return true;
  } catch (e) {
   $.writeln("[SEPARATION][UB_DEBUG] ensureSwatchExistsFromSource error: " + (e.message || e.toString()));
+  return false;
+ }
+}
+
+function isBlockerEnabled(profileMetadata) {
+ try {
+  var raw = profileMetadata ? profileMetadata.blocker : null;
+  if (raw === true || raw === 1) return true;
+  if (typeof raw === "string") {
+   var normalized = raw.replace(/^\s+|\s+$/g, "").toUpperCase();
+   return normalized === "Y" || normalized === "YES" || normalized === "TRUE" || normalized === "1";
+  }
+  return false;
+ } catch (e) {
   return false;
  }
 }
@@ -876,6 +905,14 @@ function applyProfileUnderbaseLayers(profileMetadata) {
    duplicateLayerContentsToNewLayer(CONSTANTS.LAYER_NAMES.WHITE_UB, CONSTANTS.LAYER_NAMES.WHITE_UB + " 2");
    duplicateLayerContentsToNewLayer(CONSTANTS.LAYER_NAMES.WHITE_UB, CONSTANTS.LAYER_NAMES.WHITE_UB + " 3");
    duplicateLayerContentsToNewLayer(CONSTANTS.LAYER_NAMES.WHITE_UB, CONSTANTS.LAYER_NAMES.WHITE_UB + " 4");
+  }
+  if (isBlockerEnabled(profileMetadata)) {
+   ensureSwatchExistsFromSource(
+    CONSTANTS.SWATCH_NAMES.WHITE_UB,
+    CONSTANTS.SWATCH_NAMES.BLOCKER,
+    { c: 0, m: 0, y: 0, k: 0 }
+   );
+   duplicateLayerContentsToNewLayer(CONSTANTS.LAYER_NAMES.WHITE_UB, CONSTANTS.LAYER_NAMES.BLOCKER);
   }
   // Temporarily disabled per request: do not copy Black layer items into White UB layers.
   // copyBlackLayersToUnderbaseTargets(profileMetadata);
@@ -1255,6 +1292,15 @@ function handleRecreatePlatesInActiveDocument(params_string) {
   }
   var doc = app.activeDocument;
   loadLEAPColorSepsActions();
+  var profileMetadata = params.profileMetadata || null;
+  if (!profileMetadata) {
+   try {
+    var xmpRec = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
+    if (xmpRec.isXmpCreated && xmpRec.doesStructFieldExist("SeparationProfileMetadata")) {
+     profileMetadata = xmpRec.getStructField("SeparationProfileMetadata", true);
+    }
+   } catch (eMeta) { }
+  }
   var hasCleanupParams = params.hasOwnProperty("deleteUnpaintedPaths") || params.hasOwnProperty("deleteLeftoverPaths");
   var cleanupOpts = null;
   if (hasCleanupParams) {
@@ -1267,7 +1313,7 @@ function handleRecreatePlatesInActiveDocument(params_string) {
   if (cleanupOpts == null || cleanupOpts.deleteUnpaintedPaths) {
    deleteNonFillStrokeItems();
   }
-  generateUnderbase(graphicName, cleanupOpts, null);
+  generateUnderbase(graphicName, cleanupOpts, profileMetadata);
   setOverprintOnSeparatedArt(doc, true);
   var _sizedArtLayer = app.activeDocument.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_ART);
   _sizedArtLayer.visible = false;
@@ -2750,7 +2796,8 @@ function handleLoadSeparationPaths(params_string) {
   if (!app.documents.length) {
    return JSON.stringify({
     success: true,
-    separationPaths: {}
+    separationPaths: {},
+    separationEntries: []
    });
   }
   var versionDoc = null;
@@ -2781,6 +2828,7 @@ function handleLoadSeparationPaths(params_string) {
    return JSON.stringify({
     success: false,
     separationPaths: {},
+    separationEntries: [],
     error: "No version document found"
    });
   }
@@ -2789,6 +2837,7 @@ function handleLoadSeparationPaths(params_string) {
    return JSON.stringify({
     success: false,
     separationPaths: {},
+    separationEntries: [],
     error: "XMP not created"
    });
   }
@@ -2796,6 +2845,7 @@ function handleLoadSeparationPaths(params_string) {
   loadPathsDebug.push("Version doc path: " + (versionDoc && versionDoc.fullName ? versionDoc.fullName.fsName : "null"));
   loadPathsDebug.push("XMP created: " + xmp.isXmpCreated);
   var separationPaths = {};
+  var separationEntries = [];
   var fieldExists = xmp.doesStructFieldExist("LEAPSeparationProfileData");
   loadPathsDebug.push("LEAPSeparationProfileData field exists: " + fieldExists);
   if (fieldExists) {
@@ -2825,6 +2875,24 @@ function handleLoadSeparationPaths(params_string) {
       } else {
        loadPathsDebug.push("Separation missing required fields - graphicName: " + (separation ? separation.graphicName : "null") + ", separatedDocumentPath: " + (separation ? separation.separatedDocumentPath : "null"));
       }
+
+      var styleCodes = [];
+      if (
+       separation &&
+       separation.profileMetadata &&
+       separation.profileMetadata.styleCodes &&
+       separation.profileMetadata.styleCodes instanceof Array
+      ) {
+       styleCodes = separation.profileMetadata.styleCodes;
+      }
+      if (separation && separation.graphicName && profileName) {
+       separationEntries.push({
+        graphicName: separation.graphicName,
+        profileName: profileName,
+        styleCodes: styleCodes,
+        separatedDocumentPath: separation.separatedDocumentPath || ""
+       });
+      }
      }
      loadPathsDebug.push("Total paths loaded: " + Object.keys(separationPaths).length);
     } else {
@@ -2850,12 +2918,14 @@ function handleLoadSeparationPaths(params_string) {
    return JSON.stringify({
     success: true,
     separationPaths: separationPaths,
+    separationEntries: separationEntries,
     debug: debugInfo
    });
   } catch (jsonError) {
    return JSON.stringify({
     success: false,
     separationPaths: {},
+    separationEntries: [],
     error: "Failed to serialize response: " + jsonError.message
    });
   }
@@ -2863,6 +2933,7 @@ function handleLoadSeparationPaths(params_string) {
   return JSON.stringify({
    success: false,
    separationPaths: {},
+   separationEntries: [],
    error: e.message || e.toString()
   });
  }
@@ -2896,6 +2967,363 @@ function handleOpenSeparationDocument(params_string) {
   });
  }
 }
+
+
+function leapProfileNameFromSeparationEntry(separation) {
+ if (separation && separation.profileMetadata && separation.profileMetadata.profileName) {
+  return String(separation.profileMetadata.profileName);
+ }
+ return "";
+}
+
+function handleDeleteSeparationFile(params_string) {
+ try {
+  var params = JSON.parse(params_string);
+  var graphicName = params.graphicName;
+  var profileName = params.profileName ? String(params.profileName) : "";
+  var filePath = params.filePath ? String(params.filePath) : "";
+
+  var versionDoc = app.activeDocument;
+  var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", versionDoc);
+  if (!xmp.isXmpCreated) {
+   return JSON.stringify({
+    success: false,
+    error: "Failed to initialize XMP on version document"
+   });
+  }
+
+  if (!xmp.doesStructFieldExist("LEAPSeparationProfileData")) {
+   return JSON.stringify({
+    success: false,
+    error: "LEAPSeparationProfileData not found in XMP"
+   });
+  }
+
+  var separations = xmp.getStructField("LEAPSeparationProfileData", true);
+  if (!Array.isArray(separations)) {
+   return JSON.stringify({
+    success: false,
+    error: "LEAPSeparationProfileData is not an array"
+   });
+  }
+
+  var idx = -1;
+  for (var i = 0; i < separations.length; i++) {
+   var sep = separations[i];
+   var g = sep && sep.graphicName ? String(sep.graphicName) : "";
+   var pn = leapProfileNameFromSeparationEntry(sep);
+   if (g === String(graphicName) && pn === profileName) {
+    idx = i;
+    break;
+   }
+  }
+
+  if (idx < 0) {
+   return JSON.stringify({
+    success: false,
+    error: "No matching separation entry for graphic and profile"
+   });
+  }
+
+  var entry = separations[idx];
+  var pathToRemove = filePath;
+  var _separtionFile = File(entry.separatedDocumentPath);
+  if (_separtionFile.exists) {
+   try {
+    _separtionFile.remove();
+   } catch (removeErr) {
+    return JSON.stringify({
+     success: false,
+     error: "Could not delete file: " + (removeErr.message || removeErr.toString())
+    });
+   }
+  }
+
+  var newEntry = {
+   graphicName: entry.graphicName,
+   profileMetadata: entry.profileMetadata ? entry.profileMetadata : null
+  };
+
+  separations[idx] = newEntry;
+  xmp.setStructField("LEAPSeparationProfileData", separations, true, false);
+  xmp.commit();
+  if (versionDoc.fullName && versionDoc.fullName.fsName) {
+   try {
+    versionDoc.save();
+   } catch (saveError) {
+   }
+  }
+
+  return JSON.stringify({
+   success: true,
+   message: "Separation file removed and XMP path cleared"
+  });
+ } catch (e) {
+  return JSON.stringify({
+   success: false,
+   error: e.message || e.toString()
+  });
+ }
+}
+
+function handleUpdateSeparationProfileDataEntry(params_string) {
+ try {
+  var params = JSON.parse(params_string);
+  var graphicName = params.graphicName ? String(params.graphicName) : "";
+  var matchProfileName = params.matchProfileName != null ? String(params.matchProfileName) : "";
+  var newProfileName = params.profileName != null ? String(params.profileName) : "";
+  var styleCodes = params.styleCodes && params.styleCodes instanceof Array ? params.styleCodes : [];
+  var profileCode = params.profileCode != null ? params.profileCode : null;
+  var duplicateAiFile = params.duplicateAiFile === true;
+  var scaleEnabled = params.scaleEnabled === true;
+  var scalePercent = params.scalePercent != null ? Number(params.scalePercent) : null;
+
+  if (!graphicName) {
+   return JSON.stringify({
+    success: false,
+    error: "graphicName is required"
+   });
+  }
+
+  var versionDoc = app.activeDocument;
+  if (!versionDoc) {
+   return JSON.stringify({
+    success: false,
+    error: "No version document found"
+   });
+  }
+
+  var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", versionDoc);
+  if (!xmp.isXmpCreated || !xmp.doesStructFieldExist("LEAPSeparationProfileData")) {
+   return JSON.stringify({
+    success: false,
+    error: "LEAPSeparationProfileData not found"
+   });
+  }
+
+  var separations = xmp.getStructField("LEAPSeparationProfileData", true);
+  if (!Array.isArray(separations)) {
+   return JSON.stringify({
+    success: false,
+    error: "LEAPSeparationProfileData is not an array"
+   });
+  }
+
+  var idx = -1;
+  for (var j = 0; j < separations.length; j++) {
+   var sep2 = separations[j];
+   var g2 = sep2 && sep2.graphicName ? String(sep2.graphicName) : "";
+   var pn2 = leapProfileNameFromSeparationEntry(sep2);
+   if (g2 === graphicName && pn2 === matchProfileName) {
+    idx = j;
+    break;
+   }
+  }
+
+  if (idx < 0) {
+   return JSON.stringify({
+    success: false,
+    error: "No matching separation entry for graphic and profile"
+   });
+  }
+
+  var entry2 = separations[idx];
+  var meta = entry2.profileMetadata ? entry2.profileMetadata : {};
+  if (newProfileName) {
+   meta.profileName = newProfileName;
+  }
+  if (profileCode != null && profileCode !== "") {
+   meta.profileCode = profileCode;
+  }
+  meta.styleCodes = styleCodes;
+
+  if (scaleEnabled && scalePercent != null && !isNaN(scalePercent)) {
+   meta.graphicScalePercent = scalePercent;
+  } else {
+   try {
+    delete meta.graphicScalePercent;
+   } catch (delScale) {
+    meta.graphicScalePercent = null;
+   }
+  }
+
+  var pathOut = entry2.separatedDocumentPath ? String(entry2.separatedDocumentPath) : "";
+
+  if (duplicateAiFile && pathOut) {
+   var srcFile = new File(pathOut);
+   if (!srcFile.exists) {
+    return JSON.stringify({
+     success: false,
+     error: "Separation file not found for duplicate: " + pathOut
+    });
+   }
+   var parentFolder = srcFile.parent;
+   var base = srcFile.name.replace(/\.ai$/i, "");
+   var stamp = String((new Date()).getTime());
+   var destFile = new File(parentFolder.fsName + "/" + base + "_COPY_" + stamp + ".ai");
+   try {
+    srcFile.copy(destFile);
+    if (!destFile.exists) {
+     return JSON.stringify({
+      success: false,
+      error: "Copy failed (destination missing)"
+     });
+    }
+    pathOut = destFile.fsName;
+   } catch (copyErr) {
+    return JSON.stringify({
+     success: false,
+     error: "Copy failed: " + (copyErr.message || copyErr.toString())
+    });
+   }
+  }
+
+  var updatedEntry = {
+   graphicName: entry2.graphicName,
+   profileMetadata: meta,
+   separatedDocumentPath: pathOut
+  };
+
+  separations[idx] = updatedEntry;
+  xmp.setStructField("LEAPSeparationProfileData", separations, true, false);
+  xmp.commit();
+  if (versionDoc.fullName && versionDoc.fullName.fsName) {
+   try {
+    versionDoc.save();
+   } catch (saveErr2) {
+   }
+  }
+
+  return JSON.stringify({
+   success: true,
+   separatedDocumentPath: updatedEntry.separatedDocumentPath || "",
+   message: "Separation profile data updated"
+  });
+ } catch (e) {
+  return JSON.stringify({
+   success: false,
+   error: e.message || e.toString()
+  });
+ }
+}
+
+function handleAddSeparationProfileDataEntry(params_string) {
+ try {
+  var params = JSON.parse(params_string);
+  var graphicName = params.graphicName ? String(params.graphicName) : "";
+  var profileName = params.profileName ? String(params.profileName) : "";
+  var profileCode = params.profileCode != null ? String(params.profileCode) : "";
+  var styleCodes = params.styleCodes && params.styleCodes instanceof Array ? params.styleCodes : [];
+
+  if (!graphicName || !profileName || !styleCodes.length) {
+   return JSON.stringify({ success: false, error: "graphicName, profileName and styleCodes are required" });
+  }
+
+  function normalizeCodes(list) {
+   var out = [];
+   var seen = {};
+   for (var i = 0; i < list.length; i++) {
+    var code = list[i] != null ? String(list[i]).replace(/^\s+|\s+$/g, "") : "";
+    if (!code) continue;
+    if (!seen[code]) {
+     seen[code] = true;
+     out.push(code);
+    }
+   }
+   out.sort();
+   return out;
+  }
+
+  function findVersionDocument() {
+   var versionDoc = null;
+   if (app.documents.length > 0) {
+    var activeDoc = app.activeDocument;
+    if (activeDoc && activeDoc.fullName && activeDoc.fullName.fsName) {
+     var activeDocPath = activeDoc.fullName.fsName;
+     var isSeparatedDoc = activeDocPath.indexOf("09 SEPARATIONS") !== -1;
+     var isVersionDoc = activeDocPath.indexOf("01 TEAMOUTS") !== -1 && !isSeparatedDoc;
+     if (isVersionDoc) versionDoc = activeDoc;
+    }
+   }
+   if (!versionDoc) {
+    for (var d = 0; d < app.documents.length; d++) {
+     var doc = app.documents[d];
+     if (doc && doc.fullName && doc.fullName.fsName) {
+      var docPath = doc.fullName.fsName;
+      var isSeparatedDoc2 = docPath.indexOf("09 SEPARATIONS") !== -1;
+      var isVersionDoc2 = docPath.indexOf("01 TEAMOUTS") !== -1 && !isSeparatedDoc2;
+      if (isVersionDoc2) { versionDoc = doc; break; }
+     }
+    }
+   }
+   return versionDoc;
+  }
+
+  var versionDoc = findVersionDocument();
+  if (!versionDoc) {
+   return JSON.stringify({ success: false, error: "No version document found" });
+  }
+
+  var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", versionDoc);
+  if (!xmp.isXmpCreated) {
+   return JSON.stringify({ success: false, error: "XMP not created on version document" });
+  }
+
+  var separations = [];
+  if (xmp.doesStructFieldExist("LEAPSeparationProfileData")) {
+   try {
+    var existing = xmp.getStructField("LEAPSeparationProfileData", true);
+    if (Array.isArray(existing)) separations = existing;
+   } catch (e) {
+    separations = [];
+   }
+  }
+
+  var idx = -1;
+  for (var j = 0; j < separations.length; j++) {
+   var s = separations[j];
+   var g = s && s.graphicName ? String(s.graphicName) : "";
+   var p = leapProfileNameFromSeparationEntry(s);
+   if (g === graphicName && p === profileName) { idx = j; break; }
+  }
+
+  var normalizedIncoming = normalizeCodes(styleCodes);
+  var created = false;
+  if (idx >= 0) {
+   var entry = separations[idx];
+   var meta = entry && entry.profileMetadata ? entry.profileMetadata : {};
+   var existingCodes = meta.styleCodes && meta.styleCodes instanceof Array ? meta.styleCodes : [];
+   meta.profileName = profileName;
+   if (profileCode) meta.profileCode = profileCode;
+   meta.styleCodes = normalizeCodes(existingCodes.concat(normalizedIncoming));
+   entry.profileMetadata = meta;
+   if (!entry.separatedDocumentPath) entry.separatedDocumentPath = "";
+   separations[idx] = entry;
+  } else {
+   created = true;
+   separations.push({
+    graphicName: graphicName,
+    profileMetadata: {
+     profileName: profileName,
+     profileCode: profileCode || null,
+     styleCodes: normalizedIncoming
+    },
+    separatedDocumentPath: ""
+   });
+  }
+
+  xmp.setStructField("LEAPSeparationProfileData", separations, true, false);
+  xmp.commit();
+  if (versionDoc.fullName && versionDoc.fullName.fsName) {
+   try { versionDoc.save(); } catch (saveErr) { }
+  }
+
+  return JSON.stringify({ success: true, created: created });
+ } catch (e) {
+  return JSON.stringify({ success: false, error: e.message || e.toString() });
+ }
+}
+
 function handleGetBodyColor(params_string) {
  try {
   if (!app.documents.length) {

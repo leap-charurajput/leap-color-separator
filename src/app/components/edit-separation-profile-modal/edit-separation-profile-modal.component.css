@@ -9,9 +9,9 @@
 }
 
 .profile-modal-container {
- width: 360px;
- max-width: 95vw;
- max-height: 90vh;
+ width: min(410px, 95vw);
+ max-width: 96vw;
+ max-height: 92vh;
  display: flex;
  flex-direction: column;
  background: rgba(28, 28, 30, 0.97);
@@ -23,7 +23,7 @@
 }
 
 .modal-header {
- padding: 8px 16px;
+ padding: 4px 8px 3px;
  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
@@ -38,13 +38,13 @@
 .modal-body {
  display: flex;
  flex-direction: column;
- gap: 10px;
- padding: 16px 20px;
+ gap: 5px;
+ padding: 6px 10px 4px;
  overflow-y: auto;
 }
 
 .modal-body.settings-style {
- gap: 12px;
+ gap: 5px;
 }
 
 /* Settings-style fields (aligned with settings.component.css) */
@@ -52,7 +52,11 @@
  display: flex;
  justify-content: space-between;
  align-items: center;
- gap: 15px;
+ gap: 10px;
+}
+
+.settings-style .settings-field.profile-field-row {
+ margin-bottom: 5px;
 }
 
 .settings-style .settings-field-label {
@@ -78,6 +82,8 @@
 
 .settings-style .settings-field-input-wide {
  width: 200px;
+ max-width: 100%;
+ box-sizing: border-box;
  text-align: left;
 }
 
@@ -96,27 +102,206 @@
  text-align: left;
 }
 
-.settings-style .settings-field-label-inline {
- font-size: 12px;
- color: rgba(255, 255, 255, 0.9);
- flex-shrink: 0;
- font-family: 'Adobe Clean', sans-serif;
- margin-left: 0;
-}
-
 .settings-style .settings-field-inline {
  flex-wrap: wrap;
+ gap: 4px;
+}
+
+.settings-style .settings-field.settings-field-twin-checks {
+ justify-content: flex-start;
+ gap: 12px;
+ flex-wrap: nowrap;
+ align-items: center;
+}
+
+:host ::ng-deep .settings-field-twin-checks .checkbox-component {
  gap: 6px;
 }
 
-.settings-style .settings-field-inline app-checkbox:first-child {
- margin-right: 0;
+:host ::ng-deep .settings-field-twin-checks .checkbox-label-text {
+ font-size: 11px;
+ line-height: 1.35;
 }
 
-.profile-modal-compact-rows {
+.settings-style .settings-field.settings-field-format-row {
+ justify-content: flex-start;
+ gap: 6px;
+ flex-wrap: nowrap;
+ align-items: center;
+}
+
+.settings-style .settings-field.settings-field-underbase-swatch {
+ justify-content: flex-start;
+ gap: 8px;
+ flex-wrap: nowrap;
+ align-items: center;
+}
+
+.profile-underbase-swatch-select {
+ width: 150px !important;
+ text-align: left !important;
+ padding: 2px 6px;
+ font-size: 11px;
+}
+
+.settings-style .settings-field-format-row .settings-field-input-format {
+ flex: 1 1 auto;
+ min-width: 0;
+ width: auto;
+ max-width: none;
+}
+
+/* ——— Bordered underbase grid (headers + rows align) ——— */
+.profile-ub-grid {
+ border: none;
+ border-radius: 4px;
+ padding: 0;
+ background: transparent;
+ box-sizing: border-box;
+ width: 100%;
+ overflow: hidden;
+}
+
+.profile-ub-grid-header,
+.profile-ub-grid-row {
+ display: grid;
+ grid-template-columns: minmax(108px, 1.2fr) 64px minmax(110px, 1fr);
+ column-gap: 0px;
+ align-items: center;
+ box-sizing: border-box;
+}
+
+.profile-ub-grid-header {
+ padding: 3px 6px;
+ margin-bottom: 5px;
+ border-bottom: 1px solid var(--profile-table-border, rgba(255, 255, 255, 0.25));
+ background: rgba(0, 0, 0, 0.12);
+}
+
+.profile-ub-h-cell {
+ font-size: 11px;
+ font-weight: 600;
+ text-transform: none;
+ letter-spacing: 0.02em;
+ color: rgba(255, 255, 255, 0.85);
+ line-height: 1.2;
+}
+
+.profile-ub-h-underbase {
+ justify-self: start;
+}
+
+.profile-ub-h-mesh {
+ justify-self: center;
+ text-align: center;
+}
+
+.profile-ub-h-dark {
+ justify-self: center;
+ text-align: center;
+}
+
+.profile-ub-grid-row {
+ padding: 2px 6px;
+ border-top: none;
+ min-height: 24px;
+}
+
+.profile-ub-grid-header+.profile-ub-grid-row {
+ border-top: none;
+ padding-top: 2px;
+}
+
+.profile-ub-grid-row-blocker {
+ margin-top: 0;
+ padding-top: 2px;
+}
+
+.profile-ub-cell-underbase {
+ justify-self: start;
  display: flex;
- flex-direction: column;
+ align-items: center;
+}
+
+.profile-ub-cell-mesh {
+ justify-self: start;
+ display: flex;
+ justify-content: flex-start;
+ width: 100%;
+}
+
+.profile-ub-cell-dark {
+ justify-self: center;
+ display: flex;
+ justify-content: center;
+ width: 100%;
+}
+
+.profile-ub-mesh-input {
+ width: 100%;
+ max-width: 56px;
+ box-sizing: border-box;
+ padding: 3px 5px;
+ font-size: 12px;
+ text-align: left;
+}
+
+.profile-ub-cell-dash {
+ display: flex;
+ align-items: center;
+ justify-content: center;
+ font-size: 12px;
+ color: rgba(255, 255, 255, 0.28);
+ user-select: none;
+}
+
+/* Unchecked rows look identical to checked rows.
+   Native :disabled on radio/select is the only visual cue. */
+
+:host ::ng-deep .profile-ub-grid .checkbox-component {
  gap: 4px;
+}
+
+:host ::ng-deep .profile-ub-grid .checkbox-label-text {
+ font-size: 12px;
+ line-height: 1.25;
+}
+
+/* OP / K/O */
+.profile-ub-radios {
+ display: flex;
+ align-items: center;
+ justify-content: center;
+ gap: 8px;
+ flex-shrink: 0;
+}
+
+.profile-ub-radio {
+ display: flex;
+ align-items: center;
+ gap: 3px;
+ cursor: pointer;
+ font-size: 12px;
+ color: rgba(255, 255, 255, 0.9);
+ user-select: none;
+}
+
+.profile-ub-radio-input {
+ width: 12px;
+ height: 12px;
+ margin: 0;
+ accent-color: #9a9a9a;
+ cursor: pointer;
+ flex-shrink: 0;
+}
+
+.profile-ub-radio-muted {
+ opacity: 0.45;
+ cursor: not-allowed;
+}
+
+.profile-ub-radio-muted .profile-ub-radio-input {
+ cursor: not-allowed;
 }
 
 .settings-style .settings-field-vertical {
@@ -130,18 +315,16 @@
  box-sizing: border-box;
 }
 
-.settings-style .settings-field-readonly {
+.profile-ko-textarea-label {
  font-size: 11px;
- color: rgba(255, 255, 255, 0.7);
- font-family: 'Adobe Clean', sans-serif;
- width: 100%;
- word-break: break-word;
+ line-height: 1.35;
+ color: rgba(255, 255, 255, 0.85);
 }
 
 .modal-footer {
  display: flex;
  justify-content: flex-end;
- gap: 12px;
- padding: 12px 20px 20px;
+ gap: 8px;
+ padding: 8px 10px 8px;
  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
