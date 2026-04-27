@@ -37,9 +37,18 @@ export const checkForJSXUpdates = async (
 
   const getAllJSXFiles = (rootDir: string): string[] => {
    const files: string[] = [];
+   const ignoredFileNames = new Set([
+    '.DS_Store',
+    'Thumbs.db'
+   ]);
    const walk = (currentDir: string) => {
     const entries = fs.readdirSync(currentDir);
     for (const entry of entries) {
+     // Skip hidden/system files and folders (e.g. .DS_Store, .git, etc.).
+     if (entry.startsWith('.')) {
+      continue;
+     }
+
      const fullPath = path.join(currentDir, entry);
      const stat = fs.statSync(fullPath);
      if (stat.isDirectory()) {
@@ -48,6 +57,9 @@ export const checkForJSXUpdates = async (
      }
 
      const relativePath = path.relative(rootDir, fullPath).replace(/\\/g, '/');
+     if (ignoredFileNames.has(path.basename(relativePath))) {
+      continue;
+     }
      files.push(relativePath);
     }
    };
