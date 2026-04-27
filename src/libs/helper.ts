@@ -1,5 +1,6 @@
 export const csInterface = new (window as any).CSInterface();
 export const fs = new (window as any).cep_node.require('fs');
+export const path = new (window as any).cep_node.require('path');
 
 export async function evalScript(script: any) {
  let res = await new Promise((resolve, reject) => {
@@ -22,7 +23,7 @@ export const checkForJSXUpdates = async (
   let updateStatus: 'no_update' | 'update_available' | 'update_done' | 'update_error' = 'update_available';
   const remoteVersionFileURL = origin + 'jsx/version.json';
   const remoteVersionFile = await fetch(remoteVersionFileURL);
-  const { jsxVersion: remoteJsxVersion = 0, updatedFiles = [] } = await remoteVersionFile.json();
+  const { jsxVersion: remoteJsxVersion = 0 } = await remoteVersionFile.json();
   //  console.log('remote version:', remoteJsxVersion);
   // @ts-ignore
   const localJSXRoot = csInterface.getSystemPath(SystemPath.EXTENSION) + '/jsx';
@@ -33,12 +34,40 @@ export const checkForJSXUpdates = async (
   } catch (e) { }
   var { jsxVersion: localJsxVersion = 0 } = JSON.parse(jsonData);
   //  console.log('local version:', localJsxVersion);
-  // Always sync jsx files on panel startup/load, regardless of local version.
-  for (const file of updatedFiles) {
+
+  const getAllJSXFiles = (rootDir: string): string[] => {
+   const files: string[] = [];
+   const walk = (currentDir: string) => {
+    const entries = fs.readdirSync(currentDir);
+    for (const entry of entries) {
+     const fullPath = path.join(currentDir, entry);
+     const stat = fs.statSync(fullPath);
+     if (stat.isDirectory()) {
+      walk(fullPath);
+      continue;
+     }
+
+     const relativePath = path.relative(rootDir, fullPath).replace(/\\/g, '/');
+     files.push(relativePath);
+    }
+   };
+
+   walk(rootDir);
+   return files;
+  };
+
+  // Always sync complete jsx folder on panel startup/load.
+  const jsxFiles = getAllJSXFiles(localJSXRoot).filter((file) => file !== 'version.json');
+  for (const file of jsxFiles) {
    const remoteFileURL = origin + '/jsx/' + file;
    const remoteFile = await fetch(remoteFileURL);
    const remoteFileContent = await remoteFile.text();
-   fs.writeFileSync(localJSXRoot + '/' + file, remoteFileContent, 'utf8');
+   const destinationPath = localJSXRoot + '/' + file;
+   const destinationDir = path.dirname(destinationPath);
+   if (!fs.existsSync(destinationDir)) {
+    fs.mkdirSync(destinationDir, { recursive: true });
+   }
+   fs.writeFileSync(destinationPath, remoteFileContent, 'utf8');
   }
 
   jsonData = JSON.stringify({ jsxVersion: remoteJsxVersion }, null, 2);
@@ -47,7 +76,7 @@ export const checkForJSXUpdates = async (
   console.log('jsx sync completed on startup', {
    remoteJsxVersion,
    localJsxVersion,
-   syncedFiles: updatedFiles.length
+   syncedFiles: jsxFiles.length
   });
   updateStatus = 'update_done';
   return updateStatus;
