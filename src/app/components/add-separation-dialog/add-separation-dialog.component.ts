@@ -3,6 +3,7 @@ import { ChangeDetectorRef, Component, EventEmitter, Input, OnChanges, Output, S
 export interface AddSeparationDialogStyleOption {
 	styleCode: string;
 	profileName: string;
+	styleDesc?: string;
 }
 
 export interface AddSeparationDialogResult {
@@ -31,6 +32,8 @@ export class AddSeparationDialogComponent implements OnChanges {
 	selectedProfileName = '';
 	filteredStyles: AddSeparationDialogStyleOption[] = [];
 	filteredProfiles: string[] = [];
+	showStyleList = false;
+	showProfileList = false;
 
 	constructor(private cdr: ChangeDetectorRef) {}
 
@@ -50,6 +53,8 @@ export class AddSeparationDialogComponent implements OnChanges {
 		this.selectedProfileName = '';
 		this.filteredStyles = [];
 		this.filteredProfiles = [];
+		this.showStyleList = false;
+		this.showProfileList = false;
 	}
 
 	get normalizedQuery(): string {
@@ -71,8 +76,8 @@ export class AddSeparationDialogComponent implements OnChanges {
 
 	private updateFilteredResults(): void {
 		if (!this.hasTypedQuery) {
-			this.filteredStyles = [];
-			this.filteredProfiles = [];
+			this.filteredStyles = (this.styleOptions || []).slice();
+			this.filteredProfiles = this.uniqueProfiles.slice(0, 100);
 			console.log('[AddSeparationDialog] Cleared filtered lists (empty query)', {
 				selectionMode: this.selectionMode,
 				query: this.query,
@@ -82,7 +87,11 @@ export class AddSeparationDialogComponent implements OnChanges {
 		}
 
 		this.filteredStyles = (this.styleOptions || [])
-			.filter((item) => String(item?.styleCode || '').trim().toLowerCase().includes(this.normalizedQuery))
+			.filter((item) => {
+				const styleCode = String(item?.styleCode || '').trim().toLowerCase();
+				const styleDesc = String(item?.styleDesc || '').trim().toLowerCase();
+				return styleCode.includes(this.normalizedQuery) || styleDesc.includes(this.normalizedQuery);
+			})
 			.slice(0, 100);
 
 		this.filteredProfiles = this.uniqueProfiles
@@ -129,6 +138,7 @@ export class AddSeparationDialogComponent implements OnChanges {
 		if (this.selectionMode !== 'style') return;
 		const value = (ev.target as HTMLInputElement | null)?.value || '';
 		this.query = value;
+		this.showStyleList = true;
 		if (this.selectedStyleCode) this.selectedStyleCode = '';
 		console.log('[AddSeparationDialog] onStyleInput', {
 			rawInput: value,
@@ -143,6 +153,7 @@ export class AddSeparationDialogComponent implements OnChanges {
 		if (this.selectionMode !== 'profile') return;
 		const value = (ev.target as HTMLInputElement | null)?.value || '';
 		this.query = value;
+		this.showProfileList = true;
 		if (this.selectedProfileName) this.selectedProfileName = '';
 		this.updateFilteredResults();
 		this.cdr.detectChanges();
@@ -152,6 +163,7 @@ export class AddSeparationDialogComponent implements OnChanges {
 		this.selectedStyleCode = String(styleCode || '').trim();
 		this.selectedProfileName = '';
 		this.query = '';
+		this.showStyleList = false;
 		this.updateFilteredResults();
 		this.cdr.detectChanges();
 	}
@@ -160,6 +172,7 @@ export class AddSeparationDialogComponent implements OnChanges {
 		this.selectedProfileName = String(profileName || '').trim();
 		this.selectedStyleCode = '';
 		this.query = '';
+		this.showProfileList = false;
 		this.updateFilteredResults();
 		this.cdr.detectChanges();
 	}
@@ -168,6 +181,41 @@ export class AddSeparationDialogComponent implements OnChanges {
 		ev.preventDefault();
 		ev.stopPropagation();
 		this.selectStyle(styleCode);
+	}
+
+	onStyleFocus(): void {
+		if (this.selectionMode !== 'style') {
+			this.selectionMode = 'style';
+			this.query = '';
+		}
+		this.showStyleList = true;
+		this.updateFilteredResults();
+		this.cdr.detectChanges();
+	}
+
+	onStyleBlur(): void {
+		// Delay to allow option mousedown to commit before hiding.
+		setTimeout(() => {
+			this.showStyleList = false;
+			this.cdr.detectChanges();
+		}, 0);
+	}
+
+	onProfileFocus(): void {
+		if (this.selectionMode !== 'profile') {
+			this.selectionMode = 'profile';
+			this.query = '';
+		}
+		this.showProfileList = true;
+		this.updateFilteredResults();
+		this.cdr.detectChanges();
+	}
+
+	onProfileBlur(): void {
+		setTimeout(() => {
+			this.showProfileList = false;
+			this.cdr.detectChanges();
+		}, 0);
 	}
 
 	onProfileOptionMouseDown(profileName: string, ev: MouseEvent): void {

@@ -608,7 +608,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
      console.warn(logPrefix, 'Step 1 – Style codes: missing or failed. success:', styleResult?.success, '| count:', styleResult?.styleCodes?.length ?? 0, '| error:', styleResult?.error ?? 'none');
      this.separations = [];
      this.allTeamStyleCodes = [];
-     this.styleCatalogOptions = [];
+    // Keep existing Styles.xlsx catalog for Add Separation search.
      this.isLoadingSeparations = false;
      this.cdr.detectChanges();
      return;
@@ -681,7 +681,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
     console.error(logPrefix, 'Error loading separations:', err);
     this.separations = [];
     this.allTeamStyleCodes = [];
-   this.styleCatalogOptions = [];
+   // Keep existing Styles.xlsx catalog for Add Separation search.
     this.isLoadingSeparations = false;
     this.cdr.detectChanges();
    });
@@ -1228,7 +1228,8 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
    if (catalogResult?.success && Array.isArray(catalogResult.styles) && catalogResult.styles.length > 0) {
     this.styleCatalogOptions = catalogResult.styles.map((item: any) => ({
      styleCode: String(item?.styleCode || '').trim(),
-     profileName: String(item?.profileName || 'Unknown Profile').trim()
+    profileName: String(item?.profileName || 'Unknown Profile').trim(),
+    styleDesc: String(item?.styleDesc || '').trim()
     })).filter((item: AddSeparationDialogStyleOption) => !!item.styleCode);
     console.log('[Separations] Add dialog style catalog loaded from Styles.xlsx', {
      styleCatalogOptionsCount: this.styleCatalogOptions.length
@@ -1261,7 +1262,8 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
    const profileMap = profileResult?.success && profileResult?.profileMap ? profileResult.profileMap : {};
    this.styleCatalogOptions = styleCodes.map((styleCode: string) => ({
     styleCode,
-    profileName: String(profileMap[styleCode] || 'Unknown Profile').trim()
+    profileName: String(profileMap[styleCode] || 'Unknown Profile').trim(),
+    styleDesc: ''
    }));
    console.log('[Separations] Add dialog style catalog loaded from fallback flow', {
     styleCatalogOptionsCount: this.styleCatalogOptions.length

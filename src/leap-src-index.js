@@ -436,8 +436,12 @@ async function getProfileNamesFromExcel(styleCodes) {
   }
 
   const headerRow = data[0];
-  const styleCodeColIndex = headerRow.findIndex((col) => col === 'Style Code');
-  const profileNameColIndex = headerRow.findIndex((col) => col === 'Profile Name');
+  const normalizedHeaders = headerRow.map((col) => String(col || '').trim().toLowerCase());
+  const findHeaderIndex = (candidates) =>
+   normalizedHeaders.findIndex((header) => candidates.indexOf(header) >= 0);
+  const styleCodeColIndex = findHeaderIndex(['style code']);
+  const profileNameColIndex = findHeaderIndex(['profile name']);
+  const styleDescColIndex = findHeaderIndex(['style desc', 'style description', 'description']);
 
   if (styleCodeColIndex === -1 || profileNameColIndex === -1) {
    throw new Error('Required columns not found in Excel file');
@@ -603,12 +607,22 @@ async function getStylesCatalogFromExcel(explicitBasePath) {
   }
 
   const headerRow = data[0];
-  const styleCodeColIndex = headerRow.findIndex((col) => col === 'Style Code');
-  const profileNameColIndex = headerRow.findIndex((col) => col === 'Profile Name');
+  const normalizedHeaders = headerRow.map((col) => String(col || '').trim().toLowerCase());
+  const findHeaderIndex = (candidates) =>
+   normalizedHeaders.findIndex((header) => candidates.indexOf(header) >= 0);
+  const styleCodeColIndex = findHeaderIndex(['style code']);
+  const profileNameColIndex = findHeaderIndex(['profile name']);
+  const styleDescColIndex = findHeaderIndex(['style desc', 'style description', 'description']);
 
   if (styleCodeColIndex === -1) {
    throw new Error('Style Code column not found in Styles.xlsx');
   }
+  console.log('[StylesCatalog] Header mapping', {
+   styleCodeColIndex,
+   profileNameColIndex,
+   styleDescColIndex,
+   headers: headerRow
+  });
 
   const styleMap = new Map();
   for (let row = 1; row < data.length; row++) {
@@ -622,10 +636,15 @@ async function getStylesCatalogFromExcel(explicitBasePath) {
     profileNameColIndex >= 0 && rowData[profileNameColIndex] != null
      ? String(rowData[profileNameColIndex]).trim()
      : '';
+   const styleDesc =
+    styleDescColIndex >= 0 && rowData[styleDescColIndex] != null
+     ? String(rowData[styleDescColIndex]).trim()
+     : '';
 
    styleMap.set(styleCode, {
     styleCode,
-    profileName: profileName || 'Unknown Profile'
+    profileName: profileName || 'Unknown Profile',
+    styleDesc
    });
   }
 

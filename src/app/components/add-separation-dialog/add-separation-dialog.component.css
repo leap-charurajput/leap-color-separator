@@ -70,6 +70,7 @@
 
 .add-separation-modal-input-wrap {
 	width: 100%;
+	position: relative;
 }
 
 .add-separation-modal-input:focus {
@@ -78,13 +79,16 @@
 }
 
 .add-separation-modal-list {
-	position: relative;
-	margin-top: 4px;
+	position: absolute;
+	top: calc(100% + 4px);
+	left: 0;
+	right: 0;
 	max-height: 120px;
 	overflow-y: auto;
 	border: 1px solid #555;
 	border-radius: 4px;
 	background: #2f2f2f;
+	z-index: 5;
 }
 
 .add-separation-modal-list-item {
@@ -97,7 +101,7 @@
 	justify-content: space-between;
 	gap: 10px;
 	text-align: left;
-	padding: 5px 8px;
+	padding: 7px 8px;
 	cursor: pointer;
 	font-size: 11px;
 	font-family: 'Adobe Clean', sans-serif;
@@ -117,6 +121,12 @@
 
 .add-separation-modal-list-item .style-code {
 	font-weight: 600;
+	font-variant-numeric: tabular-nums;
+}
+
+.add-separation-modal-list-item .style-code .profile-inline {
+	color: #b3b3b3;
+	font-weight: 400;
 }
 
 .add-separation-modal-list-item .profile-name {

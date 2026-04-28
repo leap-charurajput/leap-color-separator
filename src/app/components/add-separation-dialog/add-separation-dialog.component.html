@@ -19,11 +19,13 @@
 						type="text"
 						[value]="selectionMode === 'style' ? (query || selectedStyleCode) : selectedStyleCode"
 						(input)="onStyleInput($event)"
+						(focus)="onStyleFocus()"
+						(blur)="onStyleBlur()"
 						placeholder="Type to search Styles.xlsx"
 						class="add-separation-modal-input"
-						[disabled]="isLoading || selectionMode !== 'style'"
+						[disabled]="isLoading"
 					/>
-					<div *ngIf="selectionMode === 'style' && hasTypedQuery" class="add-separation-modal-list">
+					<div *ngIf="selectionMode === 'style' && showStyleList" class="add-separation-modal-list">
 						<div *ngIf="isLoading" class="add-separation-modal-empty">Loading styles...</div>
 						<div *ngIf="!isLoading && filteredStyles.length === 0" class="add-separation-modal-empty">
 							No matching styles
@@ -35,8 +37,14 @@
 							[class.is-selected]="item.styleCode === selectedStyleCode"
 							(mousedown)="onStyleOptionMouseDown(item.styleCode, $event)"
 						>
-							<span class="style-code">{{ item.styleCode }}</span>
-							<span class="profile-name">{{ item.profileName || 'Unknown Profile' }}</span>
+							<span
+								class="style-code"
+								[attr.title]="item.styleCode + ' (' + (item.profileName || 'Unknown Profile') + ')'"
+							>
+								>{{ item.styleCode }}
+								<span class="profile-inline">({{ item.profileName || 'Unknown Profile' }})</span></span
+							>
+							<span class="profile-name" [attr.title]="item.styleDesc || ''">{{ item.styleDesc || '' }}</span>
 						</button>
 					</div>
 				</div>
@@ -58,11 +66,13 @@
 						type="text"
 						[value]="selectionMode === 'profile' ? (query || selectedProfileName) : selectedProfileName"
 						(input)="onProfileInput($event)"
+						(focus)="onProfileFocus()"
+						(blur)="onProfileBlur()"
 						placeholder="Type to search Profiles"
 						class="add-separation-modal-input"
-						[disabled]="isLoading || selectionMode !== 'profile'"
+						[disabled]="isLoading"
 					/>
-					<div *ngIf="selectionMode === 'profile' && hasTypedQuery" class="add-separation-modal-list">
+					<div *ngIf="selectionMode === 'profile' && showProfileList" class="add-separation-modal-list">
 						<div *ngIf="isLoading" class="add-separation-modal-empty">Loading profiles...</div>
 						<div *ngIf="!isLoading && filteredProfiles.length === 0" class="add-separation-modal-empty">
 							No matching profiles
