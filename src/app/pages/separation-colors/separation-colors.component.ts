@@ -1176,12 +1176,31 @@ private getProfileBlockerMesh(profileInfo?: any): string {
    this.handleEditSeparation(rowId);
   } else if (item.startsWith('Add second hit')) {
    console.log('[HIT THE DROPDOWN]', rowId);
-   this.handleAddSecondHit(rowId);
+   const menuColorName = this.extractSecondHitColorName(item);
+   this.handleAddSecondHit(rowId, menuColorName);
   }
  }
 
- handleAddSecondHit(rowId: number): void {
-  const originalRow = this.colorRows.find((row) => row.id === rowId);
+ private extractSecondHitColorName(menuItem: string): string | null {
+  const prefix = 'Add second hit of ';
+  if (!menuItem || menuItem.indexOf(prefix) !== 0) {
+   return null;
+  }
+  const extracted = menuItem.substring(prefix.length).trim();
+  return extracted || null;
+ }
+
+ handleAddSecondHit(rowId: number, colorNameFromMenu?: string | null): void {
+  let originalRow: ColorRow | undefined;
+  if (colorNameFromMenu) {
+   const normalizedMenuName = colorNameFromMenu.trim().toLowerCase();
+   originalRow = this.colorRows.find(
+    (row) => !row.removed && (row.colorName || '').trim().toLowerCase() === normalizedMenuName
+   );
+  }
+  if (!originalRow) {
+   originalRow = this.colorRows.find((row) => row.id === rowId);
+  }
   if (!originalRow) return;
 
   const duplicateName = this.getUniqueSecondHitName(originalRow.colorName);
@@ -1209,7 +1228,17 @@ private getProfileBlockerMesh(profileInfo?: any): string {
   this.controller
    .generateUnderbaseLayer(originalRow.colorName, duplicateName)
    .then((res: string) => {
-    console.log('[SEPARATION] Second hit underbase created:', res);
+    console.log('[SEPARATION] Second hit request:', {
+     sourceColor: originalRow!.colorName,
+     duplicateColor: duplicateName,
+     rowId: rowId
+    });
+    try {
+     const parsed = res ? JSON.parse(res) : null;
+     console.log('[SEPARATION] Second hit underbase response:', parsed || res);
+    } catch (_e) {
+     console.log('[SEPARATION] Second hit underbase created:', res);
+    }
    })
    .catch((err: any) => {
     console.error('[SEPARATION] Failed to create second hit underbase', err);

@@ -16,7 +16,7 @@
 
     <div *ngIf="selectedSection === 'General Settings'" class="general-settings-content">
       <!-- Environment selector -->
-      <div class="settings-dropdown-wrapper">
+      <div class="settings-field settings-field-inline-input">
         <label class="settings-field-label">Version</label>
         <app-dropdown [value]="selectedEnvironmentKey" [items]="environmentKeys"
           (onChange)="onEnvironmentChange($event)" placeholder="Select environment..."></app-dropdown>
@@ -48,6 +48,13 @@
         <label class="settings-field-label">PPD Name</label>
         <input type="text" class="settings-field-input" [(ngModel)]="ppdName"
           (ngModelChange)="saveGeneralSettings()" placeholder="IBlock v2" />
+      </div>
+
+      <div class="settings-field settings-field-inline-input">
+        <label class="settings-field-label">Seps Template</label>
+        <app-dropdown [value]="sepsTemplateFileName" [items]="sepsTemplateFiles"
+          (onChange)="sepsTemplateFileName = $event; saveGeneralSettings()"
+          placeholder="Select template..."></app-dropdown>
       </div>
 
       <div class="settings-field">

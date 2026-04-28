@@ -584,6 +584,14 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
   return merged;
  }
 
+ private buildSeparationsFromXmpGroups(): Separation[] {
+  const fallbackList = this.mergeSeparationGroups([], this.xmpSeparationGroups);
+  return fallbackList.map((item, index) => ({
+   ...item,
+   id: index + 1
+  }));
+ }
+
  loadSeparations(): void {
   const logPrefix = '[Separations] Profile generation:';
   if (this.isRunningInBrowser) {
@@ -592,8 +600,11 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 
   if (!this.teamCode || this.teamCode === '') {
    console.log(logPrefix, 'Skipped – missing teamCode:', this.teamCode || '(empty)');
-   this.separations = [];
+   this.separations = this.buildSeparationsFromXmpGroups();
    this.allTeamStyleCodes = [];
+   if (this.separations.length > 0) {
+    console.log(logPrefix, 'Fallback – using XMP separation groups only:', this.separations);
+   }
    this.cdr.detectChanges();
    return;
   }
@@ -606,8 +617,11 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
    .then((styleResult) => {
     if (!styleResult.success || !styleResult.styleCodes || styleResult.styleCodes.length === 0) {
      console.warn(logPrefix, 'Step 1 – Style codes: missing or failed. success:', styleResult?.success, '| count:', styleResult?.styleCodes?.length ?? 0, '| error:', styleResult?.error ?? 'none');
-     this.separations = [];
+    this.separations = this.buildSeparationsFromXmpGroups();
      this.allTeamStyleCodes = [];
+    if (this.separations.length > 0) {
+     console.log(logPrefix, 'Fallback – rendering XMP separation groups because style codes are unavailable:', this.separations);
+    }
     // Keep existing Styles.xlsx catalog for Add Separation search.
      this.isLoadingSeparations = false;
      this.cdr.detectChanges();
@@ -621,12 +635,15 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
     return this.controller.getProfileNamesFromExcel(styleCodes).then((profileResult) => {
      if (!profileResult.success || !profileResult.profileMap) {
       console.warn(logPrefix, 'Step 2 – Profile names: missing or failed. success:', profileResult?.success, '| error:', profileResult?.error ?? 'none');
-      this.separations = [];
+     this.separations = this.buildSeparationsFromXmpGroups();
       // Keep style search usable in Add Separation even when profile mapping fails.
       this.styleCatalogOptions = styleCodes.map((styleCode: string) => ({
        styleCode: String(styleCode || '').trim(),
        profileName: 'Unknown Profile'
       }));
+     if (this.separations.length > 0) {
+      console.log(logPrefix, 'Fallback – rendering XMP separation groups because profile mapping is unavailable:', this.separations);
+     }
       this.isLoadingSeparations = false;
       this.cdr.detectChanges();
       return;
@@ -679,8 +696,11 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
    })
    .catch((err) => {
     console.error(logPrefix, 'Error loading separations:', err);
-    this.separations = [];
+   this.separations = this.buildSeparationsFromXmpGroups();
     this.allTeamStyleCodes = [];
+   if (this.separations.length > 0) {
+    console.log(logPrefix, 'Fallback – rendering XMP separation groups after error:', this.separations);
+   }
    // Keep existing Styles.xlsx catalog for Add Separation search.
     this.isLoadingSeparations = false;
     this.cdr.detectChanges();
@@ -746,12 +766,15 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 
    let artistName = '';
    let artistInitials = '';
+   let sepsTemplateFileName = '';
    if (!this.isRunningInBrowser) {
     try {
      const gs = await this.controller.loadGeneralSettings();
      if (gs?.success && gs?.data) {
       artistName = gs.data.artistName != null ? String(gs.data.artistName) : '';
       artistInitials = gs.data.artistInitials != null ? String(gs.data.artistInitials) : '';
+      sepsTemplateFileName =
+       gs.data.sepsTemplateFileName != null ? String(gs.data.sepsTemplateFileName).trim() : '';
      }
     } catch (err) { }
    }
@@ -872,7 +895,9 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
    }
 
    console.log('[SEPARATIONS][UB_DEBUG] performSeparation payload profileMetadata:', profileMetadata);
-   return this.controller.performSeparation(graphicName, styleCodes, profileMetadata);
+   return this.controller.performSeparation(graphicName, styleCodes, profileMetadata, {
+    sepsTemplateFileName
+   });
   };
 
   getProfileCodeAndCreateSeparation()
@@ -1217,7 +1242,6 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
  }
 
  private async ensureStyleCatalogOptionsLoaded(): Promise<void> {
-  if (this.styleCatalogOptions.length > 0) return;
   if (this.isRunningInBrowser) return;
 
   this.isLoadingAddSeparationDialog = true;

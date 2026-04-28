@@ -201,6 +201,135 @@ function findExcelFileInBatchFolder(documentPath) {
  }
 }
 
+function findTeamJsonFileNearDocument(documentPath, teamCode) {
+ try {
+  if (!documentPath || !fs.existsSync(documentPath)) {
+   return null;
+  }
+
+  const extractTeamCodeFromJson = (parsedJson) => {
+   if (!parsedJson || typeof parsedJson !== 'object') return '';
+   const direct = parsedJson.TeamCode;
+   const fromTeamInfo = parsedJson.team_info && parsedJson.team_info.TeamCode;
+   const value = direct || fromTeamInfo || '';
+   return String(value || '').trim().toUpperCase();
+  };
+
+  const resolveJsonFromFolder = (jsonFolderPath, teamCode) => {
+   if (!fs.existsSync(jsonFolderPath) || !fs.statSync(jsonFolderPath).isDirectory()) {
+    return null;
+   }
+   const jsonFiles = fs
+    .readdirSync(jsonFolderPath)
+    .filter((entry) => entry.toLowerCase().endsWith('.json'))
+    .sort();
+   if (!jsonFiles.length) {
+    return null;
+   }
+   if (teamCode) {
+    const normalizedTeamCode = String(teamCode).trim().toUpperCase();
+    const teamSpecific = jsonFiles.find(
+     (file) => String(file).toUpperCase().startsWith(normalizedTeamCode + '_')
+    );
+    if (teamSpecific) {
+     return path.join(jsonFolderPath, teamSpecific);
+    }
+
+    // Fallback: match by JSON content TeamCode when filename convention differs.
+    for (let i = 0; i < jsonFiles.length; i++) {
+     const jsonFile = jsonFiles[i];
+     const jsonPath = path.join(jsonFolderPath, jsonFile);
+     try {
+      const raw = fs.readFileSync(jsonPath, 'utf8');
+      const parsed = JSON.parse(raw);
+      const jsonTeamCode = extractTeamCodeFromJson(parsed);
+      if (jsonTeamCode && jsonTeamCode === normalizedTeamCode) {
+       return jsonPath;
+      }
+     } catch (jsonReadError) {}
+    }
+
+    // Do not silently pick another team's JSON when a team code was explicitly provided.
+    return null;
+   }
+   return path.join(jsonFolderPath, jsonFiles[0]);
+  };
+
+  const normalizedTeamCode = String(teamCode || '').trim();
+  const aiFolderPath = path.dirname(documentPath);
+  const preferredJsonFolder = path.join(aiFolderPath, 'JSON');
+
+  // Optimized path: JSON folder is usually at active document parent (AI folder) level.
+  const preferredJsonFile = resolveJsonFromFolder(preferredJsonFolder, normalizedTeamCode);
+  if (preferredJsonFile) {
+   return preferredJsonFile;
+  }
+
+  // Fallback for older/variant structures: walk upward to locate JSON.
+  let currentDir = path.dirname(aiFolderPath);
+  while (currentDir) {
+   const fallbackJsonFile = resolveJsonFromFolder(path.join(currentDir, 'JSON'), normalizedTeamCode);
+   if (fallbackJsonFile) {
+    return fallbackJsonFile;
+   }
+   const parentDir = path.dirname(currentDir);
+   if (!parentDir || parentDir === currentDir) break;
+   currentDir = parentDir;
+  }
+
+  return null;
+ } catch (error) {
+  return null;
+ }
+}
+
+function getBatchExcelRecordsFromJson(documentPath, teamCode) {
+ try {
+  const jsonPath = findTeamJsonFileNearDocument(documentPath, teamCode);
+  if (!jsonPath || !fs.existsSync(jsonPath)) {
+   return null;
+  }
+
+  const raw = fs.readFileSync(jsonPath, 'utf8');
+  const parsed = JSON.parse(raw);
+  const records = parsed && parsed.batch_excel_records ? parsed.batch_excel_records : null;
+  if (!records || typeof records !== 'object') {
+   return null;
+  }
+
+  console.log(
+   '[Separations] Using batch_excel_records JSON fallback from:',
+   jsonPath,
+   '| teamCode:',
+   String(teamCode || '').trim() || '(missing)'
+  );
+  return records;
+ } catch (error) {
+  console.log('[Separations] Failed to parse batch_excel_records JSON fallback:', error?.message ?? error);
+  return null;
+ }
+}
+
+function getUniqueValuesFromBatchRecords(records, columnName) {
+ const rawValue = records ? records[columnName] : null;
+ if (rawValue == null) {
+  return [];
+ }
+
+ const values = Array.isArray(rawValue) ? rawValue : [rawValue];
+ const unique = new Set();
+
+ values.forEach((entry) => {
+  if (entry == null) return;
+  const text = String(entry).trim();
+  if (text !== '') {
+   unique.add(text);
+  }
+ });
+
+ return Array.from(unique).sort();
+}
+
 async function getColorCodesFromExcel(teamCode, documentPath) {
  try {
   if (!teamCode) {
@@ -208,29 +337,39 @@ async function getColorCodesFromExcel(teamCode, documentPath) {
   }
 
   let excelFilePath;
+  let batchRecordsFromJson = null;
   if (documentPath) {
    excelFilePath = findExcelFileInBatchFolder(documentPath);
    if (!excelFilePath) {
-    throw new Error('Excel file not found in BATCH folder');
+    batchRecordsFromJson = getBatchExcelRecordsFromJson(documentPath, teamCode);
+    if (!batchRecordsFromJson) {
+     throw new Error('Excel file not found in BATCH folder');
+    }
    }
-   if (!fs.existsSync(excelFilePath)) {
+   if (excelFilePath && !fs.existsSync(excelFilePath)) {
     throw new Error(`Excel file does not exist at: ${excelFilePath}`);
    }
-   try {
-    fs.accessSync(excelFilePath, fs.constants.R_OK);
-   } catch (accessError) {
-    throw new Error(`Cannot access Excel file: ${excelFilePath}`);
-   }
-   try {
-    const stats = fs.statSync(excelFilePath);
-    if (stats.size === 0) {
-     throw new Error(`Excel file is empty: ${excelFilePath}`);
+   if (excelFilePath) {
+    try {
+     fs.accessSync(excelFilePath, fs.constants.R_OK);
+    } catch (accessError) {
+     throw new Error(`Cannot access Excel file: ${excelFilePath}`);
     }
-   } catch (statsError) {
-    throw new Error(`Cannot get file stats for Excel file: ${excelFilePath}`);
+    try {
+     const stats = fs.statSync(excelFilePath);
+     if (stats.size === 0) {
+      throw new Error(`Excel file is empty: ${excelFilePath}`);
+     }
+    } catch (statsError) {
+     throw new Error(`Cannot get file stats for Excel file: ${excelFilePath}`);
+    }
    }
   } else {
    throw new Error('Document path not provided');
+  }
+
+  if (!excelFilePath && batchRecordsFromJson) {
+   return getUniqueValuesFromBatchRecords(batchRecordsFromJson, 'Style Color Code');
   }
 
   let workbook;
@@ -302,14 +441,22 @@ async function getStyleCodesFromExcel(teamCode, documentPath) {
   }
 
   let excelFilePath;
+  let batchRecordsFromJson = null;
   if (documentPath) {
    excelFilePath = findExcelFileInBatchFolder(documentPath);
    if (!excelFilePath) {
-    throw new Error('Excel file not found in BATCH folder');
+    batchRecordsFromJson = getBatchExcelRecordsFromJson(documentPath, teamCode);
+    if (!batchRecordsFromJson) {
+     throw new Error('Excel file not found in BATCH folder');
+    }
    }
   } else {
    console.log('[Separations] getStyleCodesFromExcel – document path not provided');
    throw new Error('Document path not provided');
+  }
+
+  if (!excelFilePath && batchRecordsFromJson) {
+   return getUniqueValuesFromBatchRecords(batchRecordsFromJson, 'Lineup Style Code');
   }
 
   let workbook;
@@ -439,9 +586,9 @@ async function getProfileNamesFromExcel(styleCodes) {
   const normalizedHeaders = headerRow.map((col) => String(col || '').trim().toLowerCase());
   const findHeaderIndex = (candidates) =>
    normalizedHeaders.findIndex((header) => candidates.indexOf(header) >= 0);
-  const styleCodeColIndex = findHeaderIndex(['style code']);
-  const profileNameColIndex = findHeaderIndex(['profile name']);
-  const styleDescColIndex = findHeaderIndex(['style desc', 'style description', 'description']);
+  const styleCodeColIndex = findHeaderIndex(['style code', 'lineup style code']);
+  const profileNameColIndex = findHeaderIndex(['profile name', 'profile', 'lineup profile name']);
+  const styleDescColIndex = findHeaderIndex(['style desc', 'style description', 'description', 'style name']);
 
   if (styleCodeColIndex === -1 || profileNameColIndex === -1) {
    throw new Error('Required columns not found in Excel file');
@@ -774,32 +921,52 @@ async function getColorByCodeFromLookup(colorCode) {
  }
 }
 
-async function getGraphicPlacementOptions(documentPath) {
+async function getGraphicPlacementOptions(documentPath, teamCode) {
  try {
   let excelFilePath;
+  let batchRecordsFromJson = null;
   if (documentPath) {
    excelFilePath = findExcelFileInBatchFolder(documentPath);
    if (!excelFilePath) {
-    throw new Error('Excel file not found in BATCH folder');
+    batchRecordsFromJson = getBatchExcelRecordsFromJson(documentPath, teamCode);
+    if (!batchRecordsFromJson) {
+     throw new Error('Excel file not found in BATCH folder');
+    }
    }
-   if (!fs.existsSync(excelFilePath)) {
+   if (excelFilePath && !fs.existsSync(excelFilePath)) {
     throw new Error(`Excel file does not exist at: ${excelFilePath}`);
    }
-   try {
-    fs.accessSync(excelFilePath, fs.constants.R_OK);
-   } catch (accessError) {
-    throw new Error(`Cannot access Excel file: ${excelFilePath}`);
-   }
-   try {
-    const stats = fs.statSync(excelFilePath);
-    if (stats.size === 0) {
-     throw new Error(`Excel file is empty: ${excelFilePath}`);
+   if (excelFilePath) {
+    try {
+     fs.accessSync(excelFilePath, fs.constants.R_OK);
+    } catch (accessError) {
+     throw new Error(`Cannot access Excel file: ${excelFilePath}`);
     }
-   } catch (statsError) {
-    throw new Error(`Cannot get file stats for Excel file: ${excelFilePath}`);
+    try {
+     const stats = fs.statSync(excelFilePath);
+     if (stats.size === 0) {
+      throw new Error(`Excel file is empty: ${excelFilePath}`);
+     }
+    } catch (statsError) {
+     throw new Error(`Cannot get file stats for Excel file: ${excelFilePath}`);
+    }
    }
   } else {
    throw new Error('Document path not provided');
+  }
+
+  if (!excelFilePath && batchRecordsFromJson) {
+   const placementsRaw = getUniqueValuesFromBatchRecords(batchRecordsFromJson, 'Graphic Placement');
+   const placementSet = new Set();
+   placementsRaw.forEach((value) => {
+    value.split(',').forEach((item) => {
+     const trimmed = String(item || '').trim();
+     if (trimmed) {
+      placementSet.add(trimmed);
+     }
+    });
+   });
+   return Array.from(placementSet).sort();
   }
 
   let workbook;
@@ -1361,7 +1528,7 @@ class Leap {
   }
  }
 
- async getGraphicPlacementOptions(documentPath) {
+ async getGraphicPlacementOptions(documentPath, teamCode) {
   try {
    if (!documentPath) {
     try {
@@ -1376,7 +1543,19 @@ class Leap {
     }
    }
 
-   const placements = await getGraphicPlacementOptions(documentPath);
+   if (!teamCode) {
+    try {
+     const templateInfoResult = await scriptLoader.evalScript('handleGetTemplateInfo', {});
+     const templateInfoData = JSON.parse(templateInfoResult);
+     if (templateInfoData?.success && templateInfoData?.data?.teamCode) {
+      teamCode = String(templateInfoData.data.teamCode).trim();
+     }
+    } catch (templateError) {
+     this.log(`Could not get team code from template info: ${templateError.message}`);
+    }
+   }
+
+   const placements = await getGraphicPlacementOptions(documentPath, teamCode);
    return {
     success: true,
     placements: placements

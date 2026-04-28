@@ -391,8 +391,19 @@ export class ControllerService {
   const safeNew = newNameLayer.replace(/'/g, "\\'");
 
   const script = `
+		(function() {
 		function duplicateSeparatedArtLayer(sourceLayerName, newNameLayer) {
 		  var doc = app.activeDocument;
+		  var debug = {
+			sourceLayerName: sourceLayerName,
+			newLayerName: newNameLayer,
+			targetSwatchFound: false,
+			targetSpotFound: false,
+			fillAssignments: 0,
+			strokeAssignments: 0,
+			textFillAssignments: 0,
+			textStrokeAssignments: 0
+		  };
 	
 		  var CONSTANTS = {
 			LAYER_NAMES: {
@@ -416,12 +427,32 @@ export class ControllerService {
 	
 		  var newLayer = separatedArtLayer.layers.add();
 		  newLayer.name = newNameLayer;
-	
+
+		  function getSwatchByName(name) {
+        try {
+          return doc.swatches.getByName(name);
+        } catch (e) {
+          return null;
+        }
+		  }
+
+		  function duplicateSpotSwatchIfNeeded(sourceName, targetName) {
+      var sourceSwatch = getSwatchByName(sourceName);
+      var targetSwatch = doc.spots.add();
+      targetSwatch.name = targetName;
+      targetSwatch.colorType = ColorModel.SPOT;
+      targetSwatch.color = sourceSwatch.color.spot.color;
+      return targetSwatch;
+		  }
+
+		  var targetSwatch = duplicateSpotSwatchIfNeeded(sourceLayerName, newNameLayer);
+		  
+
 		  (function copyLayer(src, dst) {
 			for (var i = src.pageItems.length - 1; i >= 0; i--) {
 			  src.pageItems[i].duplicate(dst, ElementPlacement.PLACEATBEGINNING);
 			}
-	
+
 			for (var j = 0; j < src.layers.length; j++) {
 			  var srcSub = src.layers[j];
 			  var dstSub = dst.layers.add();
@@ -429,11 +460,65 @@ export class ControllerService {
 			  copyLayer(srcSub, dstSub);
 			}
 		  })(sourceLayer, newLayer);
-	
-		  return 'OK';
+
+		  // Simpler recolor flow: select all items in duplicated layer, then apply target swatch.
+    try{
+		  app.activeDocument.selection = null;
+    app.redraw();
+      app.activeDocument.activeLayer = newLayer;
+      app.activeDocument.activeLayer.hasSelectedArtwork = true;
+      app.redraw();
+      var newColor = app.activeDocument.swatches.getByName(newNameLayer).color;
+      var selectedItems = app.activeDocument.selection || [];
+
+      function applyColorToItem(item, color) {
+        if (!item || !color) return;
+        try {
+          if (item.typename === 'PathItem') {
+            if (item.filled) {
+              item.fillColor = color;
+            }
+            if (item.stroked) {
+              item.strokeColor = color;
+            }
+            return;
+          }
+          if (item.typename === 'CompoundPathItem') {
+            for (var cp = 0; cp < item.pathItems.length; cp++) {
+              applyColorToItem(item.pathItems[cp], color);
+            }
+            return;
+          }
+          if (item.typename === 'GroupItem') {
+            for (var gi = 0; gi < item.pageItems.length; gi++) {
+              applyColorToItem(item.pageItems[gi], color);
+            }
+            return;
+          }
+          if (item.typename === 'TextFrame' && item.textRange && item.textRange.characterAttributes) {
+            try { item.textRange.characterAttributes.fillColor = color; } catch (_e1) {}
+            try { item.textRange.characterAttributes.strokeColor = color; } catch (_e2) {}
+          }
+        } catch (_e) {}
+      }
+
+      for (var si = 0; si < selectedItems.length; si++) {
+        applyColorToItem(selectedItems[si], newColor);
+      }
+		  app.redraw();
+      app.activeDocument.selection = null;
+	}catch(e){
+ alert('Error: ' + e.message);
+	}
+		  return JSON.stringify({ success: true, debug: debug });
 		}
-	
-		duplicateSeparatedArtLayer('${safeSource}', '${safeNew}');
+
+		try {
+		  return duplicateSeparatedArtLayer('${safeSource}', '${safeNew}');
+		} catch (e) {
+		  return JSON.stringify({ success: false, error: e && e.message ? e.message : String(e) });
+		}
+		})();
 	  `;
 
   try {
@@ -535,12 +620,18 @@ export class ControllerService {
   });
  }
 
- getGraphicPlacementOptions(): Promise<any> {
+ getGraphicPlacementOptions(teamCode?: string, documentPath?: string): Promise<any> {
   this.log('getGraphicPlacementOptions called');
+  console.log(
+   '[Separations] getGraphicPlacementOptions – teamCode:',
+   teamCode ?? '(missing)',
+   '| documentPath:',
+   documentPath ?? '(missing)'
+  );
 
   return this.ensureSession().then(() => {
    return (window as any).leap
-    .getGraphicPlacementOptions()
+    .getGraphicPlacementOptions(documentPath, teamCode)
     .then((result: any) => {
      return result;
     })
@@ -1254,7 +1345,7 @@ export class ControllerService {
   graphicName: string,
   styleCodes: string[] = [],
   profileMetadata: any = null,
-  options?: { recreateInActiveDoc?: boolean }
+  options?: { recreateInActiveDoc?: boolean; sepsTemplateFileName?: string }
  ): Promise<any> {
   this.log(
    'performSeparation called for: ' +
@@ -1270,6 +1361,9 @@ export class ControllerService {
    };
    if (options?.recreateInActiveDoc === true) {
     params.recreateInActiveDoc = true;
+   }
+   if (options?.sepsTemplateFileName) {
+    params.sepsTemplateFileName = String(options.sepsTemplateFileName);
    }
 
    return (window as any).leap
@@ -1415,7 +1509,8 @@ export class ControllerService {
       artistInitials: '',
       ppdName: 'IBlock v2',
       chokeStrokeColorSwatch: '',
-      koDarkColorNames: 'Black, PANTONE PROCESS BLACK C'
+      koDarkColorNames: 'Black, PANTONE PROCESS BLACK C',
+      sepsTemplateFileName: 'SEP-GRID-TEMPLATE.ai'
      }
     });
     return;
@@ -1443,7 +1538,8 @@ export class ControllerService {
        artistInitials: '',
        ppdName: 'IBlock v2',
        chokeStrokeColorSwatch: '',
-       koDarkColorNames: 'Black, PANTONE PROCESS BLACK C'
+       koDarkColorNames: 'Black, PANTONE PROCESS BLACK C',
+       sepsTemplateFileName: 'SEP-GRID-TEMPLATE.ai'
       }
      });
     }
@@ -1457,7 +1553,8 @@ export class ControllerService {
       artistInitials: '',
       ppdName: 'IBlock v2',
       chokeStrokeColorSwatch: '',
-      koDarkColorNames: 'Black, PANTONE PROCESS BLACK C'
+      koDarkColorNames: 'Black, PANTONE PROCESS BLACK C',
+      sepsTemplateFileName: 'SEP-GRID-TEMPLATE.ai'
      }
     });
    }
@@ -1472,6 +1569,7 @@ export class ControllerService {
   ppdName?: string;
   chokeStrokeColorSwatch?: string;
   koDarkColorNames?: string;
+  sepsTemplateFileName?: string;
  }): Promise<{ success: boolean; error?: string }> {
   return new Promise((resolve) => {
    const cep = (window as any).cep;
@@ -1499,6 +1597,38 @@ export class ControllerService {
     resolve({ success: false, error: 'Error writing settings file: ' + writeResult.err });
    }
   });
+ }
+
+ getSepsTemplateFiles(): Promise<{ success: boolean; files: string[]; error?: string }> {
+  return this.getLeapServerDataPath()
+   .then((basePath) => {
+    const normalizedBasePath = String(basePath || '').trim().replace(/[\/\\]+$/, '');
+    if (!normalizedBasePath) {
+     return { success: false, files: [], error: 'LEAP server path is not configured' };
+    }
+
+    const req = (window as any)?.cep_node?.require;
+    if (!req) {
+     return { success: false, files: [], error: 'CEP node runtime is unavailable' };
+    }
+
+    const fs = req('fs');
+    const path = req('path');
+    const templatesDir = path.join(normalizedBasePath, 'SETTINGS', 'LEAP_SEPS', 'Templates');
+    if (!fs.existsSync(templatesDir)) {
+     return { success: false, files: [], error: 'Templates folder not found: ' + templatesDir };
+    }
+
+    const aiFiles = (fs.readdirSync(templatesDir) as string[])
+     .filter((name: string) => /\.ai$/i.test(name))
+     .sort((a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+    return { success: true, files: aiFiles };
+   })
+   .catch((err: any) => ({
+    success: false,
+    files: [],
+    error: err?.message || String(err)
+   }));
  }
 
  hasSession(): boolean {

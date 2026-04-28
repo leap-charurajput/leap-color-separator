@@ -46,6 +46,8 @@ export class SettingsComponent implements OnInit, OnChanges {
  ppdName = 'IBlock v2';
  chokeStrokeColorSwatch = '';
  koDarkColorNames = 'Black, PANTONE PROCESS BLACK C';
+ sepsTemplateFileName = 'SEP-GRID-TEMPLATE.ai';
+ sepsTemplateFiles: string[] = [];
  selectedSection = 'Separation Profiles';
 
  // 🔑 Environment config
@@ -78,6 +80,7 @@ export class SettingsComponent implements OnInit, OnChanges {
   this.loadProfiles();
   this.loadLeapServerPath();
   this.loadGeneralSettings();
+  this.loadSepsTemplateFiles();
 
   try {
    const result = await this.controller.getAppVersion();
@@ -130,6 +133,10 @@ export class SettingsComponent implements OnInit, OnChanges {
      result.data.koDarkColorNames !== undefined && result.data.koDarkColorNames !== null
       ? String(result.data.koDarkColorNames)
       : 'Black, PANTONE PROCESS BLACK C';
+    this.sepsTemplateFileName =
+     result.data.sepsTemplateFileName != null && String(result.data.sepsTemplateFileName).trim() !== ''
+      ? String(result.data.sepsTemplateFileName).trim()
+      : 'SEP-GRID-TEMPLATE.ai';
    }
   });
  }
@@ -142,7 +149,8 @@ export class SettingsComponent implements OnInit, OnChanges {
    artistInitials: this.artistInitials,
    ppdName: this.ppdName,
    chokeStrokeColorSwatch: this.chokeStrokeColorSwatch,
-   koDarkColorNames: this.koDarkColorNames
+   koDarkColorNames: this.koDarkColorNames,
+   sepsTemplateFileName: this.sepsTemplateFileName
   };
   this.controller.saveGeneralSettings(settings).then((result) => {
    if (!result.success) {
@@ -154,6 +162,7 @@ export class SettingsComponent implements OnInit, OnChanges {
  loadLeapServerPath(): void {
   this.controller.getLeapServerDataPath().then((path) => {
    this.leapServerPath = path;
+   this.loadSepsTemplateFiles();
   });
  }
 
@@ -161,8 +170,26 @@ export class SettingsComponent implements OnInit, OnChanges {
   this.controller.selectAndSaveLeapSettings().then((result) => {
    if (result.success && result.path) {
     this.leapServerPath = result.path;
+    this.loadSepsTemplateFiles();
    } else if (!result.cancelled) {
     // console.error('Error updating LEAP Data path', result.error);
+   }
+  });
+ }
+
+ loadSepsTemplateFiles(): void {
+  this.controller.getSepsTemplateFiles().then((result) => {
+   if (result.success && Array.isArray(result.files)) {
+    this.sepsTemplateFiles = result.files;
+    if (this.sepsTemplateFiles.length > 0) {
+     const hasSavedSelection = this.sepsTemplateFiles.indexOf(this.sepsTemplateFileName) >= 0;
+     if (!hasSavedSelection) {
+      this.sepsTemplateFileName = this.sepsTemplateFiles[0];
+      this.saveGeneralSettings();
+     }
+    }
+   } else {
+    this.sepsTemplateFiles = [];
    }
   });
  }

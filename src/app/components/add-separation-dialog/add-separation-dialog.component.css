@@ -97,9 +97,9 @@
 	border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 	background: transparent;
 	color: inherit;
-	display: flex;
-	justify-content: space-between;
-	gap: 10px;
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+	column-gap: 14px;
 	text-align: left;
 	padding: 7px 8px;
 	cursor: pointer;
@@ -122,6 +122,9 @@
 .add-separation-modal-list-item .style-code {
 	font-weight: 600;
 	font-variant-numeric: tabular-nums;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .add-separation-modal-list-item .style-code .profile-inline {
@@ -131,6 +134,12 @@
 
 .add-separation-modal-list-item .profile-name {
 	opacity: 0.85;
+	justify-self: end;
+	text-align: right;
+	width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .add-separation-modal-empty {

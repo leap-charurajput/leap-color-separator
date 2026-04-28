@@ -1285,6 +1285,10 @@ input[type=text].smallerInput {
 	transform: rotate(180deg);
 }
 
+.settings-field.settings-field-inline-input app-dropdown .dropDownWrap {
+	width: 260px;
+}
+
 /* Styles for dropdown when used in CDK Overlay */
 .overlay-dropdown-list {
 	display: block !important;
