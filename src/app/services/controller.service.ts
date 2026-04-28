@@ -522,6 +522,19 @@ export class ControllerService {
   });
  }
 
+ getStylesCatalogFromExcel(): Promise<any> {
+  this.log('getStylesCatalogFromExcel called');
+  return this.ensureSession().then(async () => {
+   const leapServerPath = await this.getLeapServerDataPath();
+   return (window as any).leap
+    .getStylesCatalogFromExcel(leapServerPath || '')
+    .then((result: any) => result)
+    .catch((err: any) => {
+     throw err;
+    });
+  });
+ }
+
  getGraphicPlacementOptions(): Promise<any> {
   this.log('getGraphicPlacementOptions called');
 

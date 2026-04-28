@@ -97,7 +97,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  ngOnChanges(changes: SimpleChanges): void {
   if (changes['documentRefreshKey'] && !changes['documentRefreshKey'].firstChange) {
    console.log('[SEPARATION] Refresh triggered by App (refreshKey changed)');
-   checkForJSXUpdates((window as any).location.href).then((res) => {
+   checkForJSXUpdates((window as any).location.origin).then((res) => {
     console.log('check update status ref', res);
    });
    // Reset state when document changes
@@ -753,47 +753,47 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   return String(colorName).trim().toLowerCase() === 'blocker';
  }
 
- private getProfileColorMesh(profileInfo?: any): string {
-  const profileValue =
-   profileInfo && profileInfo.colorMesh != null
-    ? profileInfo.colorMesh
-    : profileInfo && profileInfo['Color Mesh'] != null
-     ? profileInfo['Color Mesh']
-     : '';
-  if (profileValue != null && String(profileValue).trim() !== '') {
-   return String(profileValue).trim();
-  }
-
-  const meta = this.documentProfileMetadata || {};
-  const value =
-   meta.colorMesh != null
-    ? meta.colorMesh
-    : meta['Color Mesh'] != null
-     ? meta['Color Mesh']
-     : '';
-  return value == null ? '' : String(value).trim();
+private getProfileColorMesh(profileInfo?: any): string {
+ const profileValue =
+  profileInfo && profileInfo.colorMesh != null
+   ? profileInfo.colorMesh
+   : profileInfo && profileInfo['Color Mesh'] != null
+    ? profileInfo['Color Mesh']
+    : '';
+ if (profileValue != null && String(profileValue).trim() !== '') {
+  return String(profileValue).trim();
  }
 
- private getProfileBlockerMesh(profileInfo?: any): string {
-  const profileValue =
-   profileInfo && profileInfo.blockerMesh != null
-    ? profileInfo.blockerMesh
-    : profileInfo && profileInfo['Blocker Mesh'] != null
-     ? profileInfo['Blocker Mesh']
-     : '';
-  if (profileValue != null && String(profileValue).trim() !== '') {
-   return String(profileValue).trim();
-  }
+ const meta = this.documentProfileMetadata || {};
+ const value =
+  meta.colorMesh != null
+   ? meta.colorMesh
+   : meta['Color Mesh'] != null
+    ? meta['Color Mesh']
+    : '';
+ return value == null ? '' : String(value).trim();
+}
 
-  const meta = this.documentProfileMetadata || {};
-  const value =
-   meta.blockerMesh != null
-    ? meta.blockerMesh
-    : meta['Blocker Mesh'] != null
-     ? meta['Blocker Mesh']
-     : '';
-  return value == null ? '' : String(value).trim();
+private getProfileBlockerMesh(profileInfo?: any): string {
+ const profileValue =
+  profileInfo && profileInfo.blockerMesh != null
+   ? profileInfo.blockerMesh
+   : profileInfo && profileInfo['Blocker Mesh'] != null
+    ? profileInfo['Blocker Mesh']
+    : '';
+ if (profileValue != null && String(profileValue).trim() !== '') {
+  return String(profileValue).trim();
  }
+
+ const meta = this.documentProfileMetadata || {};
+ const value =
+  meta.blockerMesh != null
+   ? meta.blockerMesh
+   : meta['Blocker Mesh'] != null
+    ? meta['Blocker Mesh']
+    : '';
+ return value == null ? '' : String(value).trim();
+}
 
  private getRequiredWhiteUbCountFromProfile(): number {
   const meta = this.documentProfileMetadata || {};

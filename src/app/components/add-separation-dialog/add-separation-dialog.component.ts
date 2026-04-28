@@ -1,157 +1,228 @@
-import { Component, EventEmitter, Input, OnChanges, Output, SimpleChanges } from '@angular/core';
+import { ChangeDetectorRef, Component, EventEmitter, Input, OnChanges, Output, SimpleChanges } from '@angular/core';
 
 export interface AddSeparationDialogStyleOption {
- styleCode: string;
- profileName: string;
+	styleCode: string;
+	profileName: string;
 }
 
 export interface AddSeparationDialogResult {
- mode: 'style' | 'profile';
- profileName: string;
- styleCodes: string[];
+	mode: 'style' | 'profile';
+	profileName: string;
+	styleCodes: string[];
 }
 
 @Component({
- selector: 'app-add-separation-dialog',
- templateUrl: './add-separation-dialog.component.html',
- styleUrls: ['./add-separation-dialog.component.css']
+	selector: 'app-add-separation-dialog',
+	templateUrl: './add-separation-dialog.component.html',
+	styleUrls: ['./add-separation-dialog.component.css']
 })
 export class AddSeparationDialogComponent implements OnChanges {
- @Input() isOpen = false;
- @Input() graphicName = '';
- @Input() isLoading = false;
- @Input() styleOptions: AddSeparationDialogStyleOption[] = [];
+	@Input() isOpen = false;
+	@Input() graphicName = '';
+	@Input() isLoading = false;
+	@Input() styleOptions: AddSeparationDialogStyleOption[] = [];
 
- @Output() cancel = new EventEmitter<void>();
- @Output() confirm = new EventEmitter<AddSeparationDialogResult>();
+	@Output() cancel = new EventEmitter<void>();
+	@Output() confirm = new EventEmitter<AddSeparationDialogResult>();
 
- selectionMode: 'style' | 'profile' = 'style';
- query = '';
- selectedStyleCode = '';
- selectedProfileName = '';
+	selectionMode: 'style' | 'profile' = 'style';
+	query = '';
+	selectedStyleCode = '';
+	selectedProfileName = '';
+	filteredStyles: AddSeparationDialogStyleOption[] = [];
+	filteredProfiles: string[] = [];
 
- ngOnChanges(changes: SimpleChanges): void {
-  if (changes['isOpen'] && this.isOpen) {
-   this.resetState();
-  }
- }
+	constructor(private cdr: ChangeDetectorRef) {}
 
- private resetState(): void {
-  this.selectionMode = 'style';
-  this.query = '';
-  this.selectedStyleCode = '';
-  this.selectedProfileName = '';
- }
+	ngOnChanges(changes: SimpleChanges): void {
+		if (changes['isOpen'] && this.isOpen) {
+			this.resetState();
+		}
+		if (changes['styleOptions'] || changes['isOpen']) {
+			this.updateFilteredResults();
+		}
+	}
 
- get normalizedQuery(): string {
-  return (this.query || '').trim().toLowerCase();
- }
+	private resetState(): void {
+		this.selectionMode = 'style';
+		this.query = '';
+		this.selectedStyleCode = '';
+		this.selectedProfileName = '';
+		this.filteredStyles = [];
+		this.filteredProfiles = [];
+	}
 
- get hasTypedQuery(): boolean {
-  return this.normalizedQuery.length > 0;
- }
+	get normalizedQuery(): string {
+		return (this.query || '').trim().toLowerCase();
+	}
 
- get uniqueProfiles(): string[] {
-  const set = new Set<string>();
-  (this.styleOptions || []).forEach((item) => {
-   const profileName = String(item?.profileName || '').trim();
-   if (profileName) set.add(profileName);
-  });
-  return Array.from(set).sort((a, b) => a.localeCompare(b));
- }
+	get hasTypedQuery(): boolean {
+		return this.normalizedQuery.length > 0;
+	}
 
- get filteredStyles(): AddSeparationDialogStyleOption[] {
-  if (!this.hasTypedQuery) return [];
-  return (this.styleOptions || [])
-   .filter((item) => String(item?.styleCode || '').trim().toLowerCase().includes(this.normalizedQuery))
-   .slice(0, 100);
- }
+	get uniqueProfiles(): string[] {
+		const set = new Set<string>();
+		(this.styleOptions || []).forEach((item) => {
+			const profileName = String(item?.profileName || '').trim();
+			if (profileName) set.add(profileName);
+		});
+		return Array.from(set).sort((a, b) => a.localeCompare(b));
+	}
 
- get filteredProfiles(): string[] {
-  if (!this.hasTypedQuery) return [];
-  return this.uniqueProfiles
-   .filter((profileName) => profileName.toLowerCase().includes(this.normalizedQuery))
-   .slice(0, 100);
- }
+	private updateFilteredResults(): void {
+		if (!this.hasTypedQuery) {
+			this.filteredStyles = [];
+			this.filteredProfiles = [];
+			console.log('[AddSeparationDialog] Cleared filtered lists (empty query)', {
+				selectionMode: this.selectionMode,
+				query: this.query,
+				styleOptionsCount: (this.styleOptions || []).length
+			});
+			return;
+		}
 
- get selectedProfileFromStyle(): string {
-  const selected = (this.styleOptions || []).find(
-   (item) => String(item?.styleCode || '').trim() === String(this.selectedStyleCode || '').trim()
-  );
-  return selected?.profileName || '';
- }
+		this.filteredStyles = (this.styleOptions || [])
+			.filter((item) => String(item?.styleCode || '').trim().toLowerCase().includes(this.normalizedQuery))
+			.slice(0, 100);
 
- get selectedProfileDisplay(): string {
-  return this.selectionMode === 'style' ? this.selectedProfileFromStyle : this.selectedProfileName;
- }
+		this.filteredProfiles = this.uniqueProfiles
+			.filter((profileName) => profileName.toLowerCase().includes(this.normalizedQuery))
+			.slice(0, 100);
 
- get canSubmit(): boolean {
-  if (this.isLoading) return false;
-  if (this.selectionMode === 'style') return !!this.selectedStyleCode;
-  return !!this.selectedProfileName;
- }
+		console.log('[AddSeparationDialog] Filtered results updated', {
+			selectionMode: this.selectionMode,
+			query: this.query,
+			normalizedQuery: this.normalizedQuery,
+			styleOptionsCount: (this.styleOptions || []).length,
+			uniqueProfilesCount: this.uniqueProfiles.length,
+			filteredStylesCount: this.filteredStyles.length,
+			filteredProfilesCount: this.filteredProfiles.length,
+			styleSample: (this.styleOptions || []).slice(0, 10).map((item) => String(item?.styleCode || '').trim()),
+			filteredStyleSample: this.filteredStyles.slice(0, 10).map((item) => String(item?.styleCode || '').trim())
+		});
+	}
 
- onModeChange(mode: 'style' | 'profile'): void {
-  this.selectionMode = mode;
-  this.query = '';
- }
+	get selectedProfileFromStyle(): string {
+		const selected = (this.styleOptions || []).find(
+			(item) => String(item?.styleCode || '').trim() === String(this.selectedStyleCode || '').trim()
+		);
+		return selected?.profileName || '';
+	}
 
- onStyleInput(ev: Event): void {
-  if (this.selectionMode !== 'style') return;
-  const value = (ev.target as HTMLInputElement).value;
-  this.query = value;
-  if (this.selectedStyleCode) this.selectedStyleCode = '';
- }
+	get selectedProfileDisplay(): string {
+		return this.selectedProfileName;
+	}
 
- onProfileInput(ev: Event): void {
-  if (this.selectionMode !== 'profile') return;
-  const value = (ev.target as HTMLInputElement).value;
-  this.query = value;
-  if (this.selectedProfileName) this.selectedProfileName = '';
- }
+	get canSubmit(): boolean {
+		if (this.isLoading) return false;
+		if (this.selectionMode === 'style') return !!this.selectedStyleCode;
+		return !!this.selectedProfileName;
+	}
 
- selectStyle(styleCode: string): void {
-  this.selectedStyleCode = String(styleCode || '').trim();
-  this.selectedProfileName = '';
-  this.query = '';
- }
+	onModeChange(mode: 'style' | 'profile'): void {
+		this.selectionMode = mode;
+		this.query = '';
+		this.updateFilteredResults();
+	}
 
- selectProfile(profileName: string): void {
-  this.selectedProfileName = String(profileName || '').trim();
-  this.selectedStyleCode = '';
-  this.query = '';
- }
+	onStyleInput(ev: Event): void {
+		if (this.selectionMode !== 'style') return;
+		const value = (ev.target as HTMLInputElement | null)?.value || '';
+		this.query = value;
+		if (this.selectedStyleCode) this.selectedStyleCode = '';
+		console.log('[AddSeparationDialog] onStyleInput', {
+			rawInput: value,
+			normalizedQuery: (value || '').trim().toLowerCase(),
+			styleOptionsCount: (this.styleOptions || []).length
+		});
+		this.updateFilteredResults();
+		this.cdr.detectChanges();
+	}
 
- cancelDialog(): void {
-  this.cancel.emit();
- }
+	onProfileInput(ev: Event): void {
+		if (this.selectionMode !== 'profile') return;
+		const value = (ev.target as HTMLInputElement | null)?.value || '';
+		this.query = value;
+		if (this.selectedProfileName) this.selectedProfileName = '';
+		this.updateFilteredResults();
+		this.cdr.detectChanges();
+	}
 
- confirmDialog(): void {
-  if (!this.canSubmit) return;
-  if (this.selectionMode === 'style') {
-   const styleCode = String(this.selectedStyleCode || '').trim();
-   if (!styleCode) return;
-   this.confirm.emit({
-    mode: 'style',
-    profileName: this.selectedProfileFromStyle || 'Unknown Profile',
-    styleCodes: [styleCode]
-   });
-   return;
-  }
+	selectStyle(styleCode: string): void {
+		this.selectedStyleCode = String(styleCode || '').trim();
+		this.selectedProfileName = '';
+		this.query = '';
+		this.updateFilteredResults();
+		this.cdr.detectChanges();
+	}
 
-  const profileName = String(this.selectedProfileName || '').trim();
-  if (!profileName) return;
-  const styleCodes = (this.styleOptions || [])
-   .filter((item) => String(item?.profileName || '').trim() === profileName)
-   .map((item) => String(item?.styleCode || '').trim())
-   .filter(Boolean);
-  const deduped = Array.from(new Set(styleCodes)).sort();
-  if (deduped.length === 0) return;
-  this.confirm.emit({
-   mode: 'profile',
-   profileName,
-   styleCodes: deduped
-  });
- }
+	selectProfile(profileName: string): void {
+		this.selectedProfileName = String(profileName || '').trim();
+		this.selectedStyleCode = '';
+		this.query = '';
+		this.updateFilteredResults();
+		this.cdr.detectChanges();
+	}
+
+	onStyleOptionMouseDown(styleCode: string, ev: MouseEvent): void {
+		ev.preventDefault();
+		ev.stopPropagation();
+		this.selectStyle(styleCode);
+	}
+
+	onProfileOptionMouseDown(profileName: string, ev: MouseEvent): void {
+		ev.preventDefault();
+		ev.stopPropagation();
+		this.selectProfile(profileName);
+	}
+
+	cancelDialog(): void {
+		this.cancel.emit();
+	}
+
+	confirmDialog(): void {
+		console.log('[AddSeparationDialog] confirmDialog clicked', {
+			selectionMode: this.selectionMode,
+			canSubmit: this.canSubmit,
+			selectedStyleCode: this.selectedStyleCode,
+			selectedProfileName: this.selectedProfileName,
+			query: this.query
+		});
+		if (!this.canSubmit) return;
+		if (this.selectionMode === 'style') {
+			const styleCode = String(this.selectedStyleCode || '').trim();
+			if (!styleCode) return;
+			console.log('[AddSeparationDialog] Emitting style confirm payload', {
+				mode: 'style',
+				profileName: this.selectedProfileFromStyle || 'Unknown Profile',
+				styleCodes: [styleCode]
+			});
+			this.confirm.emit({
+				mode: 'style',
+				profileName: this.selectedProfileFromStyle || 'Unknown Profile',
+				styleCodes: [styleCode]
+			});
+			return;
+		}
+
+		const profileName = String(this.selectedProfileName || '').trim();
+		if (!profileName) return;
+		const styleCodes = (this.styleOptions || [])
+			.filter((item) => String(item?.profileName || '').trim() === profileName)
+			.map((item) => String(item?.styleCode || '').trim())
+			.filter(Boolean);
+		const deduped = Array.from(new Set(styleCodes)).sort();
+		if (deduped.length === 0) return;
+		console.log('[AddSeparationDialog] Emitting profile confirm payload', {
+			mode: 'profile',
+			profileName,
+			styleCodes: deduped
+		});
+		this.confirm.emit({
+			mode: 'profile',
+			profileName,
+			styleCodes: deduped
+		});
+	}
 }
 

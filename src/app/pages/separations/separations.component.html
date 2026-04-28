@@ -52,9 +52,10 @@
   cancelText="Cancel" confirmVariant="danger" (confirm)="confirmDeleteAllPlates()" (cancel)="cancelDeleteAllPlates()">
  </app-confirm-dialog>
 
- <app-confirm-dialog [isOpen]="showRecreateAllConfirm" title="Recreate All Plates" message=""
-  [checkboxOptions]="recreatePlateCheckboxOptions" confirmText="Recreate" cancelText="Cancel" confirmVariant="primary"
-  (confirm)="confirmRecreateAllPlates($event)" (cancel)="cancelRecreateAllPlates()">
+ <app-confirm-dialog [isOpen]="showRecreateAllConfirm" title="Recreate All Plates"
+  message=""
+  [checkboxOptions]="recreatePlateCheckboxOptions" confirmText="Recreate" cancelText="Cancel"
+  confirmVariant="primary" (confirm)="confirmRecreateAllPlates($event)" (cancel)="cancelRecreateAllPlates()">
  </app-confirm-dialog>
 
  <app-confirm-dialog [isOpen]="showDeleteSeparationFileConfirm" title="Confirm"
@@ -63,7 +64,8 @@
  </app-confirm-dialog>
 
  <app-separation-profile-action-dialog [isOpen]="separationActionDialogOpen" [mode]="separationActionDialogMode"
-  [styleCodeOptions]="separationActionDialogStyleCodes" [initialProfileName]="separationActionDialogInitialProfile"
+  [styleCodeOptions]="separationActionDialogStyleCodes"
+  [initialProfileName]="separationActionDialogInitialProfile"
   [initialSelectedStyleCodes]="separationActionDialogInitialStyles" [hasSeparationFile]="separationActionDialogHasFile"
   [initialDuplicateAiFile]="separationActionDialogInitialDuplicateAi"
   [initialScaleEnabled]="separationActionDialogInitialScaleEnabled"
@@ -71,9 +73,14 @@
   (confirm)="confirmSeparationActionDialog($event)">
  </app-separation-profile-action-dialog>
 
- <app-add-separation-dialog [isOpen]="addSeparationDialogOpen" [graphicName]="addSeparationDialogGraphicName"
-  [isLoading]="isLoadingAddSeparationDialog" [styleOptions]="styleCatalogOptions" (cancel)="cancelAddSeparationDialog()"
-  (confirm)="confirmAddSeparationDialog($event)"></app-add-separation-dialog>
+<app-add-separation-dialog
+ [isOpen]="addSeparationDialogOpen"
+ [graphicName]="addSeparationDialogGraphicName"
+ [isLoading]="isLoadingAddSeparationDialog"
+ [styleOptions]="styleCatalogOptions"
+ (cancel)="cancelAddSeparationDialog()"
+ (confirm)="confirmAddSeparationDialog($event)"
+></app-add-separation-dialog>
 
  <div *ngIf="!hasVersionDocument && !isSeparatedDoc && !isCheckingDocument" class="organize-graphics-content">
   <div class="panelTitle mx-5" style="text-align: center; padding: 40px 20px;">
@@ -113,8 +120,7 @@
      <div class="graphic-title">Graphic: <span class="graphic-name">{{ graphic }}</span></div>
     </div>
     <div class="">
-     <button type="button" class="add-separation-link"
-      (click)="$event.stopPropagation(); handleAddSeparation(graphic)">Add Separation...</button>
+     <button type="button" class="add-separation-link" (click)="$event.stopPropagation(); handleAddSeparation(graphic)">Add Separation...</button>
     </div>
    </div>
 

@@ -25,7 +25,7 @@ export class TabNavigatorComponent {
  @Output() onMenuOptionClick = new EventEmitter<string>();
  @Output() onRemoveSeparationData = new EventEmitter<void>();
 
- constructor(private controller: ControllerService) { }
+ constructor(private controller: ControllerService) {}
 
  tabs: Tab[] = [
   { title: 'Graphics', component: GraphicsComponent },

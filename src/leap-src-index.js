@@ -19,7 +19,8 @@ class ScriptLoader {
 
  loadJSX(fileName) {
   var cs = this.cs;
-  var extensionRoot = cs.getSystemPath(SystemPath.EXTENSION) + '/jsx/';
+  var extensionBase = String(cs.getSystemPath(SystemPath.EXTENSION) || '').replace(/\/+$/, '');
+  var extensionRoot = extensionBase + '/jsx/';
   cs.evalScript('$.evalFile("' + extensionRoot + fileName + '")');
  }
 
@@ -564,6 +565,80 @@ async function getStyleInformation(styleCodes) {
  } catch (error) {
   console.error('[getStyleInformation] Error:', error.message, error);
   return { success: false, error: error.message || 'Failed to read Excel file' };
+ }
+}
+
+async function getStylesCatalogFromExcel(explicitBasePath) {
+ try {
+  const resolvedBasePath =
+   explicitBasePath && String(explicitBasePath).trim() !== ''
+    ? String(explicitBasePath).trim()
+    : await getServerBasePathWithRetry();
+  if (!resolvedBasePath) {
+   throw new Error('Server base path not found');
+  }
+  const normalizedBasePath = resolvedBasePath.replace(/\/$/, '');
+  const excelFilePath = path.join(normalizedBasePath, 'SETTINGS', 'LEAP_SEPS', 'Data', 'Styles.xlsx');
+  console.log('[StylesCatalog] Reading Styles.xlsx from:', excelFilePath);
+
+  if (!fs.existsSync(excelFilePath)) {
+   throw new Error(`Excel file not found at: ${excelFilePath}`);
+  }
+
+  let workbook;
+  try {
+   const fileBuffer = fs.readFileSync(excelFilePath);
+   workbook = XLSX.read(fileBuffer, { type: 'buffer' });
+  } catch (bufferError) {
+   workbook = XLSX.readFile(excelFilePath);
+  }
+
+  const sheetName = workbook.SheetNames[0];
+  const worksheet = workbook.Sheets[sheetName];
+  const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+  console.log('[StylesCatalog] Sheet name:', sheetName, '| total rows:', data.length);
+
+  if (data.length === 0) {
+   return { success: true, styles: [] };
+  }
+
+  const headerRow = data[0];
+  const styleCodeColIndex = headerRow.findIndex((col) => col === 'Style Code');
+  const profileNameColIndex = headerRow.findIndex((col) => col === 'Profile Name');
+
+  if (styleCodeColIndex === -1) {
+   throw new Error('Style Code column not found in Styles.xlsx');
+  }
+
+  const styleMap = new Map();
+  for (let row = 1; row < data.length; row++) {
+   const rowData = data[row];
+   if (!rowData || rowData[styleCodeColIndex] == null) continue;
+
+   const styleCode = String(rowData[styleCodeColIndex]).trim();
+   if (!styleCode) continue;
+
+   const profileName =
+    profileNameColIndex >= 0 && rowData[profileNameColIndex] != null
+     ? String(rowData[profileNameColIndex]).trim()
+     : '';
+
+   styleMap.set(styleCode, {
+    styleCode,
+    profileName: profileName || 'Unknown Profile'
+   });
+  }
+
+  const styles = Array.from(styleMap.values()).sort((a, b) => a.styleCode.localeCompare(b.styleCode));
+  console.log('[StylesCatalog] Loaded style codes count:', styles.length);
+  console.log(
+   '[StylesCatalog] Loaded style codes list:',
+   styles.map((item) => item.styleCode)
+  );
+  return { success: true, styles };
+ } catch (error) {
+  console.error('[StylesCatalog] Failed to load Styles.xlsx:', error?.message || error);
+  return { success: false, error: error.message || 'Failed to read Styles.xlsx', styles: [] };
  }
 }
 
@@ -1239,6 +1314,17 @@ class Leap {
    return result;
   } catch (error) {
    console.error('[Leap.getStyleInformation] Error:', error);
+   return {
+    success: false,
+    error: error.message
+   };
+  }
+ }
+
+ async getStylesCatalogFromExcel(basePath) {
+  try {
+   return await getStylesCatalogFromExcel(basePath);
+  } catch (error) {
    return {
     success: false,
     error: error.message

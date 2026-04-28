@@ -61,7 +61,7 @@ export class SettingsComponent implements OnInit, OnChanges {
 
  leapServerPath = '';
 
- constructor(private controller: ControllerService) { }
+ constructor(private controller: ControllerService) {}
 
  get pageTitle(): string {
   return this.selectedSection === 'General Settings' ? 'General Settings' : 'Manage Profiles';
@@ -371,14 +371,14 @@ export class SettingsComponent implements OnInit, OnChanges {
      : reactProfile._jsonData.Blocker || 'N';
    jsonProfile.Flash =
     reactProfile._jsonData.Flash &&
-     reactProfile._jsonData.Flash !== null &&
-     !isNaN(reactProfile._jsonData.Flash)
+    reactProfile._jsonData.Flash !== null &&
+    !isNaN(reactProfile._jsonData.Flash)
      ? reactProfile._jsonData.Flash
      : '';
    jsonProfile.Cool =
     reactProfile._jsonData.Cool &&
-     reactProfile._jsonData.Cool !== null &&
-     !isNaN(reactProfile._jsonData.Cool)
+    reactProfile._jsonData.Cool !== null &&
+    !isNaN(reactProfile._jsonData.Cool)
      ? reactProfile._jsonData.Cool
      : '';
    jsonProfile.Micron = reactProfile._jsonData.Micron || 'XXX';
