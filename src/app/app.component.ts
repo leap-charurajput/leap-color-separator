@@ -11,7 +11,7 @@ import { GraphicsDataService } from './services/graphics-data.service';
 export class AppComponent implements OnInit, OnDestroy {
  private readonly panelVersion = '1.0.0';
  /** Bump this string when you ship a new build (same format as before: "Mon DD, YYYY"). */
- private readonly panelDeployDate = 'Apr 28, 2026 (Test Cach 2)';
+ private readonly panelDeployDate = 'Apr 28, 2026';
  activeTab: number | null = 0;
  selectedMenuOption: string | null = null;
  documentRefreshKey = 0;
