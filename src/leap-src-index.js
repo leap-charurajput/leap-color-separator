@@ -50,7 +50,7 @@ class ScriptLoader {
   return { reason, data };
  }
 
- log(val) { }
+ log(val) {}
 
  get name() {
   return 'ScriptLoader:: ';
@@ -91,7 +91,7 @@ function getServerBasePath() {
     }
    }
   }
- } catch (error) { }
+ } catch (error) {}
 
  if (cachedServerBasePath && fs.existsSync(cachedServerBasePath)) {
   return cachedServerBasePath;
@@ -246,7 +246,7 @@ function findTeamJsonFileNearDocument(documentPath, teamCode) {
       if (jsonTeamCode && jsonTeamCode === normalizedTeamCode) {
        return jsonPath;
       }
-     } catch (jsonReadError) { }
+     } catch (jsonReadError) {}
     }
 
     // Do not silently pick another team's JSON when a team code was explicitly provided.
@@ -1162,7 +1162,7 @@ async function getProfileInformation(profileCode) {
       matchedProfile['Underbase Swatch'] != null && String(matchedProfile['Underbase Swatch']).trim() !== ''
        ? String(matchedProfile['Underbase Swatch']).trim()
        : 'White UB'
-     ),
+      ),
    underbaseKnockoutBlack: [
     ubKnockoutArray ? !!ubKnockoutArray[0] : false,
     ubKnockoutArray ? !!ubKnockoutArray[1] : false,
@@ -1183,7 +1183,7 @@ async function getProfileInformation(profileCode) {
       matchedProfile['Blocker Mesh'] != null
        ? String(matchedProfile['Blocker Mesh'])
        : ''
-     ),
+      ),
    formatInkNameLabel: toEnabled(matchedProfile.formatInkNameLabel || false),
    colorNameLabelFormat:
     matchedProfile.colorNameLabelFormat != null && String(matchedProfile.colorNameLabelFormat).trim() !== ''
@@ -1622,7 +1622,7 @@ class Leap {
   }
  }
 
- log(val) { }
+ log(val) {}
 
  get name() {
   return 'LEAP:: ';

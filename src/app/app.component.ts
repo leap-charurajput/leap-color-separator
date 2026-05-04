@@ -11,7 +11,7 @@ import { GraphicsDataService } from './services/graphics-data.service';
 export class AppComponent implements OnInit, OnDestroy {
  private readonly panelVersion = '1.0.0';
  /** Bump this string when you ship a new build (same format as before: "Mon DD, YYYY"). */
- private readonly panelDeployDate = 'May 03, 2026';
+ private readonly panelDeployDate = 'May 05, 2026';
  activeTab: number | null = 0;
  selectedMenuOption: string | null = null;
  documentRefreshKey = 0;
@@ -29,9 +29,9 @@ export class AppComponent implements OnInit, OnDestroy {
  ngOnInit(): void {
   document.body.classList.add('dark');
 
-  checkForJSXUpdates((window as any).location.origin).then((res) => {
-   console.log('check update status ref', res);
-  });
+    checkForJSXUpdates((window as any).location.origin).then((res) => {
+      console.log('check update status ref', res);
+    });
 
   this.waitForSession()
    .then(() => {

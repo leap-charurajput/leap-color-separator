@@ -731,17 +731,24 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  }
 
  private sortColorRowsWithWhiteUBAtBottom(rows: ColorRow[]): ColorRow[] {
-  // Currently sorting is disabled as per request, but this function can be re-enabled if needed
   if (!rows || rows.length === 0) return rows;
 
-  const sorted = [...rows].sort((a, b) => {
-   const aIsWhiteUB = this.isWhiteUB(a.colorName);
-   const bIsWhiteUB = this.isWhiteUB(b.colorName);
-   if (aIsWhiteUB === bIsWhiteUB) return 0;
-   return aIsWhiteUB ? -1 : 1; // White UB at top (return -1 when a is White UB)
-  });
+  // Print order: Blocker first, then all White UB rows, then other inks. Stable within each group.
+  const rank = (row: ColorRow): number => {
+   if (this.isBlocker(row.colorName)) return 0;
+   if (this.isWhiteUB(row.colorName)) return 1;
+   return 2;
+  };
 
-  return sorted;
+  return rows
+   .map((row, index) => ({ row, index }))
+   .sort((a, b) => {
+    const ra = rank(a.row);
+    const rb = rank(b.row);
+    if (ra !== rb) return ra - rb;
+    return a.index - b.index;
+   })
+   .map((x) => x.row);
  }
 
  isWhiteUB(colorName: string): boolean {
@@ -752,50 +759,51 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 
  isBlocker(colorName: string): boolean {
   if (!colorName) return false;
-  return String(colorName).trim().toLowerCase() === 'blocker';
+  const t = String(colorName).trim().toLowerCase();
+  return t === 'blocker' || /^blocker\s+\d+$/.test(t);
  }
 
- private getProfileColorMesh(profileInfo?: any): string {
-  const profileValue =
-   profileInfo && profileInfo.colorMesh != null
-    ? profileInfo.colorMesh
-    : profileInfo && profileInfo['Color Mesh'] != null
-     ? profileInfo['Color Mesh']
-     : '';
-  if (profileValue != null && String(profileValue).trim() !== '') {
-   return String(profileValue).trim();
-  }
-
-  const meta = this.documentProfileMetadata || {};
-  const value =
-   meta.colorMesh != null
-    ? meta.colorMesh
-    : meta['Color Mesh'] != null
-     ? meta['Color Mesh']
-     : '';
-  return value == null ? '' : String(value).trim();
+private getProfileColorMesh(profileInfo?: any): string {
+ const profileValue =
+  profileInfo && profileInfo.colorMesh != null
+   ? profileInfo.colorMesh
+   : profileInfo && profileInfo['Color Mesh'] != null
+    ? profileInfo['Color Mesh']
+    : '';
+ if (profileValue != null && String(profileValue).trim() !== '') {
+  return String(profileValue).trim();
  }
 
- private getProfileBlockerMesh(profileInfo?: any): string {
-  const profileValue =
-   profileInfo && profileInfo.blockerMesh != null
-    ? profileInfo.blockerMesh
-    : profileInfo && profileInfo['Blocker Mesh'] != null
-     ? profileInfo['Blocker Mesh']
-     : '';
-  if (profileValue != null && String(profileValue).trim() !== '') {
-   return String(profileValue).trim();
-  }
+ const meta = this.documentProfileMetadata || {};
+ const value =
+  meta.colorMesh != null
+   ? meta.colorMesh
+   : meta['Color Mesh'] != null
+    ? meta['Color Mesh']
+    : '';
+ return value == null ? '' : String(value).trim();
+}
 
-  const meta = this.documentProfileMetadata || {};
-  const value =
-   meta.blockerMesh != null
-    ? meta.blockerMesh
-    : meta['Blocker Mesh'] != null
-     ? meta['Blocker Mesh']
-     : '';
-  return value == null ? '' : String(value).trim();
+private getProfileBlockerMesh(profileInfo?: any): string {
+ const profileValue =
+  profileInfo && profileInfo.blockerMesh != null
+   ? profileInfo.blockerMesh
+   : profileInfo && profileInfo['Blocker Mesh'] != null
+    ? profileInfo['Blocker Mesh']
+    : '';
+ if (profileValue != null && String(profileValue).trim() !== '') {
+  return String(profileValue).trim();
  }
+
+ const meta = this.documentProfileMetadata || {};
+ const value =
+  meta.blockerMesh != null
+   ? meta.blockerMesh
+   : meta['Blocker Mesh'] != null
+    ? meta['Blocker Mesh']
+    : '';
+ return value == null ? '' : String(value).trim();
+}
 
  private getRequiredWhiteUbCountFromProfile(): number {
   const meta = this.documentProfileMetadata || {};
@@ -1730,7 +1738,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   const formatEnabled = !!(this.documentProfileMetadata?.formatInkNameLabel);
   const colorNameFormat: string =
    this.documentProfileMetadata?.colorNameLabelFormat &&
-    String(this.documentProfileMetadata.colorNameLabelFormat).trim() !== ''
+   String(this.documentProfileMetadata.colorNameLabelFormat).trim() !== ''
     ? String(this.documentProfileMetadata.colorNameLabelFormat)
     : 'PANTONE XXX C';
 
