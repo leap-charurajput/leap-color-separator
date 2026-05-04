@@ -12,6 +12,7 @@ import { ConfirmDialogComponent } from './components/confirm-dialog/confirm-dial
 import { CompoundPlateModalComponent } from './components/compound-plate-modal/compound-plate-modal.component';
 import { DropdownComponent } from './components/dropdown/dropdown.component';
 import { EditSeparationModalComponent } from './components/edit-separation-modal/edit-separation-modal.component';
+import { SeparationProfileActionDialogComponent } from './components/separation-profile-action-dialog/separation-profile-action-dialog.component';
 import { EditSeparationProfileModalComponent } from './components/edit-separation-profile-modal/edit-separation-profile-modal.component';
 import { ExportSeparationsModalComponent } from './components/export-separations-modal/export-separations-modal.component';
 import { LayerStackVisualizationComponent } from './components/layer-stack-visualization/layer-stack-visualization.component';
@@ -26,6 +27,8 @@ import { SeparationsComponent } from './pages/separations/separations.component'
 import { SettingsComponent } from './pages/settings/settings.component';
 
 import { ComboBoxComponent } from './components/combo-box/combo-box.component';
+import { RadioComponent } from './components/radio/radio.component';
+import { AddSeparationDialogComponent } from './components/add-separation-dialog/add-separation-dialog.component';
 import { ControllerService } from './services/controller.service';
 
 @NgModule({
@@ -36,8 +39,11 @@ import { ControllerService } from './services/controller.service';
   ButtonComponent,
   ConfirmDialogComponent,
   ComboBoxComponent,
+  RadioComponent,
+  AddSeparationDialogComponent,
   DropdownComponent,
   EditSeparationModalComponent,
+  SeparationProfileActionDialogComponent,
   CompoundPlateModalComponent,
   LayerStackVisualizationComponent,
   CheckboxComponent,

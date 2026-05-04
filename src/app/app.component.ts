@@ -10,6 +10,8 @@ import { GraphicsDataService } from './services/graphics-data.service';
 })
 export class AppComponent implements OnInit, OnDestroy {
  private readonly panelVersion = '1.0.0';
+ /** Bump this string when you ship a new build (same format as before: "Mon DD, YYYY"). */
+ private readonly panelDeployDate = 'Apr 28, 2026';
  activeTab: number | null = 0;
  selectedMenuOption: string | null = null;
  documentRefreshKey = 0;
@@ -19,11 +21,7 @@ export class AppComponent implements OnInit, OnDestroy {
  confirmError: string | null = null;
 
  get panelBuildStamp(): string {
-  const now = new Date();
-  const month = now.toLocaleString('en-US', { month: 'short' });
-  const day = String(now.getDate()).padStart(2, '0');
-  const year = now.getFullYear();
-  return `${month} ${day}, ${year} | v${this.panelVersion}`;
+  return `${this.panelDeployDate} | v${this.panelVersion}`;
  }
 
  constructor(private controller: ControllerService, private cdr: ChangeDetectorRef, private graphicsDataService: GraphicsDataService) { }
@@ -31,7 +29,7 @@ export class AppComponent implements OnInit, OnDestroy {
  ngOnInit(): void {
   document.body.classList.add('dark');
 
-  checkForJSXUpdates((window as any).location.href).then((res) => {
+  checkForJSXUpdates((window as any).location.origin).then((res) => {
    console.log('check update status ref', res);
   });
 

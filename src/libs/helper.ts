@@ -20,7 +20,8 @@ export const checkForJSXUpdates = async (
 ): Promise<'no_update' | 'update_available' | 'update_done' | 'update_error'> => {
  try {
   let updateStatus: 'no_update' | 'update_available' | 'update_done' | 'update_error' = 'no_update';
-  const remoteVersionFileURL = origin + 'jsx/version.json';
+  const normalizedOrigin = String(origin || '').replace(/\/+$/, '');
+  const remoteVersionFileURL = normalizedOrigin + '/jsx/version.json';
   const remoteVersionFile = await fetch(remoteVersionFileURL);
   const { jsxVersion: remoteJsxVersion = 0, updatedFiles = [] } = await remoteVersionFile.json();
   //  console.log('remote version:', remoteJsxVersion);
@@ -38,7 +39,7 @@ export const checkForJSXUpdates = async (
    //  console.log('update available');
    for (const file of updatedFiles) {
     //  console.log('updating file:', file);
-    const remoteFileURL = origin + '/jsx/' + file;
+   const remoteFileURL = normalizedOrigin + '/jsx/' + file;
     const remoteFile = await fetch(remoteFileURL);
     const remoteFileContent = await remoteFile.text();
     fs.writeFileSync(localJSXRoot + '/' + file, remoteFileContent, 'utf8');

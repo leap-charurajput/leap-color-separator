@@ -97,7 +97,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  ngOnChanges(changes: SimpleChanges): void {
   if (changes['documentRefreshKey'] && !changes['documentRefreshKey'].firstChange) {
    console.log('[SEPARATION] Refresh triggered by App (refreshKey changed)');
-   checkForJSXUpdates((window as any).location.href).then((res) => {
+   checkForJSXUpdates((window as any).location.origin).then((res) => {
     console.log('check update status ref', res);
    });
    // Reset state when document changes
@@ -642,6 +642,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  ): ColorRow {
   const colorHex = swatchData.hex || this.getRandomColor();
   const isWhiteUBColor = this.isWhiteUB(swatchData.name);
+  const isBlockerColor = this.isBlocker(swatchData.name);
 
   // Determine which profile to use
   let profileInfo: any = {};
@@ -662,11 +663,21 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   const coolEnabled = hasProfile ? profileInfo.cool : false;
   const wbEnabled = hasProfile ? profileInfo.wb : true;
   const micron = hasProfile ? profileInfo.micron : 'NA';
+  const profileColorMesh = this.getProfileColorMesh(profileInfo);
+  const profileBlockerMesh = this.getProfileBlockerMesh(profileInfo);
+  let meshValue = inkInfo.mesh || '110';
+  if (isWhiteUBColor) {
+   meshValue = inkInfo.mesh || '110';
+  } else if (isBlockerColor && profileBlockerMesh !== '') {
+   meshValue = profileBlockerMesh;
+  } else if (profileColorMesh !== '') {
+   meshValue = profileColorMesh;
+  }
 
   return {
    id: currentId,
    colorName: swatchData.name,
-   mesh: inkInfo.mesh || '110',
+   mesh: meshValue,
    micron: micron,
    type: 'separation',
    layerColor: colorHex,
@@ -678,13 +689,24 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  }
 
  private createColorRowsFromSwatchesWithDefaults(): void {
+  const profileColorMesh = this.getProfileColorMesh();
+  const profileBlockerMesh = this.getProfileBlockerMesh();
   const newColorRows: ColorRow[] = this.graphicSwatches.map((swatchData: any, index: number) => {
    const colorHex = swatchData.hex || this.getRandomColor();
    const isWhiteUBColor = this.isWhiteUB(swatchData.name);
+   const isBlockerColor = this.isBlocker(swatchData.name);
+   let meshValue = '110';
+   if (!isWhiteUBColor) {
+    if (isBlockerColor && profileBlockerMesh !== '') {
+     meshValue = profileBlockerMesh;
+    } else if (profileColorMesh !== '') {
+     meshValue = profileColorMesh;
+    }
+   }
    return {
     id: index + 1,
     colorName: swatchData.name,
-    mesh: '110',
+    mesh: meshValue,
     micron: 'NA',
     type: 'separation',
     layerColor: colorHex,
@@ -725,6 +747,53 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   const lowerName = colorName.toLowerCase();
   return lowerName.includes('white ub') || lowerName.includes('whiteub');
  }
+
+ isBlocker(colorName: string): boolean {
+  if (!colorName) return false;
+  return String(colorName).trim().toLowerCase() === 'blocker';
+ }
+
+private getProfileColorMesh(profileInfo?: any): string {
+ const profileValue =
+  profileInfo && profileInfo.colorMesh != null
+   ? profileInfo.colorMesh
+   : profileInfo && profileInfo['Color Mesh'] != null
+    ? profileInfo['Color Mesh']
+    : '';
+ if (profileValue != null && String(profileValue).trim() !== '') {
+  return String(profileValue).trim();
+ }
+
+ const meta = this.documentProfileMetadata || {};
+ const value =
+  meta.colorMesh != null
+   ? meta.colorMesh
+   : meta['Color Mesh'] != null
+    ? meta['Color Mesh']
+    : '';
+ return value == null ? '' : String(value).trim();
+}
+
+private getProfileBlockerMesh(profileInfo?: any): string {
+ const profileValue =
+  profileInfo && profileInfo.blockerMesh != null
+   ? profileInfo.blockerMesh
+   : profileInfo && profileInfo['Blocker Mesh'] != null
+    ? profileInfo['Blocker Mesh']
+    : '';
+ if (profileValue != null && String(profileValue).trim() !== '') {
+  return String(profileValue).trim();
+ }
+
+ const meta = this.documentProfileMetadata || {};
+ const value =
+  meta.blockerMesh != null
+   ? meta.blockerMesh
+   : meta['Blocker Mesh'] != null
+    ? meta['Blocker Mesh']
+    : '';
+ return value == null ? '' : String(value).trim();
+}
 
  private getRequiredWhiteUbCountFromProfile(): number {
   const meta = this.documentProfileMetadata || {};
@@ -1107,12 +1176,31 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
    this.handleEditSeparation(rowId);
   } else if (item.startsWith('Add second hit')) {
    console.log('[HIT THE DROPDOWN]', rowId);
-   this.handleAddSecondHit(rowId);
+   const menuColorName = this.extractSecondHitColorName(item);
+   this.handleAddSecondHit(rowId, menuColorName);
   }
  }
 
- handleAddSecondHit(rowId: number): void {
-  const originalRow = this.colorRows.find((row) => row.id === rowId);
+ private extractSecondHitColorName(menuItem: string): string | null {
+  const prefix = 'Add second hit of ';
+  if (!menuItem || menuItem.indexOf(prefix) !== 0) {
+   return null;
+  }
+  const extracted = menuItem.substring(prefix.length).trim();
+  return extracted || null;
+ }
+
+ handleAddSecondHit(rowId: number, colorNameFromMenu?: string | null): void {
+  let originalRow: ColorRow | undefined;
+  if (colorNameFromMenu) {
+   const normalizedMenuName = colorNameFromMenu.trim().toLowerCase();
+   originalRow = this.colorRows.find(
+    (row) => !row.removed && (row.colorName || '').trim().toLowerCase() === normalizedMenuName
+   );
+  }
+  if (!originalRow) {
+   originalRow = this.colorRows.find((row) => row.id === rowId);
+  }
   if (!originalRow) return;
 
   const duplicateName = this.getUniqueSecondHitName(originalRow.colorName);
@@ -1140,7 +1228,17 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   this.controller
    .generateUnderbaseLayer(originalRow.colorName, duplicateName)
    .then((res: string) => {
-    console.log('[SEPARATION] Second hit underbase created:', res);
+    console.log('[SEPARATION] Second hit request:', {
+     sourceColor: originalRow!.colorName,
+     duplicateColor: duplicateName,
+     rowId: rowId
+    });
+    try {
+     const parsed = res ? JSON.parse(res) : null;
+     console.log('[SEPARATION] Second hit underbase response:', parsed || res);
+    } catch (_e) {
+     console.log('[SEPARATION] Second hit underbase created:', res);
+    }
    })
    .catch((err: any) => {
     console.error('[SEPARATION] Failed to create second hit underbase', err);

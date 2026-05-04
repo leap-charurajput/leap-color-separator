@@ -7,6 +7,13 @@
 		<div class="row-actions ml-auto d-flex align-center">
 			<button
 				class="row-action-button"
+				(click)="onRowAction('duplicate', profile)"
+				title="Duplicate profile"
+			>
+				<span class="material-icons" aria-hidden="true">add_box</span>
+			</button>
+			<button
+				class="row-action-button"
 				(click)="onRowAction('edit', profile)"
 				title="Edit profile"
 			>

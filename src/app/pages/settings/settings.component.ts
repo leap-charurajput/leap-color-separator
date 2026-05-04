@@ -7,11 +7,21 @@ interface Profile {
  name: string;
  code: string;
  colorMesh: string;
+ underbaseSwatch?: string;
  underbaseMeshes: string[];
  underbaseEnabled: boolean[];
  underbaseKnockoutBlack?: boolean[];
+ /** Per-UB swatch when K/O is on (optional; persisted on profile JSON). */
+ underbaseKnockoutSwatches?: string[];
+ blocker?: boolean;
+ blockerMesh?: string;
+ blockerKnockoutBlack?: boolean;
+ blockerKnockoutSwatch?: string;
  blackInksKnockoutDisplay?: string;
  waterbaseInk: boolean;
+ overprintAllInks?: boolean;
+ formatInkNameLabel?: boolean;
+ colorNameLabelFormat?: string;
  distress?: string;
  _jsonData?: any;
 }
@@ -27,6 +37,8 @@ export class SettingsComponent implements OnInit, OnChanges {
  isLoading = true;
  editModalOpen = false;
  selectedProfile: Profile | null = null;
+ /** Pre-filled profile when opening the modal from Duplicate (+); not persisted until Save. */
+ duplicateProfileDraft: Profile | null = null;
  defaultMesh = '110';
  addUnderbase = true;
  artistName = '';
@@ -34,6 +46,8 @@ export class SettingsComponent implements OnInit, OnChanges {
  ppdName = 'IBlock v2';
  chokeStrokeColorSwatch = '';
  koDarkColorNames = 'Black, PANTONE PROCESS BLACK C';
+ sepsTemplateFileName = 'SEP-GRID-TEMPLATE.ai';
+ sepsTemplateFiles: string[] = [];
  selectedSection = 'Separation Profiles';
 
  // 🔑 Environment config
@@ -49,7 +63,7 @@ export class SettingsComponent implements OnInit, OnChanges {
 
  leapServerPath = '';
 
- constructor(private controller: ControllerService) { }
+ constructor(private controller: ControllerService) {}
 
  get pageTitle(): string {
   return this.selectedSection === 'General Settings' ? 'General Settings' : 'Manage Profiles';
@@ -66,6 +80,7 @@ export class SettingsComponent implements OnInit, OnChanges {
   this.loadProfiles();
   this.loadLeapServerPath();
   this.loadGeneralSettings();
+  this.loadSepsTemplateFiles();
 
   try {
    const result = await this.controller.getAppVersion();
@@ -118,6 +133,10 @@ export class SettingsComponent implements OnInit, OnChanges {
      result.data.koDarkColorNames !== undefined && result.data.koDarkColorNames !== null
       ? String(result.data.koDarkColorNames)
       : 'Black, PANTONE PROCESS BLACK C';
+    this.sepsTemplateFileName =
+     result.data.sepsTemplateFileName != null && String(result.data.sepsTemplateFileName).trim() !== ''
+      ? String(result.data.sepsTemplateFileName).trim()
+      : 'SEP-GRID-TEMPLATE.ai';
    }
   });
  }
@@ -130,7 +149,8 @@ export class SettingsComponent implements OnInit, OnChanges {
    artistInitials: this.artistInitials,
    ppdName: this.ppdName,
    chokeStrokeColorSwatch: this.chokeStrokeColorSwatch,
-   koDarkColorNames: this.koDarkColorNames
+   koDarkColorNames: this.koDarkColorNames,
+   sepsTemplateFileName: this.sepsTemplateFileName
   };
   this.controller.saveGeneralSettings(settings).then((result) => {
    if (!result.success) {
@@ -142,6 +162,7 @@ export class SettingsComponent implements OnInit, OnChanges {
  loadLeapServerPath(): void {
   this.controller.getLeapServerDataPath().then((path) => {
    this.leapServerPath = path;
+   this.loadSepsTemplateFiles();
   });
  }
 
@@ -149,8 +170,26 @@ export class SettingsComponent implements OnInit, OnChanges {
   this.controller.selectAndSaveLeapSettings().then((result) => {
    if (result.success && result.path) {
     this.leapServerPath = result.path;
+    this.loadSepsTemplateFiles();
    } else if (!result.cancelled) {
     // console.error('Error updating LEAP Data path', result.error);
+   }
+  });
+ }
+
+ loadSepsTemplateFiles(): void {
+  this.controller.getSepsTemplateFiles().then((result) => {
+   if (result.success && Array.isArray(result.files)) {
+    this.sepsTemplateFiles = result.files;
+    if (this.sepsTemplateFiles.length > 0) {
+     const hasSavedSelection = this.sepsTemplateFiles.indexOf(this.sepsTemplateFileName) >= 0;
+     if (!hasSavedSelection) {
+      this.sepsTemplateFileName = this.sepsTemplateFiles[0];
+      this.saveGeneralSettings();
+     }
+    }
+   } else {
+    this.sepsTemplateFiles = [];
    }
   });
  }
@@ -217,6 +256,36 @@ export class SettingsComponent implements OnInit, OnChanges {
    savedKnockout ? !!savedKnockout[2] : false,
    savedKnockout ? !!savedKnockout[3] : false
   ];
+  const defaultSw = ['White UB', 'White UB', 'White UB', 'White UB'];
+  const savedSwatches = Array.isArray(jsonProfile.underbaseKnockoutSwatches)
+   ? jsonProfile.underbaseKnockoutSwatches
+   : null;
+  const underbaseKnockoutSwatches = [
+   savedSwatches && savedSwatches[0] != null && String(savedSwatches[0]).trim() !== ''
+    ? String(savedSwatches[0])
+    : defaultSw[0],
+   savedSwatches && savedSwatches[1] != null && String(savedSwatches[1]).trim() !== ''
+    ? String(savedSwatches[1])
+    : defaultSw[1],
+   savedSwatches && savedSwatches[2] != null && String(savedSwatches[2]).trim() !== ''
+    ? String(savedSwatches[2])
+    : defaultSw[2],
+   savedSwatches && savedSwatches[3] != null && String(savedSwatches[3]).trim() !== ''
+    ? String(savedSwatches[3])
+    : defaultSw[3]
+  ];
+
+  const jp = jsonProfile as any;
+  const blockerKnockoutSwatchRaw = jp.blockerKnockoutSwatch != null ? String(jp.blockerKnockoutSwatch).trim() : '';
+  const blockerKnockoutSwatch =
+   blockerKnockoutSwatchRaw !== '' ? blockerKnockoutSwatchRaw : defaultSw[0];
+  const underbaseSwatchRaw =
+   jp.underbaseSwatch != null
+    ? String(jp.underbaseSwatch).trim()
+    : jsonProfile['Underbase Swatch'] != null
+     ? String(jsonProfile['Underbase Swatch']).trim()
+     : '';
+  const underbaseSwatch = underbaseSwatchRaw !== '' ? underbaseSwatchRaw : defaultSw[0];
 
   return {
    id: jsonProfile.id || this.generateId(profileName, distress),
@@ -226,15 +295,28 @@ export class SettingsComponent implements OnInit, OnChanges {
    underbaseMeshes: ubMeshes,
    underbaseEnabled: underbaseEnabled,
    underbaseKnockoutBlack: underbaseKnockoutBlack,
+   underbaseKnockoutSwatches,
+   underbaseSwatch,
+   blocker: toEnabled(jp.blocker) || toEnabled(jsonProfile.Blocker),
+   blockerMesh:
+    jp.blockerMesh != null
+     ? String(jp.blockerMesh)
+     : (jsonProfile['Blocker Mesh'] != null ? String(jsonProfile['Blocker Mesh']) : ''),
+   blockerKnockoutBlack: !!jp.blockerKnockoutBlack,
+   blockerKnockoutSwatch,
    blackInksKnockoutDisplay:
     jsonProfile.blackInksKnockoutDisplay != null ? String(jsonProfile.blackInksKnockoutDisplay) : '',
    waterbaseInk: jsonProfile['WB'] === 'Y' || jsonProfile['WB'] === true,
+   overprintAllInks: jp.overprintAllInks !== undefined ? !!jp.overprintAllInks : true,
+   formatInkNameLabel: !!jp.formatInkNameLabel,
+   colorNameLabelFormat: jp.colorNameLabelFormat != null ? String(jp.colorNameLabelFormat) : '',
    distress: distress,
    _jsonData: jsonProfile
   };
  }
 
  reactToJsonProfile(reactProfile: Profile): any {
+  const rp = reactProfile as any;
   const stringToNumberOrEmpty = (str: string) => {
    if (!str || str.trim() === '' || str === ' ') {
     return '';
@@ -243,10 +325,23 @@ export class SettingsComponent implements OnInit, OnChanges {
    return isNaN(num) ? '' : num;
   };
 
+  const pickUbSwatchForJson = (i: number): string => {
+   const arr = rp.underbaseKnockoutSwatches;
+   if (!arr || !Array.isArray(arr) || i < 0 || i >= arr.length) return 'White UB';
+   const raw = arr[i];
+   if (raw == null) return 'White UB';
+   const t = String(raw).trim();
+   return t !== '' ? t : 'White UB';
+  };
+
   const jsonProfile: any = {
    'Profile Name': reactProfile.name || '',
    'Profile Code': reactProfile.code || '',
    'Color Mesh': stringToNumberOrEmpty(reactProfile.colorMesh),
+   'Underbase Swatch':
+    rp.underbaseSwatch != null && String(rp.underbaseSwatch).trim() !== ''
+     ? String(rp.underbaseSwatch).trim()
+     : 'White UB',
    'UB 1 Mesh': stringToNumberOrEmpty(reactProfile.underbaseMeshes[0]),
    'UB 2 Mesh': stringToNumberOrEmpty(reactProfile.underbaseMeshes[1]),
    'UB 3 Mesh': stringToNumberOrEmpty(reactProfile.underbaseMeshes[2]),
@@ -266,6 +361,25 @@ export class SettingsComponent implements OnInit, OnChanges {
     !!(reactProfile.underbaseKnockoutBlack && reactProfile.underbaseKnockoutBlack[2]),
     !!(reactProfile.underbaseKnockoutBlack && reactProfile.underbaseKnockoutBlack[3])
    ],
+   underbaseKnockoutSwatches: [
+    pickUbSwatchForJson(0),
+    pickUbSwatchForJson(1),
+    pickUbSwatchForJson(2),
+    pickUbSwatchForJson(3)
+   ],
+   underbaseSwatch:
+    rp.underbaseSwatch != null && String(rp.underbaseSwatch).trim() !== ''
+     ? String(rp.underbaseSwatch).trim()
+     : 'White UB',
+   blockerKnockoutBlack: !!rp.blockerKnockoutBlack,
+   blockerKnockoutSwatch:
+    rp.blockerKnockoutSwatch != null && String(rp.blockerKnockoutSwatch).trim() !== ''
+     ? String(rp.blockerKnockoutSwatch).trim()
+     : 'White UB',
+   blockerMesh: rp.blockerMesh != null ? String(rp.blockerMesh) : '',
+   overprintAllInks: rp.overprintAllInks !== undefined ? !!rp.overprintAllInks : true,
+   formatInkNameLabel: !!rp.formatInkNameLabel,
+   colorNameLabelFormat: rp.colorNameLabelFormat != null ? String(rp.colorNameLabelFormat) : '',
    blackInksKnockoutDisplay:
     reactProfile.blackInksKnockoutDisplay != null
      ? String(reactProfile.blackInksKnockoutDisplay)
@@ -276,24 +390,29 @@ export class SettingsComponent implements OnInit, OnChanges {
   if (reactProfile._jsonData) {
    jsonProfile.Distress = reactProfile._jsonData.Distress || 'N';
    jsonProfile['2 Hits'] = reactProfile._jsonData['2 Hits'] || 'N';
-   jsonProfile.Blocker = reactProfile._jsonData.Blocker || 'N';
+   jsonProfile.Blocker =
+    rp.blocker === true || rp.blocker === false
+     ? rp.blocker
+      ? 'Y'
+      : 'N'
+     : reactProfile._jsonData.Blocker || 'N';
    jsonProfile.Flash =
     reactProfile._jsonData.Flash &&
-     reactProfile._jsonData.Flash !== null &&
-     !isNaN(reactProfile._jsonData.Flash)
+    reactProfile._jsonData.Flash !== null &&
+    !isNaN(reactProfile._jsonData.Flash)
      ? reactProfile._jsonData.Flash
      : '';
    jsonProfile.Cool =
     reactProfile._jsonData.Cool &&
-     reactProfile._jsonData.Cool !== null &&
-     !isNaN(reactProfile._jsonData.Cool)
+    reactProfile._jsonData.Cool !== null &&
+    !isNaN(reactProfile._jsonData.Cool)
      ? reactProfile._jsonData.Cool
      : '';
    jsonProfile.Micron = reactProfile._jsonData.Micron || 'XXX';
   } else {
    jsonProfile.Distress = 'N';
    jsonProfile['2 Hits'] = 'N';
-   jsonProfile.Blocker = 'N';
+   jsonProfile.Blocker = rp.blocker === true || rp.blocker === false ? (rp.blocker ? 'Y' : 'N') : 'N';
    jsonProfile.Flash = '';
    jsonProfile.Cool = '';
    jsonProfile.Micron = 'XXX';
@@ -326,25 +445,48 @@ export class SettingsComponent implements OnInit, OnChanges {
  }
 
  handleAddProfile(): void {
+  this.duplicateProfileDraft = null;
   this.selectedProfile = null;
   this.editModalOpen = true;
  }
 
  handleEditProfile(profile: Profile): void {
+  this.duplicateProfileDraft = null;
   this.selectedProfile = profile;
   this.editModalOpen = true;
  }
 
+ /**
+  * Opens the edit modal with a copy of the profile; name and code default to "-2".
+  * JSON is updated only if the user clicks Save.
+  */
  handleDuplicateProfile(profile: Profile): void {
-  const newProfile: Profile = {
+  this.selectedProfile = null;
+  this.duplicateProfileDraft = this.buildDuplicateProfileDraft(profile);
+  this.editModalOpen = true;
+ }
+
+ private buildDuplicateProfileDraft(profile: Profile): Profile {
+  const newName = `${profile.name}-2`;
+  const baseCode = profile.code || profile._jsonData?.['Profile Code'] || '';
+  const newCode = baseCode ? `${baseCode}-2` : '';
+  const distress = profile.distress || profile._jsonData?.Distress || 'N';
+
+  let newJsonData: any | undefined;
+  if (profile._jsonData) {
+   newJsonData = JSON.parse(JSON.stringify(profile._jsonData)) as any;
+   newJsonData['Profile Name'] = newName;
+   newJsonData['Profile Code'] = newCode;
+   newJsonData.id = this.generateId(newName, distress);
+  }
+
+  return {
    ...profile,
-   id: this.generateId(profile.name + ' Copy'),
-   name: profile.name + ' Copy',
-   code: profile.code + '_COPY'
+   id: this.generateId(newName, distress),
+   name: newName,
+   code: newCode,
+   _jsonData: newJsonData
   };
-  const updatedProfiles = [...this.profiles, newProfile];
-  this.profiles = updatedProfiles;
-  this.saveProfiles(updatedProfiles);
  }
 
  handleDeleteProfile(profile: Profile): void {
@@ -368,19 +510,47 @@ export class SettingsComponent implements OnInit, OnChanges {
  handleModalClose(): void {
   this.editModalOpen = false;
   this.selectedProfile = null;
+  this.duplicateProfileDraft = null;
  }
 
  handleModalSave(updatedProfile: Profile): void {
   let updatedProfiles: Profile[];
-  if (this.selectedProfile && this.selectedProfile.id) {
-   updatedProfiles = this.profiles.map((item) =>
-    item.id === this.selectedProfile!.id ? { ...item, ...updatedProfile } : item
-   );
+
+  if (this.duplicateProfileDraft) {
+   const distress =
+    updatedProfile.distress ??
+    this.duplicateProfileDraft.distress ??
+    this.duplicateProfileDraft._jsonData?.Distress ??
+    'N';
+   const name = (updatedProfile.name || this.duplicateProfileDraft.name || '').trim();
+   const merged: Profile = {
+    ...this.duplicateProfileDraft,
+    ...updatedProfile,
+    name,
+    id: this.generateId(name || 'new-profile', distress)
+   };
+   if (merged._jsonData) {
+    const jd = JSON.parse(JSON.stringify(merged._jsonData)) as any;
+    jd['Profile Name'] = merged.name;
+    jd['Profile Code'] = merged.code ?? '';
+    jd.id = merged.id;
+    merged._jsonData = jd;
+   }
+   (merged as any)._jsonData = this.reactToJsonProfile(merged);
+   updatedProfiles = [...this.profiles, merged];
+  } else if (this.selectedProfile && this.selectedProfile.id) {
+   updatedProfiles = this.profiles.map((item) => {
+    if (item.id !== this.selectedProfile!.id) return item;
+    const merged = { ...item, ...updatedProfile } as Profile;
+    (merged as any)._jsonData = this.reactToJsonProfile(merged);
+    return merged;
+   });
   } else {
    const newProfile: Profile = {
     ...updatedProfile,
     id: updatedProfile.id || this.generateId(updatedProfile.name || 'new-profile')
    };
+   (newProfile as any)._jsonData = this.reactToJsonProfile(newProfile);
    updatedProfiles = [...this.profiles, newProfile];
   }
 

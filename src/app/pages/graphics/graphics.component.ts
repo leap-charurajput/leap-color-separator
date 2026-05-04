@@ -218,6 +218,7 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
    .then((result) => {
     if (result.success && result.data && result.data.teamCode) {
      this.teamCode = result.data.teamCode;
+    this.loadPositionOptions();
     } else {
     }
    })
@@ -245,7 +246,7 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
 
  loadPositionOptions(): void {
   this.controller
-   .getGraphicPlacementOptions()
+   .getGraphicPlacementOptions(this.teamCode)
    .then((result) => {
     let placements: string[] = [];
 
@@ -434,6 +435,11 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
  }
 
  handleColorsClick(graphicId: string, graphicName: string): void {
+  console.log(
+   '[Link colors modal] Opening — checkboxes list will load via ControllerService.getColorCodesFromExcel(teamCode) → window.leap (leap-src-index: BATCH .xlsx first, else AI/JSON batch_excel_records)',
+   { graphicId, graphicName, teamCode: this.teamCode }
+  );
+
   this.modalState = {
    isOpen: true,
    graphicId,
@@ -456,6 +462,15 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
       selectedColors = graphic.colors;
      }
 
+     console.log(
+      '[Link colors modal] Checkbox rows (@Input availableColors) — count:',
+      result.colors.length,
+      '| codes:',
+      result.colors,
+      '| pre-selected (selectedColors):',
+      selectedColors
+     );
+
      this.modalState = {
       isOpen: true,
       graphicId,
@@ -465,6 +480,11 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
       isLoadingColors: false
      };
     } else {
+     console.warn('[Link colors modal] No colors for checkboxes — getColorCodesFromExcel failed or empty', {
+      success: result?.success,
+      error: result?.error,
+      colors: result?.colors
+     });
      this.modalState = {
       isOpen: true,
       graphicId,
@@ -476,7 +496,8 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
     }
     this.cdr.detectChanges();
    })
-   .catch(() => {
+   .catch((err) => {
+    console.warn('[Link colors modal] getColorCodesFromExcel threw — no checkboxes', err);
     this.modalState = {
      isOpen: true,
      graphicId,

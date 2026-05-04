@@ -17,7 +17,7 @@
 						<app-checkbox
 							[checked]="selectedColorCodes.includes(colorCode)"
 							[label]="colorCode"
-							(change)="onColorToggle(colorCode)"
+							(change)="onColorToggle(colorCode, $event)"
 						></app-checkbox>
 					</div>
 				</ng-container>
