@@ -62,6 +62,8 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  isSeparationModalOpen = false;
  isCompoundModalOpen = false;
  isExportModalOpen = false;
+ isAddSelectionInkConfirmOpen = false;
+ selectedInkForAdd: string | null = null;
  editingRow: ColorRow | null = null;
 
  editingMeshRows = new Set<number>();
@@ -753,47 +755,47 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   return String(colorName).trim().toLowerCase() === 'blocker';
  }
 
-private getProfileColorMesh(profileInfo?: any): string {
- const profileValue =
-  profileInfo && profileInfo.colorMesh != null
-   ? profileInfo.colorMesh
-   : profileInfo && profileInfo['Color Mesh'] != null
-    ? profileInfo['Color Mesh']
-    : '';
- if (profileValue != null && String(profileValue).trim() !== '') {
-  return String(profileValue).trim();
+ private getProfileColorMesh(profileInfo?: any): string {
+  const profileValue =
+   profileInfo && profileInfo.colorMesh != null
+    ? profileInfo.colorMesh
+    : profileInfo && profileInfo['Color Mesh'] != null
+     ? profileInfo['Color Mesh']
+     : '';
+  if (profileValue != null && String(profileValue).trim() !== '') {
+   return String(profileValue).trim();
+  }
+
+  const meta = this.documentProfileMetadata || {};
+  const value =
+   meta.colorMesh != null
+    ? meta.colorMesh
+    : meta['Color Mesh'] != null
+     ? meta['Color Mesh']
+     : '';
+  return value == null ? '' : String(value).trim();
  }
 
- const meta = this.documentProfileMetadata || {};
- const value =
-  meta.colorMesh != null
-   ? meta.colorMesh
-   : meta['Color Mesh'] != null
-    ? meta['Color Mesh']
-    : '';
- return value == null ? '' : String(value).trim();
-}
+ private getProfileBlockerMesh(profileInfo?: any): string {
+  const profileValue =
+   profileInfo && profileInfo.blockerMesh != null
+    ? profileInfo.blockerMesh
+    : profileInfo && profileInfo['Blocker Mesh'] != null
+     ? profileInfo['Blocker Mesh']
+     : '';
+  if (profileValue != null && String(profileValue).trim() !== '') {
+   return String(profileValue).trim();
+  }
 
-private getProfileBlockerMesh(profileInfo?: any): string {
- const profileValue =
-  profileInfo && profileInfo.blockerMesh != null
-   ? profileInfo.blockerMesh
-   : profileInfo && profileInfo['Blocker Mesh'] != null
-    ? profileInfo['Blocker Mesh']
-    : '';
- if (profileValue != null && String(profileValue).trim() !== '') {
-  return String(profileValue).trim();
+  const meta = this.documentProfileMetadata || {};
+  const value =
+   meta.blockerMesh != null
+    ? meta.blockerMesh
+    : meta['Blocker Mesh'] != null
+     ? meta['Blocker Mesh']
+     : '';
+  return value == null ? '' : String(value).trim();
  }
-
- const meta = this.documentProfileMetadata || {};
- const value =
-  meta.blockerMesh != null
-   ? meta.blockerMesh
-   : meta['Blocker Mesh'] != null
-    ? meta['Blocker Mesh']
-    : '';
- return value == null ? '' : String(value).trim();
-}
 
  private getRequiredWhiteUbCountFromProfile(): number {
   const meta = this.documentProfileMetadata || {};
@@ -1043,6 +1045,160 @@ private getProfileBlockerMesh(profileInfo?: any): string {
 
  handleAddUnderbase(): void {
   this.handleAddCompoundPlate();
+ }
+
+ handleAddSelectionToSeparation(): void {
+  this.controller
+   .inspectSelectionForSeparationInk()
+   .then((result) => {
+    this.ngZone.run(() => {
+     if (!result?.success) {
+      this.showAddInkAlert(result?.message || 'Unable to inspect selection');
+      return;
+     }
+
+     if (!result.canAdd) {
+      if (result.reason === 'mixed-spot-fill' || result.reason === 'no-spot-fill') {
+       this.showAddInkAlert('Select objects with same fill spot color to add to separation');
+       return;
+      }
+      if (result.reason === 'no-selection') {
+       this.showAddInkAlert('Select at least one object first');
+       return;
+      }
+      if (result.reason === 'already-exists') {
+       this.showAddInkAlert(result.message || 'Ink already exists in separation');
+       return;
+      }
+      this.showAddInkAlert(result.message || 'Cannot add selection to separation');
+      return;
+     }
+
+     this.selectedInkForAdd = result.swatchName || null;
+     if (!this.selectedInkForAdd) {
+      this.showAddInkAlert('Unable to determine fill swatch from selection');
+      return;
+     }
+     this.isAddSelectionInkConfirmOpen = true;
+     this.cdr.detectChanges();
+    });
+   })
+   .catch((err) => {
+    console.error('[SEPARATION] Failed to inspect selection for adding ink:', err);
+    this.showAddInkAlert('Failed to inspect selection');
+   });
+ }
+
+ handleCancelAddSelectionInk(): void {
+  this.isAddSelectionInkConfirmOpen = false;
+  this.selectedInkForAdd = null;
+  this.cdr.detectChanges();
+ }
+
+ handleConfirmAddSelectionInk(): void {
+  const inkName = (this.selectedInkForAdd || '').trim();
+  if (!inkName) {
+   this.handleCancelAddSelectionInk();
+   return;
+  }
+
+  // Close confirm modal immediately on user action.
+  this.isAddSelectionInkConfirmOpen = false;
+  this.cdr.detectChanges();
+
+  this.controller
+   .addSelectionToSeparationInk(inkName)
+   .then((result) => {
+    this.ngZone.run(() => {
+     if (!result?.success) {
+      this.selectedInkForAdd = null;
+      this.showAddInkAlert(result?.message || 'Failed to add ink to separation');
+      return;
+     }
+
+     this.addInkRowToPanel(inkName, result?.hex || null).finally(() => {
+      this.updateSepTableInDocument();
+      this.hasUIChanges = false;
+      this.selectedInkForAdd = null;
+      this.cdr.detectChanges();
+     });
+    });
+   })
+   .catch((err) => {
+    console.error('[SEPARATION] Failed to add selection to separation:', err);
+    this.selectedInkForAdd = null;
+    this.showAddInkAlert('Failed to add ink to separation');
+   });
+ }
+
+ private showAddInkAlert(message: string): void {
+  const finalMessage = (message || '').trim() || 'Something went wrong';
+  this.controller.showHostAlert('Add Ink to Separation', finalMessage).catch((err) => {
+   console.error('[SEPARATION] Failed to show host alert dialog:', err);
+  });
+ }
+
+ private addInkRowToPanel(inkName: string, swatchHexFromHost?: string | null): Promise<void> {
+  const normalizedInkName = inkName.trim().toLowerCase();
+  const alreadyInPanel = this.colorRows.some(
+   (row) => !row.removed && (row.colorName || '').trim().toLowerCase() === normalizedInkName
+  );
+  if (alreadyInPanel) {
+   return Promise.resolve();
+  }
+
+  const swatchFromGraphic = this.graphicSwatches.find(
+   (sw: any) => (sw?.name || '').trim().toLowerCase() === normalizedInkName
+  );
+  const colorHex =
+   (swatchHexFromHost && String(swatchHexFromHost).trim()) ||
+   (swatchFromGraphic && swatchFromGraphic.hex) ||
+   this.getRandomColor();
+  const profileName = this.documentProfileMetadata ? this.documentProfileMetadata.profileName : null;
+
+  return this.controller
+   .getInkInformationBatch([inkName], profileName)
+   .then((inkResult) => {
+    this.ngZone.run(() => {
+     const inkInfo =
+      inkResult && inkResult.success && Array.isArray(inkResult.inkInfoList)
+       ? inkResult.inkInfoList[0]
+       : null;
+     const rowFromInkData = this.createColorRowFromSwatch(
+      { name: inkName, hex: colorHex },
+      inkInfo || { mesh: '110', twoHits: false, found: false },
+      null,
+      this.nextId
+     );
+     const addInkRow = {
+      ...rowFromInkData,
+      flashEnabled: false,
+      wbEnabled: false
+     };
+     this.colorRows = [...this.colorRows, addInkRow];
+     this.nextId++;
+     this.cdr.detectChanges();
+    });
+   })
+   .catch((_err) => {
+    this.ngZone.run(() => {
+     const fallbackRow: ColorRow = {
+      id: this.nextId,
+      colorName: inkName,
+      mesh: '110',
+      micron: 'NA',
+      type: 'separation',
+      layerColor: colorHex,
+      flashEnabled: false,
+      coolEnabled: false,
+      wbEnabled: false,
+      removed: false
+     };
+     this.colorRows = [...this.colorRows, fallbackRow];
+     this.nextId++;
+     this.cdr.detectChanges();
+    });
+   });
  }
 
  handleRevert(): void {
@@ -1552,6 +1708,17 @@ private getProfileBlockerMesh(profileInfo?: any): string {
   return this.selectedMeshRows.has(rowId);
  }
 
+ private resolveColorDisplayName(swatchName: string, format: string): string {
+  const trimmed = swatchName.trim();
+  if (!/^PANTONE\s/i.test(trimmed)) {
+   return swatchName;
+  }
+  const withoutPrefix = trimmed.replace(/^PANTONE\s+/i, '');
+  const tokenMatch = withoutPrefix.match(/^(.*?)\s+[A-Z]{1,3}P?$/);
+  const token = tokenMatch ? tokenMatch[1].trim() : withoutPrefix.trim();
+  return format.replace(/XXX/g, token);
+ }
+
  updateSepTableInDocument(): void {
   const activeRows = this.colorRows.filter((row) => !row.removed);
 
@@ -1560,10 +1727,20 @@ private getProfileBlockerMesh(profileInfo?: any): string {
    return;
   }
 
+  const formatEnabled = !!(this.documentProfileMetadata?.formatInkNameLabel);
+  const colorNameFormat: string =
+   this.documentProfileMetadata?.colorNameLabelFormat &&
+    String(this.documentProfileMetadata.colorNameLabelFormat).trim() !== ''
+    ? String(this.documentProfileMetadata.colorNameLabelFormat)
+    : 'PANTONE XXX C';
+
   const tableRows = this.buildTableRowsWithRequiredWhiteUb(activeRows);
   const separationData = tableRows.map((row, index) => ({
    seq: index + 1,
-   colorName: row.colorName,
+   colorName: formatEnabled
+    ? this.resolveColorDisplayName(row.colorName, colorNameFormat)
+    : row.colorName,
+   swatchName: row.colorName,
    mesh: row.mesh,
    micron: row.micron,
    flash: row.flashEnabled,

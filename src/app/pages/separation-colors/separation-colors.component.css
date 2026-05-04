@@ -330,6 +330,15 @@
  color: #ffffff;
 }
 
+.separation-action-btn .add-selection-to-seps-icon polygon,
+.separation-action-btn .add-selection-to-seps-icon path {
+ fill: currentColor;
+}
+
+.separation-action-btn .add-selection-to-seps-icon {
+ transform: none;
+}
+
 /* Theme-aware icon styling */
 .separation-action-btn .add-underbase-icon,
 .separation-action-btn .refresh-icon,

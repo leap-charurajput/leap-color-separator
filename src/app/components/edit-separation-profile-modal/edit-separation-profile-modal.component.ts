@@ -48,7 +48,7 @@ const buildDefaultProfile = (defaultBlackColorNames?: string): ProfileFormState 
  underbaseKnockoutBlack: [false, false, false, false],
  underbaseKnockoutSwatches: ['White UB', 'White UB', 'White UB', 'White UB'],
  formatInkNameLabel: false,
- colorNameLabelFormat: '',
+ colorNameLabelFormat: 'PANTONE XXX C',
  blackInksKnockoutDisplay: defaultBlackColorNames || 'Black, PANTONE Black C, PANTONE Black 6 C, BLACK 00A'
 });
 
@@ -72,7 +72,7 @@ export class EditSeparationProfileModalComponent implements OnInit, OnChanges {
  /** Live list populated from the active Illustrator document's spot swatches. */
  knockoutSwatchOptions: string[] = [...this.fallbackSwatchOptions];
 
- constructor(private controller: ControllerService, private cdr: ChangeDetectorRef) {}
+ constructor(private controller: ControllerService, private cdr: ChangeDetectorRef) { }
 
  private readonly excludedSwatches = ['[Registration]', '[None]'];
 
@@ -135,16 +135,18 @@ export class EditSeparationProfileModalComponent implements OnInit, OnChanges {
     blockerKnockoutBlack: !!(this.profile as any).blockerKnockoutBlack || !!(this.profile as any)._jsonData?.blockerKnockoutBlack,
     blockerKnockoutSwatch: String(
      (this.profile as any).blockerKnockoutSwatch ||
-      (this.profile as any)._jsonData?.blockerKnockoutSwatch ||
-      defaultProfile.blockerKnockoutSwatch
+     (this.profile as any)._jsonData?.blockerKnockoutSwatch ||
+     defaultProfile.blockerKnockoutSwatch
     ),
     underbaseSwatch: String(
      (this.profile as any).underbaseSwatch ||
-      (this.profile as any)._jsonData?.underbaseSwatch ||
-      defaultProfile.underbaseSwatch
+     (this.profile as any)._jsonData?.underbaseSwatch ||
+     defaultProfile.underbaseSwatch
     ),
     formatInkNameLabel,
-    colorNameLabelFormat: this.profile.colorNameLabelFormat ?? defaultProfile.colorNameLabelFormat
+    colorNameLabelFormat: this.profile.colorNameLabelFormat != null && this.profile.colorNameLabelFormat !== ''
+     ? this.profile.colorNameLabelFormat
+     : defaultProfile.colorNameLabelFormat
    };
   } else {
    this.formState = { ...defaultProfile };

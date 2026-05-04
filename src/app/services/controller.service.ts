@@ -134,6 +134,334 @@ export class ControllerService {
   });
  }
 
+ showHostAlert(title: string, message: string): Promise<any> {
+  this.log('showHostAlert called');
+
+  return this.ensureSession().then(() => {
+   const safeTitle = String(title || 'Alert').replace(/'/g, "\\'");
+   const safeMessage = String(message || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+   const script = `
+(function() {
+  try {
+    var alertTitle = '${safeTitle}';
+    var alertMessage = '${safeMessage}';
+    var win, windowResource;
+    windowResource = "dialog { " +
+      "orientation: 'column', " +
+      "alignChildren: ['fill', 'top'], " +
+      "preferredSize:[340, 120], " +
+      "text: '" + alertTitle + "', " +
+      "margins:15, " +
+      "messageText: StaticText { text:" + JSON.stringify(alertMessage) + ", properties:{multiline:true} }, " +
+      "bottomGroup: Group{ alignment:['center','center'], okButton: Button { text: 'OK', properties:{name:'ok'}, size: [75,24] } }" +
+    "}";
+    win = new Window(windowResource);
+    win.bottomGroup.okButton.onClick = function () { win.close(); };
+    win.show();
+    return JSON.stringify({ success: true });
+  } catch (e) {
+    return JSON.stringify({ success: false, error: e && e.message ? e.message : String(e) });
+  }
+})();
+`;
+   return evalScript(script).then((res: any) => {
+    const str = typeof res === 'string' ? res : '';
+    try {
+     return str ? JSON.parse(str) : { success: false, error: 'Empty response from host' };
+    } catch (_e) {
+     return { success: false, error: 'Invalid response from host' };
+    }
+   });
+  });
+ }
+
+ inspectSelectionForSeparationInk(): Promise<any> {
+  this.log('inspectSelectionForSeparationInk called');
+
+  return this.ensureSession().then(() => {
+   const script = `
+(function() {
+  try {
+    if (!app.documents.length) {
+      return JSON.stringify({ success: false, canAdd: false, message: 'No active document found' });
+    }
+
+    var doc = app.activeDocument;
+    var selection = doc.selection || [];
+    if (!selection.length) {
+      return JSON.stringify({ success: true, canAdd: false, reason: 'no-selection', message: 'Select at least one object first' });
+    }
+
+    var separatedArtLayer = null;
+    try {
+      separatedArtLayer = doc.layers.getByName('SEPARATED_ART');
+    } catch (_e0) {}
+    if (!separatedArtLayer) {
+      return JSON.stringify({ success: false, canAdd: false, message: 'SEPARATED_ART layer not found' });
+    }
+
+    function normalizeName(name) {
+      return String(name || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+    }
+
+    function collectExistingSublayerNames(layer, outArr) {
+      for (var i = 0; i < layer.layers.length; i++) {
+        var sub = layer.layers[i];
+        outArr.push(sub.name);
+        collectExistingSublayerNames(sub, outArr);
+      }
+    }
+
+    var existingNames = [];
+    collectExistingSublayerNames(separatedArtLayer, existingNames);
+
+    function fillSpotNameFromPath(pathItem) {
+      if (!pathItem || !pathItem.filled || !pathItem.fillColor) {
+        return null;
+      }
+      var fc = pathItem.fillColor;
+      if (fc.typename === 'SpotColor' && fc.spot && fc.spot.name) {
+        return String(fc.spot.name);
+      }
+      return null;
+    }
+
+    function collectFillSpotNames(item, outArr) {
+      if (!item) return;
+      var type = item.typename;
+      if (type === 'PathItem') {
+        var name = fillSpotNameFromPath(item);
+        if (name) outArr.push(name);
+        return;
+      }
+      if (type === 'CompoundPathItem') {
+        for (var c = 0; c < item.pathItems.length; c++) {
+          collectFillSpotNames(item.pathItems[c], outArr);
+        }
+        return;
+      }
+      if (type === 'GroupItem') {
+        for (var g = 0; g < item.pageItems.length; g++) {
+          collectFillSpotNames(item.pageItems[g], outArr);
+        }
+        return;
+      }
+      if (type === 'TextFrame') {
+        try {
+          if (item.textRange && item.textRange.characterAttributes) {
+            var textFill = item.textRange.characterAttributes.fillColor;
+            if (textFill && textFill.typename === 'SpotColor' && textFill.spot && textFill.spot.name) {
+              outArr.push(String(textFill.spot.name));
+            }
+          }
+        } catch (_e1) {}
+      }
+    }
+
+    var fillSpotNames = [];
+    for (var s = 0; s < selection.length; s++) {
+      collectFillSpotNames(selection[s], fillSpotNames);
+    }
+
+    if (!fillSpotNames.length) {
+      return JSON.stringify({
+        success: true,
+        canAdd: false,
+        reason: 'no-spot-fill',
+        message: 'Select objects with same fill spot color to add to separation'
+      });
+    }
+
+    var firstName = fillSpotNames[0];
+    var normalizedFirst = normalizeName(firstName);
+    for (var j = 1; j < fillSpotNames.length; j++) {
+      if (normalizeName(fillSpotNames[j]) !== normalizedFirst) {
+        return JSON.stringify({
+          success: true,
+          canAdd: false,
+          reason: 'mixed-spot-fill',
+          message: 'Select objects with same fill spot color to add to separation'
+        });
+      }
+    }
+
+    var alreadyExists = false;
+    for (var e = 0; e < existingNames.length; e++) {
+      if (normalizeName(existingNames[e]) === normalizedFirst) {
+        alreadyExists = true;
+        break;
+      }
+    }
+
+    return JSON.stringify({
+      success: true,
+      canAdd: !alreadyExists,
+      alreadyExists: alreadyExists,
+      swatchName: firstName,
+      reason: alreadyExists ? 'already-exists' : 'ok',
+      message: alreadyExists ? (firstName + ' already exists in separation') : ''
+    });
+  } catch (e) {
+    return JSON.stringify({
+      success: false,
+      canAdd: false,
+      message: 'Failed to inspect selection: ' + (e && e.message ? e.message : String(e))
+    });
+  }
+})();
+`;
+
+   return evalScript(script).then((res: any) => {
+    const str = typeof res === 'string' ? res : '';
+    try {
+     return str ? JSON.parse(str) : { success: false, canAdd: false, message: 'Empty response' };
+    } catch (_e) {
+     return { success: false, canAdd: false, message: 'Invalid response from host' };
+    }
+   });
+  });
+ }
+
+ addSelectionToSeparationInk(inkName: string): Promise<any> {
+  this.log('addSelectionToSeparationInk called for: ' + inkName);
+
+  return this.ensureSession().then(() => {
+   const safeInkName = String(inkName || '').replace(/'/g, "\\'");
+   const script = `
+(function() {
+  try {
+    if (!app.documents.length) {
+      return JSON.stringify({ success: false, message: 'No active document found' });
+    }
+
+    var doc = app.activeDocument;
+    var selection = doc.selection || [];
+    if (!selection.length) {
+      return JSON.stringify({ success: false, message: 'No selection available' });
+    }
+
+    var targetInkName = '${safeInkName}';
+    if (!targetInkName) {
+      return JSON.stringify({ success: false, message: 'Invalid ink name' });
+    }
+
+    var separatedArtLayer = null;
+    try {
+      separatedArtLayer = doc.layers.getByName('SEPARATED_ART');
+    } catch (_e0) {}
+    if (!separatedArtLayer) {
+      return JSON.stringify({ success: false, message: 'SEPARATED_ART layer not found' });
+    }
+
+    function normalizeName(name) {
+      return String(name || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+    }
+
+    function cmykToRgb(c, m, y, k) {
+      c = c / 100;
+      m = m / 100;
+      y = y / 100;
+      k = k / 100;
+      var r = 255 * (1 - c) * (1 - k);
+      var g = 255 * (1 - m) * (1 - k);
+      var b = 255 * (1 - y) * (1 - k);
+      return { r: Math.round(r), g: Math.round(g), b: Math.round(b) };
+    }
+
+    function rgbToHex(r, g, b) {
+      function toHex(n) {
+        var h = Math.round(n).toString(16);
+        return h.length === 1 ? '0' + h : h;
+      }
+      return '#' + toHex(r) + toHex(g) + toHex(b);
+    }
+
+    function colorToHex(color) {
+      if (!color) return null;
+      try {
+        if (color.typename === 'SpotColor' && color.spot && color.spot.color) {
+          return colorToHex(color.spot.color);
+        }
+        if (color.typename === 'CMYKColor') {
+          var rgbFromCmyk = cmykToRgb(color.cyan, color.magenta, color.yellow, color.black);
+          return rgbToHex(rgbFromCmyk.r, rgbFromCmyk.g, rgbFromCmyk.b);
+        }
+        if (color.typename === 'RGBColor') {
+          return rgbToHex(color.red, color.green, color.blue);
+        }
+        if (color.typename === 'GrayColor') {
+          var g = Math.round((100 - color.gray) * 2.55);
+          return rgbToHex(g, g, g);
+        }
+      } catch (_eColor) {}
+      return null;
+    }
+
+    function findSubLayerByNormalizedName(parentLayer, normalizedName) {
+      for (var i = 0; i < parentLayer.layers.length; i++) {
+        var sub = parentLayer.layers[i];
+        if (normalizeName(sub.name) === normalizedName) return sub;
+      }
+      return null;
+    }
+
+    var normalizedTarget = normalizeName(targetInkName);
+    var targetLayer = findSubLayerByNormalizedName(separatedArtLayer, normalizedTarget);
+    if (targetLayer) {
+      return JSON.stringify({ success: false, message: targetInkName + ' already exists in separation' });
+    }
+
+    targetLayer = separatedArtLayer.layers.add();
+    targetLayer.name = targetInkName;
+    targetLayer.locked = false;
+    targetLayer.visible = true;
+
+    for (var i = selection.length - 1; i >= 0; i--) {
+      try {
+        var item = selection[i];
+        item.locked = false;
+        item.hidden = false;
+        item.move(targetLayer, ElementPlacement.PLACEATBEGINNING);
+      } catch (_e1) {}
+    }
+
+    doc.selection = null;
+    app.redraw();
+
+    var resolvedHex = null;
+    try {
+      var sw = doc.swatches.getByName(targetInkName);
+      if (sw && sw.color) {
+        resolvedHex = colorToHex(sw.color);
+      }
+    } catch (_e2) {}
+
+    return JSON.stringify({
+      success: true,
+      inkName: targetInkName,
+      hex: resolvedHex,
+      message: 'Selection added to separation successfully'
+    });
+  } catch (e) {
+    return JSON.stringify({
+      success: false,
+      message: 'Failed to add selection to separation: ' + (e && e.message ? e.message : String(e))
+    });
+  }
+})();
+`;
+
+   return evalScript(script).then((res: any) => {
+    const str = typeof res === 'string' ? res : '';
+    try {
+     return str ? JSON.parse(str) : { success: false, message: 'Empty response' };
+    } catch (_e) {
+     return { success: false, message: 'Invalid response from host' };
+    }
+   });
+  });
+ }
+
  updateSepTable(separationData: any[]): Promise<any> {
   this.log('updateSepTable called with ' + separationData.length + ' rows');
 

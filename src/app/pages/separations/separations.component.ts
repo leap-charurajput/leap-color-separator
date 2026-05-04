@@ -617,12 +617,12 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
    .then((styleResult) => {
     if (!styleResult.success || !styleResult.styleCodes || styleResult.styleCodes.length === 0) {
      console.warn(logPrefix, 'Step 1 – Style codes: missing or failed. success:', styleResult?.success, '| count:', styleResult?.styleCodes?.length ?? 0, '| error:', styleResult?.error ?? 'none');
-    this.separations = this.buildSeparationsFromXmpGroups();
+     this.separations = this.buildSeparationsFromXmpGroups();
      this.allTeamStyleCodes = [];
-    if (this.separations.length > 0) {
-     console.log(logPrefix, 'Fallback – rendering XMP separation groups because style codes are unavailable:', this.separations);
-    }
-    // Keep existing Styles.xlsx catalog for Add Separation search.
+     if (this.separations.length > 0) {
+      console.log(logPrefix, 'Fallback – rendering XMP separation groups because style codes are unavailable:', this.separations);
+     }
+     // Keep existing Styles.xlsx catalog for Add Separation search.
      this.isLoadingSeparations = false;
      this.cdr.detectChanges();
      return;
@@ -635,15 +635,15 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
     return this.controller.getProfileNamesFromExcel(styleCodes).then((profileResult) => {
      if (!profileResult.success || !profileResult.profileMap) {
       console.warn(logPrefix, 'Step 2 – Profile names: missing or failed. success:', profileResult?.success, '| error:', profileResult?.error ?? 'none');
-     this.separations = this.buildSeparationsFromXmpGroups();
+      this.separations = this.buildSeparationsFromXmpGroups();
       // Keep style search usable in Add Separation even when profile mapping fails.
       this.styleCatalogOptions = styleCodes.map((styleCode: string) => ({
        styleCode: String(styleCode || '').trim(),
        profileName: 'Unknown Profile'
       }));
-     if (this.separations.length > 0) {
-      console.log(logPrefix, 'Fallback – rendering XMP separation groups because profile mapping is unavailable:', this.separations);
-     }
+      if (this.separations.length > 0) {
+       console.log(logPrefix, 'Fallback – rendering XMP separation groups because profile mapping is unavailable:', this.separations);
+      }
       this.isLoadingSeparations = false;
       this.cdr.detectChanges();
       return;
@@ -696,12 +696,12 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
    })
    .catch((err) => {
     console.error(logPrefix, 'Error loading separations:', err);
-   this.separations = this.buildSeparationsFromXmpGroups();
+    this.separations = this.buildSeparationsFromXmpGroups();
     this.allTeamStyleCodes = [];
-   if (this.separations.length > 0) {
-    console.log(logPrefix, 'Fallback – rendering XMP separation groups after error:', this.separations);
-   }
-   // Keep existing Styles.xlsx catalog for Add Separation search.
+    if (this.separations.length > 0) {
+     console.log(logPrefix, 'Fallback – rendering XMP separation groups after error:', this.separations);
+    }
+    // Keep existing Styles.xlsx catalog for Add Separation search.
     this.isLoadingSeparations = false;
     this.cdr.detectChanges();
    });
@@ -838,51 +838,56 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
      profileInfo.ub3Mesh != null ? String(profileInfo.ub3Mesh) : '',
      profileInfo.ub4Mesh != null ? String(profileInfo.ub4Mesh) : ''
     ];
-   profileMetadata.underbaseKnockoutBlack = Array.isArray(profileInfo.underbaseKnockoutBlack)
-    ? [
+    profileMetadata.underbaseKnockoutBlack = Array.isArray(profileInfo.underbaseKnockoutBlack)
+     ? [
       !!profileInfo.underbaseKnockoutBlack[0],
       !!profileInfo.underbaseKnockoutBlack[1],
       !!profileInfo.underbaseKnockoutBlack[2],
       !!profileInfo.underbaseKnockoutBlack[3]
      ]
-    : [false, false, false, false];
-   const defaultUbSwatches = ['White UB', 'White UB', 'White UB', 'White UB'];
-   const srcUbSwatches = (profileInfo as any).underbaseKnockoutSwatches;
-   profileMetadata.underbaseKnockoutSwatches = Array.isArray(srcUbSwatches)
-    ? [0, 1, 2, 3].map((j) =>
+     : [false, false, false, false];
+    const defaultUbSwatches = ['White UB', 'White UB', 'White UB', 'White UB'];
+    const srcUbSwatches = (profileInfo as any).underbaseKnockoutSwatches;
+    profileMetadata.underbaseKnockoutSwatches = Array.isArray(srcUbSwatches)
+     ? [0, 1, 2, 3].map((j) =>
       srcUbSwatches[j] != null && String(srcUbSwatches[j]).trim() !== ''
        ? String(srcUbSwatches[j]).trim()
        : defaultUbSwatches[j]
      )
-    : [...defaultUbSwatches];
-   profileMetadata.blackInksKnockoutDisplay =
-    profileInfo.blackInksKnockoutDisplay != null
-     ? String(profileInfo.blackInksKnockoutDisplay)
-     : '';
-   profileMetadata.underbaseSwatch =
-    (profileInfo as any).underbaseSwatch != null && String((profileInfo as any).underbaseSwatch).trim() !== ''
-     ? String((profileInfo as any).underbaseSwatch).trim()
-     : ((profileInfo as any)['Underbase Swatch'] != null && String((profileInfo as any)['Underbase Swatch']).trim() !== ''
-      ? String((profileInfo as any)['Underbase Swatch']).trim()
-      : 'White UB');
-   profileMetadata.blocker = toEnabled((profileInfo as any).blocker);
-   profileMetadata.blockerMesh =
-    (profileInfo as any).blockerMesh != null
-     ? String((profileInfo as any).blockerMesh)
-     : (
-      (profileInfo as any)['Blocker Mesh'] != null
-       ? String((profileInfo as any)['Blocker Mesh'])
-       : ''
+     : [...defaultUbSwatches];
+    profileMetadata.blackInksKnockoutDisplay =
+     profileInfo.blackInksKnockoutDisplay != null
+      ? String(profileInfo.blackInksKnockoutDisplay)
+      : '';
+    profileMetadata.underbaseSwatch =
+     (profileInfo as any).underbaseSwatch != null && String((profileInfo as any).underbaseSwatch).trim() !== ''
+      ? String((profileInfo as any).underbaseSwatch).trim()
+      : ((profileInfo as any)['Underbase Swatch'] != null && String((profileInfo as any)['Underbase Swatch']).trim() !== ''
+       ? String((profileInfo as any)['Underbase Swatch']).trim()
+       : 'White UB');
+    profileMetadata.blocker = toEnabled((profileInfo as any).blocker);
+    profileMetadata.blockerMesh =
+     (profileInfo as any).blockerMesh != null
+      ? String((profileInfo as any).blockerMesh)
+      : (
+       (profileInfo as any)['Blocker Mesh'] != null
+        ? String((profileInfo as any)['Blocker Mesh'])
+        : ''
       );
+    profileMetadata.formatInkNameLabel = !!(profileInfo as any).formatInkNameLabel;
+    profileMetadata.colorNameLabelFormat =
+     (profileInfo as any).colorNameLabelFormat != null && String((profileInfo as any).colorNameLabelFormat).trim() !== ''
+      ? String((profileInfo as any).colorNameLabelFormat)
+      : 'PANTONE XXX C';
     console.log('[SEPARATIONS][UB_DEBUG] profileMetadata underbase flags/meshes:', {
      profileName,
      profileCode,
      underbaseEnabled: profileMetadata.underbaseEnabled,
-    underbaseMeshes: profileMetadata.underbaseMeshes,
-    underbaseKnockoutBlack: profileMetadata.underbaseKnockoutBlack,
-    underbaseKnockoutSwatches: profileMetadata.underbaseKnockoutSwatches,
-    underbaseSwatch: profileMetadata.underbaseSwatch,
-    blackInksKnockoutDisplay: profileMetadata.blackInksKnockoutDisplay
+     underbaseMeshes: profileMetadata.underbaseMeshes,
+     underbaseKnockoutBlack: profileMetadata.underbaseKnockoutBlack,
+     underbaseKnockoutSwatches: profileMetadata.underbaseKnockoutSwatches,
+     underbaseSwatch: profileMetadata.underbaseSwatch,
+     blackInksKnockoutDisplay: profileMetadata.blackInksKnockoutDisplay
     });
    } else {
     console.warn('[SEPARATIONS][UB_DEBUG] No profileInfo found; underbaseEnabled not set on metadata', {
@@ -1112,10 +1117,10 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
   this.separationActionDialogContext = isNew
    ? { graphicName, separationId: -1, originalProfileName: '' }
    : {
-     graphicName,
-     separationId: separation.id,
-     originalProfileName: separation.profile
-    };
+    graphicName,
+    separationId: separation.id,
+    originalProfileName: separation.profile
+   };
   this.separationActionDialogStyleCodes = isNew ? [...this.allTeamStyleCodes] : [...(separation.styles || [])];
   this.separationActionDialogInitialProfile =
    isNew && profileOpts.length > 0 ? profileOpts[0] : separation.profile || (profileOpts[0] || '');
@@ -1252,8 +1257,8 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
    if (catalogResult?.success && Array.isArray(catalogResult.styles) && catalogResult.styles.length > 0) {
     this.styleCatalogOptions = catalogResult.styles.map((item: any) => ({
      styleCode: String(item?.styleCode || '').trim(),
-    profileName: String(item?.profileName || 'Unknown Profile').trim(),
-    styleDesc: String(item?.styleDesc || '').trim()
+     profileName: String(item?.profileName || 'Unknown Profile').trim(),
+     styleDesc: String(item?.styleDesc || '').trim()
     })).filter((item: AddSeparationDialogStyleOption) => !!item.styleCode);
     console.log('[Separations] Add dialog style catalog loaded from Styles.xlsx', {
      styleCatalogOptionsCount: this.styleCatalogOptions.length
@@ -1423,9 +1428,9 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
   const evRec = ev && typeof ev === 'object' ? (ev as Record<string, boolean>) : null;
   const cleanup = evRec
    ? {
-     deleteUnpaintedPaths: !!evRec['deleteUnpaintedPaths'],
-     deleteLeftoverPaths: !!evRec['deleteLeftoverPaths']
-    }
+    deleteUnpaintedPaths: !!evRec['deleteUnpaintedPaths'],
+    deleteLeftoverPaths: !!evRec['deleteLeftoverPaths']
+   }
    : { deleteUnpaintedPaths: false, deleteLeftoverPaths: false };
 
   this.controller.deleteAllPlatesInSeparationDoc?.()

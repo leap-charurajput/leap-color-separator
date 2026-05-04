@@ -384,21 +384,22 @@ function updateGridColorLabels(doc, separationData) {
   }
 
   var swatchColor = null;
-  if (sepData.colorName) {
-   var swatch = getSwatchByName(doc, sepData.colorName);
+  var swatchLookupName = sepData.swatchName || sepData.colorName;
+  if (swatchLookupName) {
+   var swatch = getSwatchByName(doc, swatchLookupName);
    if (swatch && swatch.color) {
     swatchColor = swatch.color;
    } else {
-    var isWhiteUbVariant = /^white\s*ub(\s+\d+)?$/i.test(String(sepData.colorName));
+    var isWhiteUbVariant = /^white\s*ub(\s+\d+)?$/i.test(String(swatchLookupName));
     if (isWhiteUbVariant) {
      var whiteUbSwatch = getSwatchByName(doc, "White UB");
      if (whiteUbSwatch && whiteUbSwatch.color) {
       swatchColor = whiteUbSwatch.color;
      } else {
-      result.errors.push("Swatch '" + sepData.colorName + "' not found for group '" + groupName + "' and fallback 'White UB' swatch missing");
+      result.errors.push("Swatch '" + swatchLookupName + "' not found for group '" + groupName + "' and fallback 'White UB' swatch missing");
      }
     } else {
-     result.errors.push("Swatch '" + sepData.colorName + "' not found for group '" + groupName + "'");
+     result.errors.push("Swatch '" + swatchLookupName + "' not found for group '" + groupName + "'");
     }
    }
   }
@@ -616,9 +617,50 @@ function deleteNonFillStrokeItems() {
   _tempRectangle.fillColor = _noneSwatch.color;
   _tempRectangle.strokeColor = _noneSwatch.color;
   app.executeMenuCommand('Find Fill & Stroke menu item');
+
+
+  for (var i = app.selection.length - 1; i >= 0; i--) {
+   var selectedItem = app.selection[i];
+   if (!selectedItem) continue;
+   // Top-level PathItem that is a clipping path
+   if (selectedItem.typename === "PathItem" && selectedItem.clipping === true) {
+    selectedItem.selected = false;
+    // Top-level GroupItem that is a clipping group, or contains one deeper
+   } else if (selectedItem.typename === "CompoundPathItem" && selectedItem.pathItems[0].clipping) {
+    selectedItem.selected = false;
+   } else if (selectedItem.typename === "GroupItem") {
+    deselectedClippedItemsInGroup(selectedItem);
+   }
+  }
+
   app.doScript("Clear", "LEAP Color Seps");
  }
  catch (e) {
+ }
+}
+
+function deselectedClippedItemsInGroup(item) {
+ if (!item) return;
+ // PathItem: .clipping === true means this path IS the clipping mask
+ if (item.typename === "PathItem" && item.clipping === true) {
+  item.selected = false;
+  return;
+ }
+ if (item.typename === "CompoundPathItem" && item.pathItems[0].clipping) {
+  item.selected = false;
+  return;
+ }
+ // GroupItem: .clipped === true means the group contains a clipping mask
+ if (item.typename === "GroupItem") {
+  if (item.clipped === true) {
+   item.selected = false;
+   return;
+  }
+  if (item.pageItems) {
+   for (var j = item.pageItems.length - 1; j >= 0; j--) {
+    deselectedClippedItemsInGroup(item.pageItems[j]);
+   }
+  }
  }
 }
 

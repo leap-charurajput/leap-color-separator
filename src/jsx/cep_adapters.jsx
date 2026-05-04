@@ -655,9 +655,24 @@ function duplicateLayerContentsToNewLayer(sourceLayerName, newLayerName, shouldC
    newLayer.name = newLayerName;
   }
 
-  // Keep added UB layers below source White UB in the layer stack.
+  // Place generated UB layers between CHOKE and WHITE UB when possible.
+  // Desired stack: CHOKE (above) -> WHITE UB 2/3/... -> WHITE UB.
   try {
-   newLayer.move(sourceLayer, ElementPlacement.PLACEAFTER);
+   var chokeLayer = null;
+   for (var m = 0; m < separatedArtLayer.layers.length; m++) {
+    if (separatedArtLayer.layers[m].name === CONSTANTS.LAYER_NAMES.CHOKE) {
+     chokeLayer = separatedArtLayer.layers[m];
+     break;
+    }
+   }
+
+   if (chokeLayer) {
+    // Put new UB directly below CHOKE.
+    newLayer.move(chokeLayer, ElementPlacement.PLACEAFTER);
+   } else {
+    // If CHOKE does not exist yet, keep UB variants above WHITE UB.
+    newLayer.move(sourceLayer, ElementPlacement.PLACEBEFORE);
+   }
   } catch (moveErr) { }
   if (shouldClearTarget !== false) {
    for (var k = newLayer.pageItems.length - 1; k >= 0; k--) {
