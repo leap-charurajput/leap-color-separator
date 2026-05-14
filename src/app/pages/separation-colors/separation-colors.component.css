@@ -262,8 +262,8 @@
 }
 
 .exportFieldTable .row {
- padding: 4px 3px 4px 8px;
- border-bottom: 1px solid #ffffff;
+ padding: 0px 3px 0px 8px;
+ border-bottom: 1px solid #525252;
 }
 
 .exportFieldTable .row .col {

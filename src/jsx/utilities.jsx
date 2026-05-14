@@ -351,6 +351,95 @@ function applyColorToRectanglesInGroup(group, color) {
  }
 }
 
+/**
+ * Rename a separation ink in the document: SEPARATED_ART sublayer and spot swatch (by name).
+ * Used when formatted labels (e.g. LS 186) replace formal names (PANTONE 186 C) in swatches and layers.
+ * Returns { success, error?, renamedLayer, renamedSwatch }.
+ */
+function renameSeparationInkInDocument(doc, fromName, toName) {
+ var result = { success: true, error: null, renamedLayer: false, renamedSwatch: false };
+ var from = String(fromName || "").replace(/^\s+|\s+$/g, "");
+ var to = String(toName || "").replace(/^\s+|\s+$/g, "");
+ if (!from || !to) {
+  result.success = false;
+  result.error = "Missing from or to ink name.";
+  return result;
+ }
+ if (from.toLowerCase() === to.toLowerCase()) {
+  return result;
+ }
+
+ var existingTargetSwatch = getSwatchByName(doc, to);
+ var sourceSwatchForConflict = getSwatchByName(doc, from);
+ if (existingTargetSwatch) {
+  if (
+   !sourceSwatchForConflict ||
+   String(existingTargetSwatch.name).toLowerCase() !== String(sourceSwatchForConflict.name).toLowerCase()
+  ) {
+   result.success = false;
+   result.error = "A swatch named \"" + to + "\" already exists.";
+   return result;
+  }
+ }
+
+ var sep = null;
+ try {
+  sep = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SEPARATED_ART);
+ } catch (eSep) { }
+ if (sep) {
+  var i;
+  var lyr = null;
+  for (i = 0; i < sep.layers.length; i++) {
+   if (String(sep.layers[i].name).toLowerCase() === from.toLowerCase()) {
+    lyr = sep.layers[i];
+    break;
+   }
+  }
+  if (lyr) {
+   try {
+    lyr.name = to;
+    result.renamedLayer = true;
+   } catch (eLyr) {
+    result.success = false;
+    result.error = (result.error ? result.error + " " : "") + "Layer rename: " + (eLyr.message || eLyr);
+   }
+  }
+ }
+
+ var sw = getSwatchByName(doc, from);
+ if (result.success && sw && sw.color) {
+  try {
+   if (sw.color.typename === "SpotColor" && sw.color.spot) {
+    sw.color.spot.name = to;
+    result.renamedSwatch = true;
+   } else {
+    try {
+     sw.name = to;
+     result.renamedSwatch = true;
+    } catch (eNm) { }
+   }
+  } catch (eSw) {
+   result.success = false;
+   result.error = (result.error ? result.error + " " : "") + "Swatch rename: " + (eSw.message || eSw);
+  }
+ }
+
+ if (!result.success) {
+  return result;
+ }
+
+ if (!result.renamedLayer && !result.renamedSwatch) {
+  result.success = false;
+  result.error =
+   (result.error ? result.error + " " : "") +
+   "No SEPARATED_ART sublayer or swatch found named \"" +
+   from +
+   "\".";
+ }
+
+ return result;
+}
+
 function updateGridColorLabels(doc, separationData) {
  var result = {
   updatedLabels: 0,
@@ -512,7 +601,61 @@ function formatSeparationDate(isoStr) {
  }
 }
 
-// Update variables in document ([ARTIST], [Artist Initials], [POS], [DATE], [STYLE_CODE], and jsonData keys)
+// Read the graphic position lookup JSON from the configured server base path.
+// Expected location: <ServerBasePath>/SETTINGS/LEAP_SEPS/Data/graphic_positions.json
+// Expected shape: [{ "ABBV": "FT", "DESC": "FRONT" }, ...]
+function loadGraphicPositionLookup() {
+ try {
+  if (typeof getServerBasePath !== 'function') return [];
+  var serverBasePath = getServerBasePath();
+  if (!serverBasePath) return [];
+  var normalizedBasePath = String(serverBasePath).replace(/\/$/, "");
+  var lookupPath = normalizedBasePath + "/SETTINGS/LEAP_SEPS/Data/graphic_positions.json";
+  var lookupFile = new File(lookupPath);
+  if (!lookupFile.exists) return [];
+  if (!lookupFile.open("r")) return [];
+  var content = lookupFile.read();
+  lookupFile.close();
+  if (!content || !content.length) return [];
+  var parsed;
+  if (typeof JSON !== "undefined" && JSON.parse) {
+   parsed = JSON.parse(content);
+  } else {
+   parsed = eval("(" + content + ")");
+  }
+  return (parsed && parsed instanceof Array) ? parsed : [];
+ } catch (e) {
+  return [];
+ }
+}
+
+// Return the ABBV for a given position DESC using the graphic position lookup.
+// Falls back to the original positionDesc when no match is found.
+function getGraphicPositionAbbreviation(positionDesc) {
+ if (positionDesc == null) return '';
+ var original = String(positionDesc).trim();
+ if (!original) return '';
+ try {
+  var target = original.toLowerCase();
+  var lookup = loadGraphicPositionLookup();
+  for (var i = 0; i < lookup.length; i++) {
+   var entry = lookup[i];
+   if (!entry) continue;
+   var desc = entry.DESC != null ? entry.DESC : (entry.desc != null ? entry.desc : '');
+   if (!desc) continue;
+   if (String(desc).trim().toLowerCase() === target) {
+    var abbv = entry.ABBV != null ? entry.ABBV : (entry.abbv != null ? entry.abbv : '');
+    if (abbv != null && String(abbv).trim() !== '') {
+     return String(abbv).trim();
+    }
+    break;
+   }
+  }
+ } catch (e) { }
+ return original;
+}
+
+// Update variables in document ([ARTIST], [Artist Initials], [POS], [DATE], [STYLE_CODE], jsonData keys; optional profileMetadata.batchVariableSource from BATCH .xlsx after JSON)
 function updateVariablesInDocument(doc, jsonData, styleCodes, profileMetadata) {
  try {
   var meta = profileMetadata || {};
@@ -543,11 +686,24 @@ function updateVariablesInDocument(doc, jsonData, styleCodes, profileMetadata) {
     } else if (key === 'artist_initials' || key === 'artistinitials') {
      value = (meta.artistInitials != null && meta.artistInitials !== '') ? String(meta.artistInitials).trim() : '';
     } else if (key === 'pos') {
-     value = (meta.position != null && meta.position !== '') ? String(meta.position).trim() : (findValueInJSON(jsonData, 'Position') || findValueInJSON(jsonData, 'position') || '');
+     var rawPosition = (meta.position != null && meta.position !== '') ? String(meta.position).trim() : (findValueInJSON(jsonData, 'Position') || findValueInJSON(jsonData, 'position') || '');
+     value = rawPosition ? getGraphicPositionAbbreviation(rawPosition) : '';
     } else if (key === 'date') {
      value = formatSeparationDate(meta.createdDate || '');
     } else {
      value = findValueInJSON(jsonData, variableName);
+    }
+
+    var batchSrc = meta.batchVariableSource;
+    if (
+     (value === null || value === undefined || value === '') &&
+     batchSrc &&
+     typeof batchSrc === 'object'
+    ) {
+     var fromBatch = findValueInJSON(batchSrc, variableName);
+     if (fromBatch !== null && fromBatch !== undefined && fromBatch !== '') {
+      value = fromBatch;
+     }
     }
 
     if (value !== null && value !== undefined) {

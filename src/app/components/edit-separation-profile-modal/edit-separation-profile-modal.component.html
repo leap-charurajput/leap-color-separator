@@ -1,127 +1,336 @@
 <div *ngIf="isOpen" class="modal-overlay" (mousedown)="onOverlayInteraction($event)"
-	(click)="onOverlayInteraction($event)">
-	<div class="profile-modal-container" (mousedown)="onOverlayInteraction($event)" (click)="onOverlayInteraction($event)">
-		<div class="modal-header profile-modal-header">
-			<h3 class="modal-title profile-modal-title">Edit Separation Profile</h3>
-		</div>
+ (click)="onOverlayInteraction($event)">
+ <div class="profile-modal-container" (mousedown)="onOverlayInteraction($event)" (click)="onOverlayInteraction($event)">
+  <div class="profile-modal-header-row">
+   <div class="modal-header profile-modal-header">
+    <h3 class="modal-title profile-modal-title">Seps Profile Options</h3>
+   </div>
 
-		<form (submit)="onSubmit($event)">
-			<div class="modal-body settings-style profile-modal-body">
-				<div class="settings-field profile-field-row">
-					<label class="settings-field-label">Name:</label>
-					<input type="text" class="settings-field-input settings-field-input-wide" [value]="formState.name"
-						(input)="onInputChange('name', $event)" />
-				</div>
-				<div class="settings-field profile-field-row">
-					<label class="settings-field-label">Code:</label>
-					<input type="text" class="settings-field-input settings-field-input-wide" [value]="formState.code"
-						(input)="onInputChange('code', $event)" />
-				</div>
-				<div class="settings-field profile-field-row profile-field-row--mesh">
-					<label class="settings-field-label">Color Mesh:</label>
-					<input type="text" class="settings-field-input" [value]="formState.colorMesh"
-						(input)="onInputChange('colorMesh', $event)" />
-				</div>
+   <div class="profile-modal-tabbar" role="tablist" aria-label="Separation profile sections">
+    <button type="button" class="profile-modal-tab" [class.is-active]="activeTab === 'general'" role="tab"
+     [attr.aria-selected]="activeTab === 'general'" aria-controls="sep-profile-panel-general"
+     id="sep-profile-tab-general" title="General Settings of Separation" (click)="setActiveTab('general')">
+     <svg class="profile-modal-tab-icon-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18"
+      height="18" fill="none" aria-hidden="true">
+      <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" stroke="currentColor" stroke-width="1.5"></path>
+      <path
+       d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c0 .66.39 1.26 1 1.51H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"
+       stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"></path>
+     </svg>
+     <span class="profile-modal-tab-sr-only">General Settings of Separation</span>
+    </button>
 
-				<div class="settings-field settings-field-inline settings-field-format-row">
-					<app-checkbox [checked]="formState.formatInkNameLabel" [label]="'Format ink name label'"
-						(change)="onCheckboxChange('formatInkNameLabel', $event)"></app-checkbox>
-					<input type="text" class="settings-field-input settings-field-input-format"
-						[value]="formState.colorNameLabelFormat" (input)="onInputChange('colorNameLabelFormat', $event)"
-						placeholder="Color name label format" aria-label="Color name label format" />
-				</div>
+    <button type="button" class="profile-modal-tab" [class.is-active]="activeTab === 'underbase'" role="tab"
+     [attr.aria-selected]="activeTab === 'underbase'" aria-controls="sep-profile-panel-underbase"
+     id="sep-profile-tab-underbase" title="Underbase Settings" (click)="setActiveTab('underbase')">
+     <svg class="profile-modal-tab-icon-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 21.57 19.35" width="18"
+      height="18" aria-hidden="true">
+      <path fill="currentColor"
+       d="M21.26,5.15L16.42.31c-.2-.2-.46-.31-.74-.31h-1.57c-.38,0-.72.2-.91.53-.35.61-1.3,1.04-2.41,1.04,0,.04,0,.07,0,.11,0-.04,0-.07,0-.11-1.11,0-2.06-.44-2.41-1.04-.19-.32-.53-.53-.91-.53h-1.57c-.28,0-.55.11-.74.31L.31,5.15c-.41.41-.41,1.08,0,1.49l2.6,2.6c.41.41,1.08.41,1.49,0l.62-.62v9.68c0,.58.47,1.05,1.05,1.05h9.43c.58,0,1.05-.47,1.05-1.05v-9.68l.62.62c.41.41,1.08.41,1.49,0l2.6-2.6c.41-.41.41-1.08,0-1.49ZM16.9,8.08h-5.67v.71h.36c.1,0,.18.04.25.11.07.07.11.15.11.25v3.55c0,.1-.04.18-.11.25-.07.07-.15.11-.25.11h-1.42c-.1,0-.18-.04-.25-.11-.07-.07-.11-.15-.11-.25v-3.55c0-.1.03-.18.11-.25.07-.07.15-.11.25-.11h.36v-1.42h5.67v-2.84h-.7v.71c0,.19-.07.36-.21.5-.14.14-.31.21-.5.21h-7.82c-.19,0-.36-.07-.5-.21-.14-.14-.21-.31-.21-.5v-2.13c0-.19.07-.36.21-.5s.31-.21.5-.21h7.82c.19,0,.36.07.5.21.14.14.21.31.21.5v.71h1.41v4.26Z">
+      </path>
+      <rect fill="currentColor" x="6.97" y="3.11" width="7.82" height=".71"></rect>
+     </svg>
+     <span class="profile-modal-tab-sr-only">Underbase Settings</span>
+    </button>
 
-				<div class="settings-field settings-field-inline settings-field-twin-checks">
-					<app-checkbox [checked]="formState.waterbaseInk" [label]="'Waterbase Ink'"
-						(change)="onCheckboxChange('waterbaseInk', $event)"></app-checkbox>
-					<app-checkbox [checked]="formState.overprintAllInks" [label]="'Overprint all inks'"
-						(change)="onCheckboxChange('overprintAllInks', $event)"></app-checkbox>
-				</div>
+    <button type="button" class="profile-modal-tab" [class.is-active]="activeTab === 'inkExceptions'" role="tab"
+     [attr.aria-selected]="activeTab === 'inkExceptions'" aria-controls="sep-profile-panel-inkExceptions"
+     id="sep-profile-tab-inkExceptions" title="Ink Exceptions" (click)="setActiveTab('inkExceptions')">
+     <svg class="profile-modal-tab-icon-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18.58 18.58" width="18"
+      height="18" aria-hidden="true">
+      <path fill="currentColor"
+       d="M0,1.16C0,.52.52,0,1.16,0h4.65c.64,0,1.16.52,1.16,1.16v13.94c0,1.92-1.56,3.48-3.48,3.48s-3.48-1.56-3.48-3.48V1.16ZM4.65,2.32h-2.32v2.32h2.32v-2.32ZM2.32,6.97v2.32h2.32v-2.32h-2.32ZM3.48,15.97c.48,0,.87-.39.87-.87s-.39-.87-.87-.87-.87.39-.87.87.39.87.87.87ZM6.63,18.58l6.97-6.97h3.82c.64,0,1.16.52,1.16,1.16v4.65c0,.64-.52,1.16-1.16,1.16H6.63ZM8.12,15.46c.01-.12.01-.24.01-.36V5.59l2.74-2.74c.45-.45,1.19-.45,1.64,0l3.28,3.28c.45.45.45,1.19,0,1.65l-7.68,7.68Z">
+      </path>
+     </svg>
+     <span class="profile-modal-tab-sr-only">Ink Exceptions</span>
+    </button>
+   </div>
+  </div>
 
-				<div class="settings-field settings-field-inline settings-field-underbase-swatch">
-					<label class="settings-field-label">Underbase swatch</label>
-					<select class="settings-field-input profile-underbase-swatch-select"
-						[ngModelOptions]="{standalone: true}"
-						[ngModel]="formState.underbaseSwatch"
-						(ngModelChange)="onUnderbaseSwatchChange($event)">
-						<option *ngFor="let opt of underbaseSwatchOptions(); trackBy: trackBySwatchOption" [value]="opt">{{ opt }}</option>
-					</select>
-				</div>
+  <form (submit)="onSubmit($event)">
+   <div class="modal-body settings-style profile-modal-body">
+    <div *ngIf="activeTab === 'general'" class="profile-modal-tab-panel profile-general-tab"
+     id="sep-profile-panel-general" role="tabpanel" aria-labelledby="sep-profile-tab-general">
+     <h4 class="profile-modal-section-title">General Settings of Separation</h4>
 
-				<div class="profile-ub-grid" role="group" aria-label="Underbase configuration">
-					<div class="profile-ub-grid-header">
-						<span class="profile-ub-h-cell profile-ub-h-underbase">Underbase</span>
-						<span class="profile-ub-h-cell profile-ub-h-mesh">Mesh</span>
-						<span class="profile-ub-h-cell profile-ub-h-dark">Dark inks</span>
-					</div>
+     <div class="settings-field profile-field-row">
+      <label class="settings-field-label profile-field-label">Name:</label>
+      <input type="text" class="settings-field-input profile-input profile-input-row" [value]="formState.name"
+       (input)="onInputChange('name', $event)" />
+     </div>
 
-					<div *ngFor="let mesh of formState.underbaseMeshes; let i = index; trackBy: trackByIndex"
-						class="profile-ub-grid-row">
-						<div class="profile-ub-cell profile-ub-cell-underbase">
-							<app-checkbox [checked]="formState.underbaseEnabled[i]" [label]="'UB ' + (i + 1)" [disabled]="i === 0"
-								(change)="onUnderbaseEnabledChange(i, $event)"></app-checkbox>
-						</div>
-						<div class="profile-ub-cell profile-ub-cell-mesh">
-							<input type="text" class="settings-field-input profile-ub-mesh-input" [value]="formState.underbaseMeshes[i]"
-								(input)="onMeshChange(i, $event)" />
-						</div>
-						<div class="profile-ub-cell profile-ub-cell-dark">
-							<div class="profile-ub-radios" role="radiogroup" [attr.aria-label]="'Dark inks UB ' + (i + 1)">
-								<label class="profile-ub-radio" [class.profile-ub-radio-muted]="!formState.underbaseEnabled[i]">
-									<input type="radio" class="profile-ub-radio-input" [attr.name]="'ub-dark-' + i"
-										[checked]="!formState.underbaseKnockoutBlack[i]" [disabled]="!formState.underbaseEnabled[i]"
-										(change)="setUnderbaseDarkInkKnockout(i, false)" />
-									<span>OP</span>
-								</label>
-								<label class="profile-ub-radio" [class.profile-ub-radio-muted]="!formState.underbaseEnabled[i]">
-									<input type="radio" class="profile-ub-radio-input" [attr.name]="'ub-dark-' + i"
-										[checked]="formState.underbaseKnockoutBlack[i]" [disabled]="!formState.underbaseEnabled[i]"
-										(change)="setUnderbaseDarkInkKnockout(i, true)" />
-									<span>k/o</span>
-								</label>
-							</div>
-						</div>
-					</div>
+     <div class="settings-field profile-field-row">
+      <label class="settings-field-label profile-field-label">Code:</label>
+      <input type="text" class="settings-field-input profile-input profile-input-row" [value]="formState.code"
+       (input)="onInputChange('code', $event)" />
+     </div>
 
-					<div class="profile-ub-grid-row profile-ub-grid-row-blocker">
-						<div class="profile-ub-cell profile-ub-cell-underbase">
-							<app-checkbox [checked]="formState.blocker" [label]="'Blocker'"
-								(change)="onCheckboxChange('blocker', $event)"></app-checkbox>
-						</div>
-						<div class="profile-ub-cell profile-ub-cell-mesh">
-							<input type="text" class="settings-field-input profile-ub-mesh-input" [value]="formState.blockerMesh"
-								(input)="onInputChange('blockerMesh', $event)" />
-						</div>
-						<div class="profile-ub-cell profile-ub-cell-dark">
-							<div class="profile-ub-radios" role="radiogroup" aria-label="Dark inks Blocker">
-								<label class="profile-ub-radio" [class.profile-ub-radio-muted]="!formState.blocker">
-									<input type="radio" class="profile-ub-radio-input" name="ub-dark-blocker"
-										[checked]="!formState.blockerKnockoutBlack" [disabled]="!formState.blocker"
-										(change)="setBlockerDarkInkKnockout(false)" />
-									<span>OP</span>
-								</label>
-								<label class="profile-ub-radio" [class.profile-ub-radio-muted]="!formState.blocker">
-									<input type="radio" class="profile-ub-radio-input" name="ub-dark-blocker"
-										[checked]="formState.blockerKnockoutBlack" [disabled]="!formState.blocker"
-										(change)="setBlockerDarkInkKnockout(true)" />
-									<span>k/o</span>
-								</label>
-							</div>
-						</div>
-					</div>
-				</div>
+     <div class="settings-field profile-field-row profile-field-row--mesh">
+      <label class="settings-field-label profile-field-label">Color Mesh:</label>
+      <input type="text" class="settings-field-input profile-input profile-input-mesh-short"
+       [value]="formState.colorMesh" (input)="onInputChange('colorMesh', $event)" />
+     </div>
 
-				<div *ngIf="isAnyKnockoutBlackChecked()" class="settings-field settings-field-vertical">
-					<label class="settings-field-label profile-ko-textarea-label">Dark inks k/o'd from Underbase and Blocker:</label>
-					<textarea class="settings-field-input settings-field-input-wide" [value]="formState.blackInksKnockoutDisplay"
-						(input)="onInputChange('blackInksKnockoutDisplay', $event)"></textarea>
-				</div>
-			</div>
+     <div class="settings-field settings-field-inline profile-row-format">
+      <app-checkbox class="profile-checkbox-tight" [checked]="formState.formatInkNameLabel"
+       [label]="'Format ink name label'" (change)="onCheckboxChange('formatInkNameLabel', $event)"></app-checkbox>
+      <input type="text" class="settings-field-input profile-input profile-input-format-inline"
+       [value]="formState.colorNameLabelFormat" (input)="onInputChange('colorNameLabelFormat', $event)"
+       placeholder="Color name label format" aria-label="Color name label format" />
+     </div>
 
-			<div class="modal-footer profile-modal-footer">
-				<app-button type="button" variant="secondary" (onClick)="onCancel()">Cancel</app-button>
-				<app-button type="button" variant="primary" (onClick)="onSubmit($event)">OK</app-button>
-			</div>
-		</form>
-	</div>
+     <div class="settings-field settings-field-inline profile-row-ink-options">
+      <app-checkbox class="profile-checkbox-tight" [checked]="formState.waterbaseInk" [label]="'Waterbase Ink'"
+       (change)="onCheckboxChange('waterbaseInk', $event)"></app-checkbox>
+      <app-checkbox class="profile-checkbox-tight" [checked]="formState.overprintAllInks" [label]="'Overprint all inks'"
+       (change)="onCheckboxChange('overprintAllInks', $event)"></app-checkbox>
+     </div>
+    </div>
+
+    <div *ngIf="activeTab === 'underbase'" class="profile-modal-tab-panel profile-underbase-tab"
+     id="sep-profile-panel-underbase" role="tabpanel" aria-labelledby="sep-profile-tab-underbase">
+     <h4 class="profile-modal-section-title">Underbase Settings</h4>
+
+     <div class="profile-ub-table" role="group" aria-label="Underbase Mesh Dark inks">
+      <div class="profile-ub-table-header">
+       <span class="profile-ub-th">Underbase</span>
+       <span class="profile-ub-th">Mesh</span>
+       <span class="profile-ub-th profile-ub-th-dark">Dark inks</span>
+      </div>
+
+      <div *ngFor="let mesh of formState.underbaseMeshes; let i = index; trackBy: trackByIndex" class="profile-ub-row"
+       [class.is-row-disabled]="!formState.underbaseEnabled[i]">
+       <div class="profile-ub-cell profile-ub-cell-underbase">
+        <app-checkbox class="profile-checkbox-tight" [checked]="formState.underbaseEnabled[i]" [label]="'UB ' + (i + 1)"
+         [disabled]="i === 0" (change)="onUnderbaseEnabledChange(i, $event)"></app-checkbox>
+       </div>
+       <div class="profile-ub-cell profile-ub-cell-mesh">
+        <input type="text" class="settings-field-input profile-input profile-ub-mesh-input"
+         [value]="formState.underbaseMeshes[i]" (input)="onMeshChange(i, $event)" />
+       </div>
+       <div class="profile-ub-cell profile-ub-cell-opko">
+        <div class="profile-opko-group" role="radiogroup" [attr.aria-label]="'Dark inks UB ' + (i + 1)">
+         <label class="profile-radio-tight" [class.profile-radio-muted]="!formState.underbaseEnabled[i]">
+          <input type="radio" class="profile-radio-input" [attr.name]="'ub-dark-' + i"
+           [checked]="!formState.underbaseKnockoutBlack[i]" [disabled]="!formState.underbaseEnabled[i]"
+           (change)="setUnderbaseDarkInkKnockout(i, false)" />
+          <span class="radio-label-text">OP</span>
+         </label>
+         <label class="profile-radio-tight" [class.profile-radio-muted]="!formState.underbaseEnabled[i]">
+          <input type="radio" class="profile-radio-input" [attr.name]="'ub-dark-' + i"
+           [checked]="formState.underbaseKnockoutBlack[i]" [disabled]="!formState.underbaseEnabled[i]"
+           (change)="setUnderbaseDarkInkKnockout(i, true)" />
+          <span class="radio-label-text">k/o</span>
+         </label>
+        </div>
+       </div>
+      </div>
+
+      <div class="profile-ub-row profile-ub-row-blocker" [class.is-row-disabled]="!formState.blocker">
+       <div class="profile-ub-cell profile-ub-cell-underbase">
+        <app-checkbox class="profile-checkbox-tight" [checked]="formState.blocker" [label]="'Blocker'"
+         (change)="onCheckboxChange('blocker', $event)"></app-checkbox>
+       </div>
+       <div class="profile-ub-cell profile-ub-cell-mesh">
+        <input type="text" class="settings-field-input profile-input profile-ub-mesh-input"
+         [value]="formState.blockerMesh" (input)="onInputChange('blockerMesh', $event)" />
+       </div>
+       <div class="profile-ub-cell profile-ub-cell-opko">
+        <div class="profile-opko-group" role="radiogroup" aria-label="Dark inks Blocker">
+         <label class="profile-radio-tight" [class.profile-radio-muted]="!formState.blocker">
+          <input type="radio" class="profile-radio-input" name="ub-dark-blocker"
+           [checked]="!formState.blockerKnockoutBlack" [disabled]="!formState.blocker"
+           (change)="setBlockerDarkInkKnockout(false)" />
+          <span class="radio-label-text">OP</span>
+         </label>
+         <label class="profile-radio-tight" [class.profile-radio-muted]="!formState.blocker">
+          <input type="radio" class="profile-radio-input" name="ub-dark-blocker"
+           [checked]="formState.blockerKnockoutBlack" [disabled]="!formState.blocker"
+           (change)="setBlockerDarkInkKnockout(true)" />
+          <span class="radio-label-text">k/o</span>
+         </label>
+        </div>
+       </div>
+      </div>
+     </div>
+
+     <div class="profile-row-swatch profile-row-swatch--underbase-tab">
+      <label class="settings-field-label profile-field-label profile-field-label--linkish">Underbase swatch</label>
+      <select class="settings-field-input profile-input profile-row-swatch-select" [ngModelOptions]="{standalone: true}"
+       [ngModel]="formState.underbaseSwatch" (ngModelChange)="onUnderbaseSwatchChange($event)">
+       <option *ngFor="let opt of underbaseSwatchOptions(); trackBy: trackBySwatchOption" [value]="opt">{{ opt }}
+       </option>
+      </select>
+     </div>
+
+     <div *ngIf="isAnyKnockoutBlackChecked()" class="profile-field-stack profile-field-stack--textarea">
+      <label class="settings-field-label profile-field-label profile-ko-textarea-label">Dark inks k/o'd from Underbase
+       and Blocker:</label>
+      <textarea class="settings-field-input profile-input profile-input-block profile-textarea-dark-inks"
+       [value]="formState.blackInksKnockoutDisplay"
+       (input)="onInputChange('blackInksKnockoutDisplay', $event)"></textarea>
+     </div>
+    </div>
+
+    <div *ngIf="activeTab === 'inkExceptions'"
+     class="profile-modal-tab-panel profile-modal-tab-panel--ink profile-ink-tab" id="sep-profile-panel-inkExceptions"
+     role="tabpanel" aria-labelledby="sep-profile-tab-inkExceptions">
+     <div class="profile-ink-top-bar">
+      <h4 class="profile-modal-section-title profile-ink-section-title">Ink Exceptions</h4>
+      <div class="profile-ink-toolbar">
+       <div class="profile-ink-search">
+        <span class="profile-ink-search-icon" aria-hidden="true">
+         <svg class="profile-ink-toolbar-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16"
+          height="16" fill="none" aria-hidden="true">
+          <circle cx="11" cy="11" r="6" stroke="currentColor" stroke-width="1.5"></circle>
+          <path d="M16 16l4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
+         </svg>
+        </span>
+        <input type="search" class="settings-field-input profile-input profile-ink-search-input"
+         placeholder="Search inks…" [value]="inkExceptionQuery" (input)="inkExceptionQuery = $any($event.target).value"
+         aria-label="Search ink exceptions" />
+       </div>
+       <button type="button" class="profile-ink-add-btn" (click)="handleInkExceptionAdd()" title="Add ink exception"
+        aria-label="Add ink exception">
+        <svg class="profile-ink-toolbar-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16"
+         height="16" fill="none" aria-hidden="true">
+         <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
+        </svg>
+       </button>
+      </div>
+     </div>
+
+     <div class="profile-ink-table" role="table" aria-label="Ink exceptions">
+      <div class="profile-ink-table-head" role="rowgroup">
+       <div class="profile-ink-row profile-ink-row--header" role="row">
+        <div class="profile-ink-cell profile-ink-cell--status" role="columnheader" aria-label="Status"></div>
+        <div class="profile-ink-cell profile-ink-cell--name profile-ink-cell--name-header" role="columnheader">Profile
+         Defaults</div>
+        <div class="profile-ink-cell profile-ink-cell--mesh" role="columnheader">
+         <span class="profile-ink-mesh-badge">{{ defaultMeshLabel }}</span>
+        </div>
+        <div class="profile-ink-cell profile-ink-cell--ub" role="columnheader">
+         <span class="profile-ink-pill profile-ink-pill--ub profile-ink-pill--static">
+          <svg class="profile-ink-pill-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12.14 11.8" width="13"
+           height="13" aria-hidden="true">
+           <path fill="currentColor"
+            d="M10.15,0l1.99,1.86-4.41,4.69c-.31.33-.82.34-1.14.02l-.43-.42c-.29-.29-.32-.74-.06-1.06L10.15,0Z"></path>
+           <path fill="currentColor"
+            d="M3.66,11.57c-1.59.45-3.66.11-3.66.11,1.92-.53,2.21-1.92,2.46-3.38.27-1.6,1.87-2.88,3.24-1.72,2.69,2.28-.45,4.53-2.04,4.98ZM3.79,7.1c-.59.37-.74,1.01-.78,1.6s-.47,1.32-.08,1.13.66-.97.9-1.44.9-.66.86-1.05-.58-.43-.9-.23Z">
+           </path>
+          </svg>
+         </span>
+        </div>
+        <div class="profile-ink-cell profile-ink-cell--hits" role="columnheader">
+         <span class="profile-ink-pill profile-ink-pill--hits profile-ink-pill--static">
+          <svg class="profile-ink-pill-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 11.78 11.04" width="13"
+           height="13" aria-hidden="true">
+           <path fill="currentColor"
+            d="M11.78,5.89h-6.63v.74h.37c.1,0,.19.04.26.11.07.07.11.16.11.26v3.68c0,.1-.04.19-.11.26-.07.07-.16.11-.26.11h-1.47c-.1,0-.19-.04-.26-.11-.07-.07-.11-.16-.11-.26v-3.68c0-.1.04-.19.11-.26.07-.07.16-.11.26-.11h.37v-1.47h6.63v-2.94h-1.47v.74c0,.2-.07.37-.22.52s-.32.22-.52.22H.74c-.2,0-.37-.07-.52-.22s-.22-.32-.22-.52V.74c0-.2.07-.37.22-.52s.32-.22.52-.22h8.1c.2,0,.37.07.52.22s.22.32.22.52v.74h2.21v4.42ZM8.83,1.47v-.74H.74v.74h8.1Z">
+           </path>
+          </svg>
+         </span>
+        </div>
+        <div class="profile-ink-cell profile-ink-cell--del" role="columnheader"></div>
+       </div>
+      </div>
+
+      <div class="profile-ink-table-body" role="rowgroup">
+       <div *ngIf="filteredInkExceptions.length === 0" class="profile-ink-empty" role="status">
+        {{ formState.inkExceptions.length > 0 ? 'No inks match your search.' : 'No ink exceptions yet. Use + to add
+        one.' }}
+       </div>
+
+       <div *ngFor="let row of filteredInkExceptions; trackBy: trackByInkException" class="profile-ink-row"
+        [class.is-disabled]="!row.enabled" role="row">
+        <div class="profile-ink-cell profile-ink-cell--status" role="cell">
+         <button type="button" class="profile-ink-icon-btn profile-ink-row-toggle"
+          [class.is-row-disabled]="!row.enabled" (click)="toggleInkException(row.id)"
+          [title]="row.enabled ? 'Click to disable this ink exception' : 'Click to enable this ink exception'"
+          [attr.aria-label]="row.enabled ? 'Disable ink exception' : 'Enable ink exception'"
+          [attr.aria-pressed]="row.enabled">
+          <svg class="profile-ink-row-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18.58 18.58" width="14"
+           height="14" aria-hidden="true">
+           <path fill="currentColor"
+            d="M0,1.16C0,.52.52,0,1.16,0h4.65c.64,0,1.16.52,1.16,1.16v13.94c0,1.92-1.56,3.48-3.48,3.48s-3.48-1.56-3.48-3.48V1.16ZM4.65,2.32h-2.32v2.32h2.32v-2.32ZM2.32,6.97v2.32h2.32v-2.32h-2.32ZM3.48,15.97c.48,0,.87-.39.87-.87s-.39-.87-.87-.87-.87.39-.87.87.39.87.87.87ZM6.63,18.58l6.97-6.97h3.82c.64,0,1.16.52,1.16,1.16v4.65c0,.64-.52,1.16-1.16,1.16H6.63ZM8.12,15.46c.01-.12.01-.24.01-.36V5.59l2.74-2.74c.45-.45,1.19-.45,1.64,0l3.28,3.28c.45.45.45,1.19,0,1.65l-7.68,7.68Z">
+           </path>
+          </svg>
+         </button>
+        </div>
+
+        <div class="profile-ink-cell profile-ink-cell--name" role="cell">
+         <div *ngIf="editingInkExceptionId === row.id; else inkNameView" class="profile-ink-name-edit">
+          <input type="text" class="settings-field-input profile-input profile-ink-name-input"
+           [value]="draftInkExceptionName" (input)="draftInkExceptionName = $any($event.target).value"
+           (keydown)="onInkExceptionNameKeydown($event)" />
+          <button type="button" class="profile-ink-mini-btn" (click)="cancelInkExceptionNameEdit()"
+           aria-label="Cancel edit" title="Cancel">×</button>
+          <button type="button" class="profile-ink-mini-btn" (click)="commitInkExceptionNameEdit()"
+           aria-label="Save ink name" title="Save">✓</button>
+         </div>
+         <ng-template #inkNameView>
+          <button type="button" class="profile-ink-name-btn" [disabled]="!row.enabled"
+           (click)="beginInkExceptionNameEdit(row)" title="Click to edit ink name">{{ row.inkName || '—' }}</button>
+         </ng-template>
+        </div>
+
+        <div class="profile-ink-cell profile-ink-cell--mesh" role="cell">
+         <input type="text" class="settings-field-input profile-input profile-ink-mesh-input" [value]="row.mesh"
+          (input)="updateInkException(row.id, { mesh: $any($event.target).value })" [disabled]="!row.enabled"
+          [attr.aria-label]="'Mesh for ' + (row.inkName || 'ink')" placeholder="—" />
+        </div>
+
+        <div class="profile-ink-cell profile-ink-cell--ub" role="cell">
+         <button type="button" class="profile-ink-pill profile-ink-pill--ub" [class.is-disabled]="!row.enabled"
+          [disabled]="!row.enabled"
+          (click)="updateInkException(row.id, { hitsCount: cycleBrushCount(row.hitsCount || 1) })"
+          [title]="(row.hitsCount || 1) + ' brush hit' + ((row.hitsCount || 1) > 1 ? 's' : '') + ' — click to change'"
+          [attr.aria-label]="(row.hitsCount || 1) + ' brush ' + ((row.hitsCount || 1) > 1 ? 'hits' : 'hit')">
+          <svg *ngFor="let _ of countArray(row.hitsCount || 1); trackBy: trackByIndex" class="profile-ink-pill-icon"
+           xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12.14 11.8" width="13" height="13" aria-hidden="true">
+           <path fill="currentColor"
+            d="M10.15,0l1.99,1.86-4.41,4.69c-.31.33-.82.34-1.14.02l-.43-.42c-.29-.29-.32-.74-.06-1.06L10.15,0Z"></path>
+           <path fill="currentColor"
+            d="M3.66,11.57c-1.59.45-3.66.11-3.66.11,1.92-.53,2.21-1.92,2.46-3.38.27-1.6,1.87-2.88,3.24-1.72,2.69,2.28-.45,4.53-2.04,4.98ZM3.79,7.1c-.59.37-.74,1.01-.78,1.6s-.47,1.32-.08,1.13.66-.97.9-1.44.9-.66.86-1.05-.58-.43-.9-.23Z">
+           </path>
+          </svg>
+         </button>
+        </div>
+
+        <div class="profile-ink-cell profile-ink-cell--hits" role="cell">
+         <button type="button" class="profile-ink-pill profile-ink-pill--hits" [class.is-disabled]="!row.enabled"
+          [disabled]="!row.enabled"
+          (click)="updateInkException(row.id, { underbaseCount: cycleRollerCount(row.underbaseCount || 1) })"
+          [title]="(row.underbaseCount || 1) + ' roller pass' + ((row.underbaseCount || 1) > 1 ? 'es' : '') + ' — click to change'"
+          [attr.aria-label]="(row.underbaseCount || 1) + ' roller ' + ((row.underbaseCount || 1) > 1 ? 'passes' : 'pass')">
+          <svg *ngFor="let _ of countArray(row.underbaseCount || 1); trackBy: trackByIndex"
+           class="profile-ink-pill-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 11.78 11.04" width="13"
+           height="13" aria-hidden="true">
+           <path fill="currentColor"
+            d="M11.78,5.89h-6.63v.74h.37c.1,0,.19.04.26.11.07.07.11.16.11.26v3.68c0,.1-.04.19-.11.26-.07.07-.16.11-.26.11h-1.47c-.1,0-.19-.04-.26-.11-.07-.07-.11-.16-.11-.26v-3.68c0-.1.04-.19.11-.26.07-.07.16-.11.26-.11h.37v-1.47h6.63v-2.94h-1.47v.74c0,.2-.07.37-.22.52s-.32.22-.52.22H.74c-.2,0-.37-.07-.52-.22s-.22-.32-.22-.52V.74c0-.2.07-.37.22-.52s.32-.22.52-.22h8.1c.2,0,.37.07.52.22s.22.32.22.52v.74h2.21v4.42ZM8.83,1.47v-.74H.74v.74h8.1Z">
+           </path>
+          </svg>
+         </button>
+        </div>
+
+        <div class="profile-ink-cell profile-ink-cell--del" role="cell">
+         <button type="button" class="profile-ink-del-btn" (click)="requestInkExceptionRemove(row.id)"
+          title="Remove exception" aria-label="Remove exception"><span aria-hidden="true">×</span></button>
+        </div>
+       </div>
+      </div>
+     </div>
+    </div>
+   </div>
+
+   <div class="modal-footer profile-modal-footer">
+    <app-button type="button" variant="secondary" (onClick)="onCancel()">Cancel</app-button>
+    <app-button type="button" variant="primary" (onClick)="onSubmit($event)">OK</app-button>
+   </div>
+  </form>
+ </div>
 </div>
+
+<app-confirm-dialog [isOpen]="!!inkExceptionRemoveId" title="Remove ink exception" [message]="inkExceptionRemoveMessage"
+ confirmText="Remove" cancelText="Cancel" confirmVariant="danger" (confirm)="confirmInkExceptionRemove()"
+ (cancel)="cancelInkExceptionRemove()"></app-confirm-dialog>

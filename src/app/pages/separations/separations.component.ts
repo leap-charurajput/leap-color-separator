@@ -899,6 +899,18 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
     profileMetadata.bodyColorData = bodyColorData;
    }
 
+   if (!this.isRunningInBrowser && this.teamCode && this.controller.getBatchRowVariableSource) {
+    const docPath = this.versionDocumentPath || undefined;
+    try {
+     const batchVar = await this.controller.getBatchRowVariableSource(this.teamCode, docPath);
+     if (batchVar?.success && batchVar.fields && Object.keys(batchVar.fields).length > 0) {
+      profileMetadata.batchVariableSource = batchVar.fields;
+     }
+    } catch (batchErr) {
+     console.warn('[SEPARATIONS] batchVariableSource from Batch Excel skipped:', batchErr);
+    }
+   }
+
    console.log('[SEPARATIONS][UB_DEBUG] performSeparation payload profileMetadata:', profileMetadata);
    return this.controller.performSeparation(graphicName, styleCodes, profileMetadata, {
     sepsTemplateFileName

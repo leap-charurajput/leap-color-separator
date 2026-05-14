@@ -134,6 +134,70 @@ export class ControllerService {
   });
  }
 
+ reorderSeparatedArtLayers(orderedNames: string[]): Promise<any> {
+  this.log('reorderSeparatedArtLayers called');
+
+  return this.ensureSession().then(() => {
+   const params = { orderedNames };
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleReorderSeparatedArtLayers', params)
+    .then((res: string) => {
+     if (res == null || String(res).trim() === '') {
+      return { success: false, error: 'Empty response from Illustrator for reorder' };
+     }
+     try {
+      return JSON.parse(String(res));
+     } catch (parseErr: any) {
+      console.error('[Controller] reorderSeparatedArtLayers JSON.parse failed:', res, parseErr);
+      return { success: false, error: 'Invalid JSON from Illustrator: ' + String(res).slice(0, 200) };
+     }
+    })
+    .catch((err: any) => {
+     console.error('[Controller] reorderSeparatedArtLayers evalScript failed:', err);
+     throw err;
+    });
+  });
+ }
+
+ removeSeparationInkArtifacts(
+  tryNames: string[],
+  removeSublayer: boolean,
+  removeSwatch: boolean
+ ): Promise<any> {
+  this.log('removeSeparationInkArtifacts called');
+
+  return this.ensureSession().then(() => {
+   const normalized = Array.isArray(tryNames)
+    ? tryNames.map((n) => String(n || '').trim()).filter((n) => n.length > 0)
+    : [];
+   const params = {
+    tryNames: normalized,
+    inkSublayerName: normalized.length > 0 ? normalized[0] : '',
+    removeSublayer: !!removeSublayer,
+    removeSwatch: !!removeSwatch
+   };
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleRemoveSeparationInkArtifacts', params)
+    .then((res: string) => {
+     if (res == null || String(res).trim() === '') {
+      return { success: false, error: 'Empty response from Illustrator' };
+     }
+     try {
+      return JSON.parse(String(res));
+     } catch (parseErr: any) {
+      console.error('[Controller] removeSeparationInkArtifacts JSON.parse failed:', res, parseErr);
+      return { success: false, error: 'Invalid JSON from Illustrator: ' + String(res).slice(0, 200) };
+     }
+    })
+    .catch((err: any) => {
+     console.error('[Controller] removeSeparationInkArtifacts evalScript failed:', err);
+     throw err;
+    });
+  });
+ }
+
  showHostAlert(title: string, message: string): Promise<any> {
   this.log('showHostAlert called');
 
@@ -838,6 +902,10 @@ export class ControllerService {
 	}catch(e){
  alert('Error: ' + e.message);
 	}
+		  // layers.add() puts the new sublayer at the top of SEPARATED_ART; keep stack aligned with panel order (after source plate).
+		  try {
+		    newLayer.move(sourceLayer, ElementPlacement.PLACEAFTER);
+		  } catch (moveErr) {}
 		  return JSON.stringify({ success: true, debug: debug });
 		}
 
@@ -896,6 +964,19 @@ export class ControllerService {
      );
      return result;
     })
+    .catch((err: any) => {
+     throw err;
+    });
+  });
+ }
+
+ getBatchRowVariableSource(teamCode: string, documentPath?: string): Promise<any> {
+  this.log('getBatchRowVariableSource called for team: ' + teamCode);
+
+  return this.ensureSession().then(() => {
+   return (window as any).leap
+    .getBatchRowVariableSource(teamCode, documentPath)
+    .then((result: any) => result)
     .catch((err: any) => {
      throw err;
     });
@@ -1269,14 +1350,6 @@ export class ControllerService {
   this.log('exportPostscript called with ' + (inks?.length ?? 0) + ' inks');
 
   return this.ensureSession().then(() => {
-   const presetPath = this.resolveBundledPrintPostscriptPresetPath();
-   if (!presetPath) {
-    return Promise.resolve({
-     success: false,
-     error:
-      'Could not resolve bundled print preset (extension root). Open the panel from the Illustrator CEP extension so jsx/presets/Print Postscript is on disk.'
-    });
-   }
    return this.loadGeneralSettings().then((settingsResult) => {
     const resolvedPpdName =
      settingsResult?.success && settingsResult?.data?.ppdName != null
@@ -1284,7 +1357,6 @@ export class ControllerService {
       : 'IBlock v2';
     const script = this.buildExportPostscriptScript(
      Array.isArray(inks) ? inks : [],
-     presetPath,
      resolvedPpdName
     );
     return evalScript(script)
@@ -1380,24 +1452,10 @@ export class ControllerService {
   });
  }
 
- /** Absolute path to jsx/presets/Print Postscript inside the installed CEP extension (matches angular.json asset copy). */
- private resolveBundledPrintPostscriptPresetPath(): string {
-  const w = window as any;
-  if (!w.__adobe_cep__ || typeof csInterface?.getSystemPath !== 'function') {
-   return '';
-  }
-  try {
-   const extensionRoot = csInterface.getSystemPath('extension');
-   return extensionRoot + '/jsx/presets/Print Postscript';
-  } catch {
-   return '';
-  }
- }
-
- private buildExportPostscriptScript(inks: string[], printPresetFsPath: string, ppdName: string): string {
+ /** ExtendScript body aligned with React exportPostscript.script.ts (LEAP Color Separator). */
+ private buildExportPostscriptScript(inks: string[], ppdName: string): string {
   const safeInks = Array.isArray(inks) ? inks : [];
   const inksLiteral = JSON.stringify(safeInks);
-  const presetPathLiteral = JSON.stringify(printPresetFsPath);
   const ppdNameLiteral = JSON.stringify(ppdName || 'IBlock v2');
   return `
 (function() {
@@ -1410,30 +1468,63 @@ export class ControllerService {
       });
     }
     var doc = app.activeDocument;
+    if (!doc.artboards || doc.artboards.length === 0) {
+      return JSON.stringify({
+        success: false,
+        error: "No artboards found in document"
+      });
+    }
+
+    var gridArtboardIndex = -1;
+    for (var abIndex = 0; abIndex < doc.artboards.length; abIndex++) {
+      var ab = doc.artboards[abIndex];
+      var abName = (ab && ab.name != null) ? ab.name.toString() : "";
+      if (abName && abName.toUpperCase() === "GRID") {
+        gridArtboardIndex = abIndex;
+        break;
+      }
+    }
+
+    if (gridArtboardIndex === -1) {
+      return JSON.stringify({
+        success: false,
+        error: "Artboard named \\"GRID\\" not found"
+      });
+    }
+
     var docFile = new File(doc.fullName);
     var docFolder = docFile.parent;
     var docName = docFile.name.replace(/\\.[^\\.]+$/, "");
     var outputPath = docFolder.fsName + "/" + docName + ".ps";
 
+    // Flattener
+    var flatOptions = new PrintFlattenerOptions();
+    flatOptions.clipComplexRegions = false;
+    flatOptions.convertStrokesToOutlines = false;
+    flatOptions.convertTextToOutlines = false;
+    flatOptions.flatteningBalance = 100;
+    flatOptions.gradientResolution = 300;
+    flatOptions.rasterizationResolution = 300;
+
+     // Font options
+    var fontOptions = new PrintFontOptions();
+    fontOptions.downloadFonts = PrintFontDownloadMode.DOWNLOADSUBSET;
+
+
     // Job options for the print job
     var jobOptions = new PrintJobOptions();
     jobOptions.copies = 1;
-    jobOptions.printAllArtboards = false;
-    
-    var foundIndex = -1;
-    for (var i = 0; i < doc.artboards.length; i++) {
-      if (doc.artboards[i].name === 'Grid') {
-        foundIndex = i;
-        break;
-      }
-    }
-
-    jobOptions.artboardRange = (foundIndex + 1).toString();
     jobOptions.printArea = PrintingBounds.ARTBOARDBOUNDS;
+    jobOptions.printAllArtboards = false;
+    jobOptions.artboardRange = (gridArtboardIndex + 1).toString();
     jobOptions.file = new File(outputPath);
 
      // Color separation options
     var colorSepOptions = new PrintColorSeparationOptions();
+    colorSepOptions.colorSeparationMode = PrintColorSeparationMode.HOSTBASEDSEPARATION;
+    colorSepOptions.convertSpotColors = false;
+    colorSepOptions.overprintBlack = false;
+
     var _inkList = doc.inkList;
     var printInks = [];
     var inksLookup = {};
@@ -1442,24 +1533,60 @@ export class ControllerService {
     }
     for (var i = 0; i < _inkList.length; i++) {
       var ink = _inkList[i];
-      // var inkName = ink.name.toUpperCase();
-      // ink.inkInfo.printingStatus = inksLookup[inkName] ? true : false;
-      printInks.push(ink);
+      var inkName = ink.name.toUpperCase();
+      if (inksLookup[inkName]) {
+        printInks.push(ink);
+      }
     }
+
     colorSepOptions.inkList = printInks;
+
+
+ 		// Page marks options
+    var marksOptions = new PrintPageMarksOptions();
+    marksOptions.trimMarks = false;
+    marksOptions.registrationMarks = false;
+    marksOptions.colorBars = false;
+    marksOptions.pageInformationMarks = false;
+
+    // PostScript
+		var psOptions = new PrintPostScriptOptions();
+		psOptions.postScriptLevel = PrinterPostScriptLevelEnum.PSLEVEL2;
+		psOptions.binaryPrinting = false;
+		psOptions.imageCompression = PostScriptImageCompressionType.IMAGECOMPRESSIONNONE
+
+    var printCoordinateOptions = new PrintCoordinateOptions();
+    printCoordinateOptions.fitToPage = true;
 
     // Print options
 		var printOptions = new PrintOptions();
     printOptions.printPreset = 'LEAP_SEPS_POSTSCRIPT';
-    //  printOptions.colorSeparationOptions = colorSepOptions;
+    printOptions.colorSeparationOptions = colorSepOptions;
+    // printOptions.file = new File(outputPath);
+    printOptions.flattenerOptions = flatOptions;
+    printOptions.fontOptions = fontOptions;
     printOptions.jobOptions = jobOptions;
+    printOptions.pageMarksOptions = marksOptions;
+    // printOptions.paperOptions = paperOptions;
+    printOptions.coordinateOptions = printCoordinateOptions;
+    printOptions.postScriptOptions = psOptions;
+    // printOptions.printerName = 'Adobe PostScript File';
+    // printOptions.PPDName = ${ppdNameLiteral};
 
-    app.activeDocument.print(printOptions);
+    var previousActiveArtboardIndex = doc.artboards.getActiveArtboardIndex();
+    try {
+      doc.artboards.setActiveArtboardIndex(gridArtboardIndex);
+      app.activeDocument.print(printOptions);
+    } finally {
+      doc.artboards.setActiveArtboardIndex(previousActiveArtboardIndex);
+    }
 
     return JSON.stringify({
       success: true,
       message: "PostScript exported successfully",
-      filePath: outputPath
+      filePath: outputPath,
+      artboardName: "GRID",
+      artboardIndex: gridArtboardIndex
     });
   } catch (e) {
     return JSON.stringify({
@@ -1838,6 +1965,7 @@ export class ControllerService {
       ppdName: 'IBlock v2',
       chokeStrokeColorSwatch: '',
       koDarkColorNames: 'Black, PANTONE PROCESS BLACK C',
+      meshValues: '',
       sepsTemplateFileName: 'SEP-GRID-TEMPLATE.ai'
      }
     });
@@ -1867,6 +1995,7 @@ export class ControllerService {
        ppdName: 'IBlock v2',
        chokeStrokeColorSwatch: '',
        koDarkColorNames: 'Black, PANTONE PROCESS BLACK C',
+       meshValues: '',
        sepsTemplateFileName: 'SEP-GRID-TEMPLATE.ai'
       }
      });
@@ -1882,6 +2011,7 @@ export class ControllerService {
       ppdName: 'IBlock v2',
       chokeStrokeColorSwatch: '',
       koDarkColorNames: 'Black, PANTONE PROCESS BLACK C',
+      meshValues: '',
       sepsTemplateFileName: 'SEP-GRID-TEMPLATE.ai'
      }
     });
@@ -1897,6 +2027,7 @@ export class ControllerService {
   ppdName?: string;
   chokeStrokeColorSwatch?: string;
   koDarkColorNames?: string;
+  meshValues?: string;
   sepsTemplateFileName?: string;
  }): Promise<{ success: boolean; error?: string }> {
   return new Promise((resolve) => {

@@ -930,10 +930,20 @@ function copyAndPrepareSEPDocument(templateFile, destinationFolder, docName, jso
  updateVariablesInDocument(sepDoc, jsonData, styleCodes, profileMetadata);
  try {
   var sepXmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", sepDoc);
-  if (sepXmp.isXmpCreated) {
+   if (sepXmp.isXmpCreated) {
    sepXmp.setStructField("DocumentType", "Separation Document", false, false);
    if (profileMetadata) {
-    sepXmp.setStructField("SeparationProfileMetadata", profileMetadata, true, false);
+    var metaForXmp = profileMetadata;
+    if (profileMetadata.batchVariableSource) {
+     metaForXmp = {};
+     for (var xk in profileMetadata) {
+      if (!profileMetadata.hasOwnProperty(xk) || xk === "batchVariableSource") {
+       continue;
+      }
+      metaForXmp[xk] = profileMetadata[xk];
+     }
+    }
+    sepXmp.setStructField("SeparationProfileMetadata", metaForXmp, true, false);
    }
    try {
     var bodyNameForSwatch = "Body (Default)";
@@ -1653,6 +1663,386 @@ function handleResetInkVisibility(params_string) {
   });
  }
 }
+
+/*********************************************************
+ * Reorder SEPARATED_ART sublayers to match panel ink order
+ *
+ * Params: { orderedNames: [...] } — table top first (Illustrator sublayer index 0 = top of Layers panel).
+ * - Choke, Blocker, and White UB / UB variants stay at the bottom of SEPARATED_ART (not driven by table order).
+ * - Table labels may differ from sublayer names (e.g. formal "LS 186 C" vs layer "PANTONE 186 C"); we resolve by
+ *   case-insensitive match, stripping trailing "(...)", substring, then shared digit codes among non-tail layers.
+ *********************************************************/
+function handleReorderSeparatedArtLayers(params_string) {
+ try {
+  var params = JSON.parse(params_string);
+  var orderedNames = params.orderedNames;
+
+  if (!orderedNames || !Array.isArray(orderedNames) || orderedNames.length === 0) {
+   return JSON.stringify({
+    success: false,
+    error: "orderedNames (non-empty array) is required"
+   });
+  }
+
+  if (!app.documents.length) {
+   return JSON.stringify({
+    success: false,
+    error: "No active document found"
+   });
+  }
+
+  var doc = app.activeDocument;
+  var separatedArtLayer = getSeparatedArtLayer(doc);
+  if (!separatedArtLayer) {
+   return JSON.stringify({
+    success: false,
+    error: "SEPARATED_ART layer not found"
+   });
+  }
+
+  function isStructuredTailSublayerName(layerName) {
+   if (!layerName) return false;
+   var n = String(layerName).replace(/^\s+|\s+$/g, "");
+   var up = n.toUpperCase();
+   if (up === String(CONSTANTS.LAYER_NAMES.CHOKE).toUpperCase()) return true;
+   if (up === String(CONSTANTS.LAYER_NAMES.BLOCKER).toUpperCase()) return true;
+   if (/^BLOCKER(\s+\d+)?$/i.test(n)) return true;
+   if (up === String(CONSTANTS.LAYER_NAMES.WHITE_UB).toUpperCase()) return true;
+   if (up.indexOf(String(CONSTANTS.LAYER_NAMES.WHITE_UB).toUpperCase() + " ") === 0) return true;
+   if (/WHITE\s*UB|WHITEUB/i.test(n)) return true;
+   return false;
+  }
+
+  function normalizeInkLabel(s) {
+   return String(s || "")
+    .replace(/^\s+|\s+$/g, "")
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+  }
+
+  function stripTrailingParenthetical(s) {
+   return String(s || "").replace(/\s*\([^)]*\)\s*$/g, "").replace(/^\s+|\s+$/g, "");
+  }
+
+  function extractDigitTokens(s) {
+   try {
+    var m = String(s).match(/\d{2,4}/g);
+    return m || [];
+   } catch (eDig) {
+    return [];
+   }
+  }
+
+  function resolveUiLabelToSublayer(parent, uiName, nonTailCandidates) {
+   if (!uiName || !parent) return null;
+   var lyr = getSeparatedArtSubLayerByNameCaseInsensitive(parent, uiName);
+   if (lyr && !isStructuredTailSublayerName(lyr.name)) return lyr;
+
+   var nu = normalizeInkLabel(uiName);
+   var nuStrip = normalizeInkLabel(stripTrailingParenthetical(uiName));
+   var d;
+   var ch;
+   var ln;
+   var lnStrip;
+
+   for (d = 0; d < nonTailCandidates.length; d++) {
+    ch = nonTailCandidates[d];
+    if (!ch || !ch.name) continue;
+    ln = normalizeInkLabel(ch.name);
+    lnStrip = normalizeInkLabel(stripTrailingParenthetical(ch.name));
+    if (ln === nu || lnStrip === nu || ln === nuStrip || lnStrip === nuStrip) return ch;
+   }
+
+   var subs = [];
+   for (d = 0; d < nonTailCandidates.length; d++) {
+    ch = nonTailCandidates[d];
+    if (!ch || !ch.name) continue;
+    ln = normalizeInkLabel(ch.name);
+    lnStrip = normalizeInkLabel(stripTrailingParenthetical(ch.name));
+    if (nu.length >= 4 && (ln.indexOf(nu) >= 0 || lnStrip.indexOf(nu) >= 0)) subs.push(ch);
+    else if (ln.length >= 4 && (nu.indexOf(ln) >= 0 || nu.indexOf(lnStrip) >= 0)) subs.push(ch);
+   }
+   if (subs.length === 1) return subs[0];
+   if (subs.length > 1) {
+    var best = subs[0];
+    for (var c = 1; c < subs.length; c++) {
+     if (String(subs[c].name).length < String(best.name).length) best = subs[c];
+    }
+    return best;
+   }
+
+   var uiDigits = extractDigitTokens(uiName);
+   if (uiDigits.length === 0) return null;
+   var digitMatches = [];
+   for (d = 0; d < nonTailCandidates.length; d++) {
+    ch = nonTailCandidates[d];
+    if (!ch || !ch.name) continue;
+    var ld = extractDigitTokens(ch.name);
+    var hit = false;
+    var ui;
+    var lj;
+    for (ui = 0; ui < uiDigits.length; ui++) {
+     for (lj = 0; lj < ld.length; lj++) {
+      if (uiDigits[ui] === ld[lj]) {
+       hit = true;
+       break;
+      }
+     }
+     if (hit) break;
+    }
+    if (hit) digitMatches.push(ch);
+   }
+   if (digitMatches.length === 1) return digitMatches[0];
+   return null;
+  }
+
+  var all = [];
+  var i;
+  for (i = 0; i < separatedArtLayer.layers.length; i++) {
+   all.push(separatedArtLayer.layers[i]);
+  }
+
+  var tails = [];
+  var nonTail = [];
+  for (i = 0; i < all.length; i++) {
+   if (isStructuredTailSublayerName(all[i].name)) tails.push(all[i]);
+   else nonTail.push(all[i]);
+  }
+
+  var matchedOrdered = [];
+  var usedLayer = {};
+  var u;
+  for (u = 0; u < orderedNames.length; u++) {
+   var rawName = orderedNames[u];
+   if (!rawName) continue;
+   if (isStructuredTailSublayerName(rawName)) continue;
+   var resolved = resolveUiLabelToSublayer(separatedArtLayer, rawName, nonTail);
+   if (!resolved) continue;
+   if (isStructuredTailSublayerName(resolved.name)) continue;
+   if (usedLayer[resolved.name]) continue;
+   usedLayer[resolved.name] = true;
+   matchedOrdered.push(resolved);
+  }
+
+  if (matchedOrdered.length === 0) {
+   return JSON.stringify({
+    success: false,
+    error: "Could not match any table rows to plate sublayers (check formal names vs layer names)"
+   });
+  }
+
+  var others = [];
+  for (i = 0; i < nonTail.length; i++) {
+   var nt = nonTail[i];
+   if (!usedLayer[nt.name]) others.push(nt);
+  }
+
+  var newFull = others.concat(matchedOrdered).concat(tails);
+
+  if (newFull.length !== all.length) {
+   return JSON.stringify({
+    success: false,
+    error: "Internal reorder mismatch (layer count)"
+   });
+  }
+
+  for (var t = 0; t < newFull.length; t++) {
+   if (t === 0) {
+    newFull[t].move(separatedArtLayer, ElementPlacement.PLACEATBEGINNING);
+   } else {
+    newFull[t].move(newFull[t - 1], ElementPlacement.PLACEAFTER);
+   }
+  }
+
+  try {
+   var layerNames = getSeparatedArtLayerNames(doc);
+   if (layerNames.length > 0) {
+    var sepXmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
+    if (sepXmp.isXmpCreated) {
+     sepXmp.setStructField("SeparatedLayerNames", layerNames, true, false);
+     sepXmp.commit();
+    }
+   }
+  } catch (eXmp) {}
+
+  app.redraw();
+  return JSON.stringify({
+   success: true,
+   movedCount: matchedOrdered.length
+  });
+ } catch (e) {
+  return JSON.stringify({
+   success: false,
+   error: e.message || e.toString()
+  });
+ }
+}
+
+/**
+ * Optional cleanup when removing an ink from the separation panel: delete SEPARATED_ART sublayer
+ * and/or document swatch. Params: { tryNames: string[], inkSublayerName?, removeSublayer, removeSwatch }.
+ * tryNames: ordered labels to try (UI colorName first, then host name if different) — exact case-insensitive
+ * match only; no fuzzy remap to a different ink (so "LS 186 2" removes that plate, not "PANTONE 186 C").
+ */
+function handleRemoveSeparationInkArtifacts(params_string) {
+ try {
+  var params = JSON.parse(params_string);
+  var removeSublayer = !!params.removeSublayer;
+  var removeSwatch = !!params.removeSwatch;
+  var out = {
+   success: true,
+   removedLayer: false,
+   removedSwatch: false,
+   layerMessage: null,
+   swatchMessage: null
+  };
+
+  if (!removeSublayer && !removeSwatch) {
+   return JSON.stringify(out);
+  }
+
+  var tryNames = [];
+  if (params.tryNames && params.tryNames.length) {
+   var tn;
+   for (tn = 0; tn < params.tryNames.length; tn++) {
+    var one = String(params.tryNames[tn] || "").replace(/^\s+|\s+$/g, "");
+    if (one) tryNames.push(one);
+   }
+  }
+  if (tryNames.length === 0) {
+   var legacy = String(params.inkSublayerName || params.inkName || "").replace(/^\s+|\s+$/g, "");
+   if (legacy) tryNames.push(legacy);
+  }
+
+  if (tryNames.length === 0) {
+   return JSON.stringify({
+    success: false,
+    error: "tryNames or inkSublayerName is required when removing layer or swatch"
+   });
+  }
+
+  if (!app.documents.length) {
+   return JSON.stringify({
+    success: false,
+    error: "No active document found"
+   });
+  }
+
+  var doc = app.activeDocument;
+  var mutated = false;
+  var ti;
+
+  function findSwatchByNameInsensitive(docRef, name) {
+   var n = String(name || "").toLowerCase();
+   var i;
+   var sw;
+   for (i = 0; i < docRef.swatches.length; i++) {
+    sw = docRef.swatches[i];
+    if (sw && sw.name && String(sw.name).toLowerCase() === n) {
+     return sw;
+    }
+   }
+   return null;
+  }
+
+  function tryRemoveSwatchByName(name) {
+   if (!name) return false;
+   var swatchRef = null;
+   try {
+    swatchRef = doc.swatches.getByName(name);
+   } catch (eSw0) {
+    swatchRef = findSwatchByNameInsensitive(doc, name);
+   }
+   if (!swatchRef) return false;
+   try {
+    swatchRef.remove();
+    return true;
+   } catch (eSw1) {
+    out.swatchMessage = eSw1 && eSw1.message ? eSw1.message : String(eSw1);
+    return false;
+   }
+  }
+
+  var resolvedDocLayerName = null;
+
+  if (removeSublayer) {
+   var separatedArtLayer = getSeparatedArtLayer(doc);
+   if (!separatedArtLayer) {
+    out.layerMessage = "SEPARATED_ART layer not found";
+   } else {
+    var sub = null;
+    for (ti = 0; ti < tryNames.length; ti++) {
+     sub = getSeparatedArtSubLayerByNameCaseInsensitive(separatedArtLayer, tryNames[ti]);
+     if (sub) break;
+    }
+    if (!sub) {
+     out.layerMessage = "Sublayer not found (tried: " + tryNames.join(", ") + ")";
+    } else {
+     try {
+      resolvedDocLayerName = sub.name;
+      sub.locked = false;
+      sub.visible = true;
+      sub.remove();
+      out.removedLayer = true;
+      mutated = true;
+      try {
+       var layerNames = getSeparatedArtLayerNames(doc);
+       var sepXmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
+       if (sepXmp.isXmpCreated) {
+        sepXmp.setStructField("SeparatedLayerNames", layerNames, true, false);
+        sepXmp.commit();
+       }
+      } catch (eXmp) {}
+     } catch (eRem) {
+      out.layerMessage = eRem && eRem.message ? eRem.message : String(eRem);
+      out.success = false;
+     }
+    }
+   }
+  }
+
+  if (removeSwatch) {
+   var swatchOrder = [];
+   if (resolvedDocLayerName) swatchOrder.push(resolvedDocLayerName);
+   for (ti = 0; ti < tryNames.length; ti++) {
+    if (
+     resolvedDocLayerName &&
+     String(tryNames[ti]).toUpperCase() === String(resolvedDocLayerName).toUpperCase()
+    ) {
+     continue;
+    }
+    swatchOrder.push(tryNames[ti]);
+   }
+   var removedSw = false;
+   for (ti = 0; ti < swatchOrder.length; ti++) {
+    if (tryRemoveSwatchByName(swatchOrder[ti])) {
+     removedSw = true;
+     break;
+    }
+   }
+   if (removedSw) {
+    out.removedSwatch = true;
+    mutated = true;
+   } else if (!out.swatchMessage) {
+    out.swatchMessage = "Swatch not found (tried: " + swatchOrder.join(", ") + ")";
+   }
+  }
+
+  if (mutated) {
+   try {
+    doc.save();
+   } catch (eSave) {}
+  }
+
+  return JSON.stringify(out);
+ } catch (e) {
+  return JSON.stringify({
+   success: false,
+   error: e.message || e.toString()
+  });
+ }
+}
+
 function handleGetTemplateInfo(params_string) {
  try {
   if (!app.documents.length) {
@@ -1754,6 +2144,26 @@ function handleUpdateSepTable(params_string) {
   var errors = [];
   var updatedRows = 0;
   var clearedRows = 0;
+  var inkRenamesApplied = 0;
+  var ri;
+  for (ri = 0; ri < separationData.length; ri++) {
+   var sdRename = separationData[ri];
+   if (!sdRename || !sdRename.renameInkFrom) {
+    continue;
+   }
+   var fromInk = String(sdRename.renameInkFrom).replace(/^\s+|\s+$/g, "");
+   var toInk = String(sdRename.swatchName || sdRename.colorName || "").replace(/^\s+|\s+$/g, "");
+   if (!fromInk || !toInk || fromInk.toLowerCase() === toInk.toLowerCase()) {
+    continue;
+   }
+   var rr = renameSeparationInkInDocument(doc, fromInk, toInk);
+   if (rr.success && (rr.renamedLayer || rr.renamedSwatch)) {
+    inkRenamesApplied++;
+   } else if (rr.error) {
+    errors.push("Ink rename " + fromInk + " → " + toInk + ": " + rr.error);
+   }
+  }
+
   var pgInkDataLayer = findLayerByName(doc.layers, "PG Ink Data");
   if (pgInkDataLayer) {
    // Track which groups have data (by seq number)
@@ -1845,6 +2255,12 @@ function handleUpdateSepTable(params_string) {
    var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
    if (xmp.isXmpCreated) {
     xmp.setStructField("LEAPSeparationColorsData", separationData, true, false);
+    if (inkRenamesApplied > 0) {
+     try {
+      var syncedLayerNames = getSeparatedArtLayerNames(doc);
+      xmp.setStructField("SeparatedLayerNames", syncedLayerNames, true, false);
+     } catch (eSyn) { }
+    }
     xmp.commit();
     // Save document to persist XMP data
     try {
@@ -1864,6 +2280,7 @@ function handleUpdateSepTable(params_string) {
    updatedLabels: gridLabelResult.updatedLabels,
    deletedLabels: gridLabelResult.deletedLabels,
    totalRows: separationData.length,
+   inkRenamesApplied: inkRenamesApplied,
    errors: errors.length > 0 ? errors : undefined
   });
  } catch (e) {

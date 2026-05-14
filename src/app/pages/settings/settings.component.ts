@@ -2,6 +2,15 @@ import { Component, Input, OnChanges, OnInit, SimpleChanges } from '@angular/cor
 import { csInterface } from '../../../libs/helper';
 import { ControllerService } from '../../services/controller.service';
 
+interface InkExceptionRow {
+ id: string;
+ enabled: boolean;
+ inkName: string;
+ mesh: string;
+ underbaseCount: number;
+ hitsCount: number;
+}
+
 interface Profile {
  id: string;
  name: string;
@@ -23,8 +32,40 @@ interface Profile {
  formatInkNameLabel?: boolean;
  colorNameLabelFormat?: string;
  distress?: string;
+ inkExceptions?: InkExceptionRow[] | null;
  _jsonData?: any;
 }
+
+const makeInkExceptionId = (): string => {
+ const c = typeof crypto !== 'undefined' ? crypto : null;
+ if (c && typeof c.randomUUID === 'function') {
+  return c.randomUUID();
+ }
+ return `ink-ex-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+};
+
+const clampInkExceptionCount = (value: any, max: number, defaultValue = 1): number => {
+ const n = parseInt(value, 10);
+ if (isNaN(n) || n < 1) return defaultValue;
+ if (n > max) return max;
+ return n;
+};
+
+const normalizeInkExceptionsList = (raw: any): InkExceptionRow[] => {
+ if (!Array.isArray(raw)) return [];
+ return raw
+  .map((row: any) => {
+   if (!row || typeof row !== 'object') return null;
+   const id = row.id != null && String(row.id).trim() ? String(row.id) : makeInkExceptionId();
+   const inkName = row.inkName != null ? String(row.inkName) : '';
+   const mesh = row.mesh != null ? String(row.mesh) : '';
+   const enabled = row.enabled !== false && row.disabled !== true;
+   const underbaseCount = clampInkExceptionCount(row.underbaseCount, 4);
+   const hitsCount = clampInkExceptionCount(row.hitsCount, 2);
+   return { id, enabled, inkName, mesh, underbaseCount, hitsCount } as InkExceptionRow;
+  })
+  .filter(Boolean) as InkExceptionRow[];
+};
 
 @Component({
  selector: 'app-settings',
@@ -46,6 +87,7 @@ export class SettingsComponent implements OnInit, OnChanges {
  ppdName = 'IBlock v2';
  chokeStrokeColorSwatch = '';
  koDarkColorNames = 'Black, PANTONE PROCESS BLACK C';
+ meshValues = '';
  sepsTemplateFileName = 'SEP-GRID-TEMPLATE.ai';
  sepsTemplateFiles: string[] = [];
  selectedSection = 'Separation Profiles';
@@ -133,6 +175,7 @@ export class SettingsComponent implements OnInit, OnChanges {
      result.data.koDarkColorNames !== undefined && result.data.koDarkColorNames !== null
       ? String(result.data.koDarkColorNames)
       : 'Black, PANTONE PROCESS BLACK C';
+    this.meshValues = result.data.meshValues != null ? String(result.data.meshValues) : '';
     this.sepsTemplateFileName =
      result.data.sepsTemplateFileName != null && String(result.data.sepsTemplateFileName).trim() !== ''
       ? String(result.data.sepsTemplateFileName).trim()
@@ -150,6 +193,7 @@ export class SettingsComponent implements OnInit, OnChanges {
    ppdName: this.ppdName,
    chokeStrokeColorSwatch: this.chokeStrokeColorSwatch,
    koDarkColorNames: this.koDarkColorNames,
+   meshValues: this.meshValues,
    sepsTemplateFileName: this.sepsTemplateFileName
   };
   this.controller.saveGeneralSettings(settings).then((result) => {
@@ -310,6 +354,7 @@ export class SettingsComponent implements OnInit, OnChanges {
    overprintAllInks: jp.overprintAllInks !== undefined ? !!jp.overprintAllInks : true,
    formatInkNameLabel: !!jp.formatInkNameLabel,
    colorNameLabelFormat: jp.colorNameLabelFormat != null ? String(jp.colorNameLabelFormat) : '',
+   inkExceptions: jp.inkExceptions != null ? normalizeInkExceptionsList(jp.inkExceptions) : null,
    distress: distress,
    _jsonData: jsonProfile
   };
@@ -384,7 +429,8 @@ export class SettingsComponent implements OnInit, OnChanges {
     reactProfile.blackInksKnockoutDisplay != null
      ? String(reactProfile.blackInksKnockoutDisplay)
      : '',
-   WB: reactProfile.waterbaseInk ? 'Y' : 'N'
+   WB: reactProfile.waterbaseInk ? 'Y' : 'N',
+   inkExceptions: normalizeInkExceptionsList((reactProfile as any).inkExceptions)
   };
 
   if (reactProfile._jsonData) {

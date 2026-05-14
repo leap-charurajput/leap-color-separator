@@ -11,11 +11,14 @@ import {
  SimpleChanges
 } from '@angular/core';
 import { checkForJSXUpdates } from '../../../libs/helper';
+import { ConfirmDialogCheckboxOption } from '../../components/confirm-dialog/confirm-dialog.component';
 import { ControllerService } from '../../services/controller.service';
 
 interface ColorRow {
  id: number;
  colorName: string;
+ /** SEPARATED_ART sublayer / document swatch name when it differs from formal colorName (XMP swatchName). */
+ swatchName?: string;
  mesh: string;
  micron: string;
  type: 'separation' | 'compound';
@@ -64,6 +67,13 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  isExportModalOpen = false;
  isAddSelectionInkConfirmOpen = false;
  selectedInkForAdd: string | null = null;
+ isRemoveColorDialogOpen = false;
+ removeColorTargetRowId: number | null = null;
+ removeColorDialogInkLabel = '';
+ removeColorCheckboxOptions: ConfirmDialogCheckboxOption[] = [
+  { id: 'removeSublayer', label: 'Also remove sublayer' },
+  { id: 'removeSwatch', label: 'Also remove swatch' }
+ ];
  editingRow: ColorRow | null = null;
 
  editingMeshRows = new Set<number>();
@@ -466,9 +476,14 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
    const isWhiteUBColor = this.isWhiteUB(sepData.colorName);
    const isCompound = sepData.type === 'compound';
 
+   const sw =
+    sepData.swatchName && String(sepData.swatchName).trim() !== ''
+     ? String(sepData.swatchName).trim()
+     : undefined;
    const row: ColorRow = {
     id: currentId++,
     colorName: sepData.colorName,
+    swatchName: sw && sw !== sepData.colorName ? sw : undefined,
     mesh: sepData.mesh || '110',
     micron: sepData.micron || 'NA',
     type: sepData.type || 'separation',
@@ -761,6 +776,32 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   if (!colorName) return false;
   const t = String(colorName).trim().toLowerCase();
   return t === 'blocker' || /^blocker\s+\d+$/.test(t);
+ }
+
+ /** Illustrator SEPARATED_ART sublayer name (XMP swatchName when it differs from formal colorName). */
+ hostLayerName(row: ColorRow): string {
+  const s = row.swatchName && String(row.swatchName).trim();
+  return (s || row.colorName || '').trim();
+ }
+
+ /**
+  * Names to try when deleting SEPARATED_ART sublayer / swatch (exact match only in host).
+  * Table label first (e.g. second hit "LS 186 2"), then document swatch name if different — never fuzzy-map to another ink.
+  */
+ private inkDeletionTryNames(row: ColorRow): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const push = (raw: string) => {
+   const t = (raw || '').trim();
+   if (!t) return;
+   const k = t.toLowerCase();
+   if (seen.has(k)) return;
+   seen.add(k);
+   out.push(t);
+  };
+  push(row.colorName || '');
+  push(this.hostLayerName(row));
+  return out;
  }
 
 private getProfileColorMesh(profileInfo?: any): string {
@@ -1335,7 +1376,7 @@ private getProfileBlockerMesh(profileInfo?: any): string {
   console.log('[SEPARATION] Color row menu clicked:', item, 'for row:', rowId);
 
   if (item === 'Remove color') {
-   this.handleRemoveColor(rowId);
+   this.openRemoveColorDialog(rowId);
   } else if (item === 'Edit') {
    this.handleEditSeparation(rowId);
   } else if (item.startsWith('Add second hit')) {
@@ -1359,7 +1400,10 @@ private getProfileBlockerMesh(profileInfo?: any): string {
   if (colorNameFromMenu) {
    const normalizedMenuName = colorNameFromMenu.trim().toLowerCase();
    originalRow = this.colorRows.find(
-    (row) => !row.removed && (row.colorName || '').trim().toLowerCase() === normalizedMenuName
+    (row) =>
+     !row.removed &&
+     ((row.colorName || '').trim().toLowerCase() === normalizedMenuName ||
+      this.hostLayerName(row).toLowerCase() === normalizedMenuName)
    );
   }
   if (!originalRow) {
@@ -1369,11 +1413,12 @@ private getProfileBlockerMesh(profileInfo?: any): string {
 
   const duplicateName = this.getUniqueSecondHitName(originalRow.colorName);
 
-  const isWhiteUBColor = this.isWhiteUB(originalRow.colorName);
   const duplicateRow: ColorRow = {
    ...originalRow,
    id: this.nextId,
-   colorName: this.getUniqueSecondHitName(originalRow.colorName),
+   colorName: duplicateName,
+   /** Second hit is its own plate; do not inherit parent's XMP swatch name (would target wrong layer/swatch on remove). */
+   swatchName: undefined,
    removed: false
   };
 
@@ -1390,10 +1435,10 @@ private getProfileBlockerMesh(profileInfo?: any): string {
 
   //   🔥 Call Illustrator script (fire-and-forget, UI-safe)
   this.controller
-   .generateUnderbaseLayer(originalRow.colorName, duplicateName)
+   .generateUnderbaseLayer(this.hostLayerName(originalRow), duplicateName)
    .then((res: string) => {
     console.log('[SEPARATION] Second hit request:', {
-     sourceColor: originalRow!.colorName,
+     sourceColor: this.hostLayerName(originalRow!),
      duplicateColor: duplicateName,
      rowId: rowId
     });
@@ -1413,15 +1458,24 @@ private getProfileBlockerMesh(profileInfo?: any): string {
    });
  }
 
+ /**
+  * Second-hit names: append " 2", " 3", … to the full ink name.
+  * Exception: a single trailing digit after whitespace (e.g. "White UB 2") is treated as an
+  * existing hit index and incremented ("White UB 3"). Multi-digit suffixes like "LS 123" stay
+  * part of the name so the next hit is "LS 123 2", not "LS 124".
+  */
  getUniqueSecondHitName(currentName: string): string {
   const trimmedName = (currentName || '').trim();
-  const match = trimmedName.match(/^(.+?)(?:\s*(\d+))$/);
+  const match = trimmedName.match(/^(.+)\s+(\d+)$/);
   let baseName = trimmedName;
   let nextNumber = 2;
 
   if (match && match[2]) {
-   baseName = match[1].trim();
-   nextNumber = parseInt(match[2], 10) + 1;
+   const trailingDigits = match[2];
+   if (trailingDigits.length === 1) {
+    baseName = match[1].trim();
+    nextNumber = parseInt(trailingDigits, 10) + 1;
+   }
   }
 
   const existingNames = new Set(
@@ -1455,12 +1509,84 @@ private getProfileBlockerMesh(profileInfo?: any): string {
   }
  }
 
- handleRemoveColor(rowId: number): void {
-  const newColorRows = this.colorRows.map((row) => {
-   if (row.id === rowId) {
-    return { ...row, removed: true };
+ private openRemoveColorDialog(rowId: number): void {
+  const row = this.colorRows.find((r) => r.id === rowId);
+  if (!row || row.removed) {
+   return;
+  }
+  this.removeColorTargetRowId = rowId;
+  this.removeColorDialogInkLabel = (row.colorName || '').trim() || this.hostLayerName(row);
+  this.isRemoveColorDialogOpen = true;
+  this.cdr.detectChanges();
+ }
+
+ handleCancelRemoveColor(): void {
+  this.isRemoveColorDialogOpen = false;
+  this.removeColorTargetRowId = null;
+  this.removeColorDialogInkLabel = '';
+  this.cdr.detectChanges();
+ }
+
+ handleConfirmRemoveColor(payload?: void | Record<string, boolean>): void {
+  const rowId = this.removeColorTargetRowId;
+  if (rowId == null) {
+   this.handleCancelRemoveColor();
+   return;
+  }
+  const row = this.colorRows.find((r) => r.id === rowId);
+  this.isRemoveColorDialogOpen = false;
+  this.removeColorTargetRowId = null;
+  this.removeColorDialogInkLabel = '';
+  this.cdr.detectChanges();
+
+  const flags =
+   payload && typeof payload === 'object'
+    ? (payload as Record<string, boolean>)
+    : ({} as Record<string, boolean>);
+  const removeSublayer = !!flags['removeSublayer'];
+  const removeSwatch = !!flags['removeSwatch'];
+  const inkDeletionTryNames = row ? this.inkDeletionTryNames(row) : [];
+
+  const applyPanelRemove = (): void => {
+   this.applyRemoveColorToPanel(rowId);
+   this.updateSepTableInDocument();
+   this.hasUIChanges = false;
+   this.cdr.detectChanges();
+  };
+
+  if (!this.isRunningInBrowser && inkDeletionTryNames.length > 0 && (removeSublayer || removeSwatch)) {
+   this.controller
+    .removeSeparationInkArtifacts(inkDeletionTryNames, removeSublayer, removeSwatch)
+    .then((result) => {
+     this.ngZone.run(() => {
+      if (result && result.success === false && result.error) {
+       console.warn('[SEPARATION] removeSeparationInkArtifacts:', result.error);
+      } else {
+       if (removeSublayer && result && !result.removedLayer && result.layerMessage) {
+        console.warn('[SEPARATION] sublayer:', result.layerMessage);
+       }
+       if (removeSwatch && result && !result.removedSwatch && result.swatchMessage) {
+        console.warn('[SEPARATION] swatch:', result.swatchMessage);
+       }
+      }
+      applyPanelRemove();
+     });
+    })
+    .catch((err) => {
+     console.error('[SEPARATION] removeSeparationInkArtifacts failed', err);
+     this.ngZone.run(() => applyPanelRemove());
+    });
+  } else {
+   applyPanelRemove();
+  }
+ }
+
+ private applyRemoveColorToPanel(rowId: number): void {
+  const newColorRows = this.colorRows.map((r) => {
+   if (r.id === rowId) {
+    return { ...r, removed: true };
    }
-   return row;
+   return r;
   });
 
   const sortedRows = newColorRows.sort((a, b) => {
@@ -1542,6 +1668,32 @@ private getProfileBlockerMesh(profileInfo?: any): string {
    'to',
    event.currentIndex
   );
+
+  // In CEP, always ask Illustrator to reorder — do not gate on isSeparatedDoc (it can be false while
+  // the table still shows rows). ExtendScript returns a clear error if SEPARATED_ART is missing.
+  if (!this.isRunningInBrowser) {
+   const orderedNames = this.colorRows
+    .filter((row) => !row.removed)
+    .map((row) => this.hostLayerName(row));
+   this.controller
+    .reorderSeparatedArtLayers(orderedNames)
+    .then((result) => {
+     if (result && result.success) {
+      console.log('[SEPARATION] SEPARATED_ART layers reordered in document:', {
+       movedCount: result.movedCount,
+       isSeparatedDoc: this.isSeparatedDoc
+      });
+     } else {
+      console.error(
+       '[SEPARATION] Failed to reorder SEPARATED_ART sublayers:',
+       result && result.error
+      );
+     }
+    })
+    .catch((err) => {
+     console.error('[SEPARATION] reorderSeparatedArtLayers error:', err);
+    });
+  }
  }
 
  getSequenceNumber(index: number): string {
@@ -1553,7 +1705,7 @@ private getProfileBlockerMesh(profileInfo?: any): string {
  getAvailableColors(): string[] {
   return this.colorRows
    .filter((row) => row.type === 'separation' && !/ub/i.test(row.colorName))
-   .map((row) => row.colorName);
+   .map((row) => this.hostLayerName(row));
  }
 
  isCompoundPlate(row: ColorRow): boolean {
@@ -1743,20 +1895,36 @@ private getProfileBlockerMesh(profileInfo?: any): string {
     : 'PANTONE XXX C';
 
   const tableRows = this.buildTableRowsWithRequiredWhiteUb(activeRows);
-  const separationData = tableRows.map((row, index) => ({
-   seq: index + 1,
-   colorName: formatEnabled
-    ? this.resolveColorDisplayName(row.colorName, colorNameFormat)
-    : row.colorName,
-   swatchName: row.colorName,
-   mesh: row.mesh,
-   micron: row.micron,
-   flash: row.flashEnabled,
-   cool: row.coolEnabled,
-   wb: row.wbEnabled,
-   hex: row.layerColor || null,
-   type: row.type || 'separation'
-  }));
+  const separationData = tableRows.map((row, index) => {
+   const host = this.hostLayerName(row).trim();
+   let colorNameOut = row.colorName;
+   let swatchNameOut = host;
+   let renameInkFrom: string | undefined = undefined;
+   if (formatEnabled) {
+    colorNameOut = this.resolveColorDisplayName(row.colorName, colorNameFormat);
+    swatchNameOut = String(colorNameOut || '').trim();
+    if (
+     host &&
+     swatchNameOut &&
+     host.toLowerCase() !== swatchNameOut.toLowerCase()
+    ) {
+     renameInkFrom = host;
+    }
+   }
+   return {
+    seq: index + 1,
+    colorName: colorNameOut,
+    swatchName: swatchNameOut,
+    renameInkFrom,
+    mesh: row.mesh,
+    micron: row.micron,
+    flash: row.flashEnabled,
+    cool: row.coolEnabled,
+    wb: row.wbEnabled,
+    hex: row.layerColor || null,
+    type: row.type || 'separation'
+   };
+  });
 
   console.log('[SEPARATION] Updating SEP TABLE with', separationData.length, 'rows');
 
@@ -1765,6 +1933,9 @@ private getProfileBlockerMesh(profileInfo?: any): string {
    .then((result) => {
     if (result.success) {
      console.log('[SEPARATION] SEP TABLE updated successfully:', result);
+     if (result.inkRenamesApplied > 0) {
+      this.checkIfSeparatedDocument();
+     }
     } else {
      console.error('[SEPARATION] Failed to update SEP TABLE:', result.error);
     }

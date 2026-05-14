@@ -9,9 +9,9 @@ import { GraphicsDataService } from './services/graphics-data.service';
  styleUrls: ['./app.component.css']
 })
 export class AppComponent implements OnInit, OnDestroy {
- private readonly panelVersion = '1.0.0';
+ private readonly panelVersion = '1.0.1';
  /** Bump this string when you ship a new build (same format as before: "Mon DD, YYYY"). */
- private readonly panelDeployDate = 'May 05, 2026';
+ private readonly panelDeployDate = 'May 15, 2026';
  activeTab: number | null = 0;
  selectedMenuOption: string | null = null;
  documentRefreshKey = 0;

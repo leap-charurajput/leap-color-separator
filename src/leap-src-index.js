@@ -26,13 +26,23 @@ class ScriptLoader {
 
  evalScript(functionName, params) {
   var params_string = params ? JSON.stringify(params) : '';
-  var eval_string = `${functionName}('${params_string}')`;
+  // Escape for embedding inside single-quoted ExtendScript string literal (apostrophes, backslashes).
+  var escaped_params = params_string.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  var eval_string = `${functionName}('${escaped_params}')`;
   var that = this;
 
   return new Promise((resolve, reject) => {
    var callback = function (eval_res) {
     if (typeof eval_res === 'string') {
-     if (eval_res.toLowerCase().indexOf('error') != -1) {
+     var trimmed = eval_res.replace(/^\s+|\s+$/g, '');
+     // Host handlers return JSON (often includes an "error" key on failure). Do not reject those.
+     if (trimmed.charAt(0) === '{' || trimmed.charAt(0) === '[') {
+      that.log('success eval');
+      resolve(eval_res);
+      return;
+     }
+     var low = eval_res.toLowerCase();
+     if (low.indexOf('evalscript error') !== -1 || low.indexOf('error') !== -1) {
       that.log('err eval');
       reject(that.createScriptError(eval_res));
       return;
@@ -521,6 +531,99 @@ async function getStyleCodesFromExcel(teamCode, documentPath) {
   return styleCodes;
  } catch (error) {
   throw new Error(`Failed to read Excel file: ${error.message}`);
+ }
+}
+
+function normalizeBatchLookupKey(str) {
+ return String(str || '')
+  .toLowerCase()
+  .replace(/[\s_-]/g, '');
+}
+
+function findBatchTeamColumnIndex(headerRow) {
+ if (!headerRow || !headerRow.length) {
+  return -1;
+ }
+ const exactOrder = ['Lineup Org Code', 'Team Code', 'TeamCode'];
+ for (let e = 0; e < exactOrder.length; e++) {
+  const ex = exactOrder[e];
+  const idx = headerRow.findIndex((col) => String(col || '').trim() === ex);
+  if (idx !== -1) {
+   return idx;
+  }
+ }
+ for (let i = 0; i < headerRow.length; i++) {
+  const nk = normalizeBatchLookupKey(String(headerRow[i] || ''));
+  if (nk === 'lineuporgcode' || nk === 'teamcode') {
+   return i;
+  }
+ }
+ return -1;
+}
+
+async function getBatchRowVariableSource(teamCode, documentPath) {
+ try {
+  const normTeam = String(teamCode || '').trim();
+  if (!normTeam || !documentPath) {
+   return {};
+  }
+  const excelFilePath = findExcelFileInBatchFolder(documentPath);
+  if (!excelFilePath) {
+   return {};
+  }
+  let workbook;
+  try {
+   try {
+    const fileBuffer = fs.readFileSync(excelFilePath);
+    workbook = XLSX.read(fileBuffer, { type: 'buffer' });
+   } catch (bufferError) {
+    workbook = XLSX.readFile(excelFilePath);
+   }
+  } catch (readError) {
+   console.warn('[Leap] getBatchRowVariableSource read error:', readError.message);
+   return {};
+  }
+  const sheetName = workbook.SheetNames[0];
+  const worksheet = workbook.Sheets[sheetName];
+  const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+  if (!data.length) {
+   return {};
+  }
+  const headerRow = data[0];
+  const teamCol = findBatchTeamColumnIndex(headerRow);
+  if (teamCol === -1) {
+   return {};
+  }
+  for (let row = 1; row < data.length; row++) {
+   const rowData = data[row];
+   if (!rowData || rowData[teamCol] == null || String(rowData[teamCol]).trim() === '') {
+    continue;
+   }
+   if (String(rowData[teamCol]).trim() !== normTeam) {
+    continue;
+   }
+   const fields = {};
+   for (let c = 0; c < headerRow.length; c++) {
+    const headerName = headerRow[c];
+    if (headerName == null || String(headerName).trim() === '') {
+     continue;
+    }
+    const key = String(headerName).trim();
+    const cell = rowData[c];
+    if (cell == null) {
+     continue;
+    }
+    const txt = String(cell).trim();
+    if (txt !== '') {
+     fields[key] = txt;
+    }
+   }
+   return fields;
+  }
+  return {};
+ } catch (error) {
+  console.warn('[Leap] getBatchRowVariableSource:', error.message);
+  return {};
  }
 }
 
@@ -1477,6 +1580,35 @@ class Leap {
    return {
     success: false,
     error: error.message
+   };
+  }
+ }
+
+ async getBatchRowVariableSource(teamCode, documentPath) {
+  try {
+   if (!documentPath) {
+    try {
+     const docPathResult = await scriptLoader.evalScript('handleGetActiveDocumentPath', {});
+     const docPathData = JSON.parse(docPathResult);
+     if (docPathData.success && docPathData.documentPath) {
+      documentPath = docPathData.documentPath;
+      this.log(`Retrieved document path from host: ${documentPath}`);
+     }
+    } catch (docPathError) {
+     this.log(`Could not get document path from host: ${docPathError.message}`);
+    }
+   }
+   const fields = await getBatchRowVariableSource(teamCode, documentPath);
+   return {
+    success: true,
+    fields: fields || {}
+   };
+  } catch (error) {
+   this.log(`Error getBatchRowVariableSource: ${error.message}`);
+   return {
+    success: false,
+    error: error.message,
+    fields: {}
    };
   }
  }
