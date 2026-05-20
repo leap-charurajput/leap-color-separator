@@ -1,0 +1,71 @@
+<div class="export-settings-panel">
+ <div class="export-settings-fields">
+  <div class="export-settings-field" *ngFor="let field of fields">
+   <label class="export-settings-label" [attr.for]="field.key">{{ field.label }}</label>
+   <textarea
+    [id]="field.key"
+    class="export-settings-input"
+    [value]="getSettingValue(field.key)"
+    (input)="onSettingInput(field.key, $event)"
+   ></textarea>
+  </div>
+ </div>
+
+ <div class="export-settings-token-section">
+  <div class="export-settings-token-header">
+   <p class="export-settings-token-title">Click on an Excel column below to copy code to clipboard</p>
+   <input
+    type="text"
+    class="export-settings-token-search"
+    [(ngModel)]="tokenSearch"
+    placeholder="Search..."
+   />
+  </div>
+
+  <div class="export-settings-token-scroll">
+   <div class="export-settings-token-list" aria-label="Export path tokens">
+    <button
+     *ngFor="let label of filteredExcelColumns"
+     type="button"
+     class="export-settings-token"
+     (click)="copyToken(label)"
+    >
+     {{ label }}
+    </button>
+    <p *ngIf="filteredExcelColumns.length === 0" class="export-settings-empty">No Excel columns found.</p>
+   </div>
+
+   <div class="export-settings-token-divider"></div>
+
+   <p class="export-settings-token-title">Positions</p>
+   <div class="export-settings-token-list" aria-label="Available graphic positions">
+    <button
+     *ngFor="let position of filteredGraphicPositions"
+     type="button"
+     class="export-settings-token"
+     (click)="copyValue(position)"
+    >
+     {{ position }}
+    </button>
+    <p *ngIf="filteredGraphicPositions.length === 0" class="export-settings-empty">No positions found.</p>
+   </div>
+
+   <div class="export-settings-token-divider"></div>
+
+   <p class="export-settings-token-title">Profile codes</p>
+   <div *ngIf="filteredProfileCodes.length > 0; else noProfileCodes" class="export-settings-token-list" aria-label="Available profile codes">
+    <button
+     *ngFor="let profileCode of filteredProfileCodes"
+     type="button"
+     class="export-settings-token"
+     (click)="copyValue(profileCode)"
+    >
+     {{ profileCode }}
+    </button>
+   </div>
+   <ng-template #noProfileCodes>
+    <p class="export-settings-empty">No profile codes found.</p>
+   </ng-template>
+  </div>
+ </div>
+</div>

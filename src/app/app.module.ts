@@ -15,6 +15,7 @@ import { EditSeparationModalComponent } from './components/edit-separation-modal
 import { SeparationProfileActionDialogComponent } from './components/separation-profile-action-dialog/separation-profile-action-dialog.component';
 import { EditSeparationProfileModalComponent } from './components/edit-separation-profile-modal/edit-separation-profile-modal.component';
 import { ExportSeparationsModalComponent } from './components/export-separations-modal/export-separations-modal.component';
+import { ExportSettingsPanelComponent } from './components/export-settings-panel/export-settings-panel.component';
 import { LayerStackVisualizationComponent } from './components/layer-stack-visualization/layer-stack-visualization.component';
 import { LinkColorsModalComponent } from './components/link-colors-modal/link-colors-modal.component';
 import { ProfilesTableComponent } from './components/profiles-table/profiles-table.component';
@@ -52,6 +53,7 @@ import { ControllerService } from './services/controller.service';
   SeparationProfilesPanelComponent,
   EditSeparationProfileModalComponent,
   ExportSeparationsModalComponent,
+  ExportSettingsPanelComponent,
   SeparationColorsComponent,
   GraphicsComponent,
   SeparationsComponent,

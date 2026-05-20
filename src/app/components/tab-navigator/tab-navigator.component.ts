@@ -35,7 +35,8 @@ export class TabNavigatorComponent {
 
  menuOptions = [
   { title: 'General Settings', component: SettingsComponent },
-  { title: 'Manage Profiles', component: SettingsComponent }
+  { title: 'Manage Profiles', component: SettingsComponent },
+  { title: 'Export Settings', component: SettingsComponent }
  ];
 
  //  get headerMenuItems(): string[] {
@@ -69,7 +70,9 @@ export class TabNavigatorComponent {
  }
 
  getSettingsSection(selectedOption: string | null): string {
-  return selectedOption === 'General Settings' ? 'General Settings' : 'Separation Profiles';
+  if (selectedOption === 'General Settings') return 'General Settings';
+  if (selectedOption === 'Export Settings') return 'Export Settings';
+  return 'Separation Profiles';
  }
 
  //  handleHeaderMenuClick(item: string): void {

@@ -134,6 +134,58 @@ function findExcelFileInBatchFolder(documentPath) {
    return null;
   }
 
+  const resolveFirstExcelFromBatchFolder = (batchFolderPath) => {
+   if (!batchFolderPath || !fs.existsSync(batchFolderPath)) {
+    return null;
+   }
+   const files = fs
+    .readdirSync(batchFolderPath)
+    .filter((file) => {
+     const filePath = path.join(batchFolderPath, file);
+     return fs.statSync(filePath).isFile() && file.toLowerCase().endsWith('.xlsx');
+    })
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+   if (!files || files.length === 0) {
+    return null;
+   }
+   const excelFilePath = path.resolve(path.join(batchFolderPath, files[0]));
+   if (!fs.existsSync(excelFilePath)) {
+    return null;
+   }
+   try {
+    fs.accessSync(excelFilePath, fs.constants.R_OK);
+   } catch (accessError) {
+    return null;
+   }
+   return excelFilePath;
+  };
+
+  let walkDir = path.dirname(documentPath);
+  while (walkDir) {
+   const entries = fs.existsSync(walkDir) ? fs.readdirSync(walkDir) : [];
+   const batchFolderName = entries.find((entry) => {
+    const entryPath = path.join(walkDir, entry);
+    return fs.statSync(entryPath).isDirectory() && entry.toUpperCase() === 'BATCH';
+   });
+   if (batchFolderName) {
+    const excelFromAncestor = resolveFirstExcelFromBatchFolder(path.join(walkDir, batchFolderName));
+    if (excelFromAncestor) {
+     console.log(
+      '[Separations] findExcelFileInBatchFolder – documentPath:',
+      documentPath,
+      '| excelFilePath:',
+      excelFromAncestor
+     );
+     return excelFromAncestor;
+    }
+   }
+   const parentWalkDir = path.dirname(walkDir);
+   if (!parentWalkDir || parentWalkDir === walkDir) {
+    break;
+   }
+   walkDir = parentWalkDir;
+  }
+
   let currentDir = path.dirname(documentPath);
   let teamoutsFolder = null;
   while (currentDir) {
@@ -627,6 +679,53 @@ async function getBatchRowVariableSource(teamCode, documentPath) {
  }
 }
 
+async function getBatchExcelColumnNames(documentPath) {
+ try {
+  if (!documentPath) {
+   return [];
+  }
+
+  const excelFilePath = findExcelFileInBatchFolder(documentPath);
+  if (!excelFilePath) {
+   const batchRecordsFromJson = getBatchExcelRecordsFromJson(documentPath);
+   return batchRecordsFromJson ? Object.keys(batchRecordsFromJson).filter((key) => String(key || '').trim() !== '') : [];
+  }
+
+  let workbook;
+  try {
+   try {
+    const fileBuffer = fs.readFileSync(excelFilePath);
+    workbook = XLSX.read(fileBuffer, { type: 'buffer' });
+   } catch (bufferError) {
+    workbook = XLSX.readFile(excelFilePath);
+   }
+  } catch (readError) {
+   console.warn('[Leap] getBatchExcelColumnNames read error:', readError.message);
+   return [];
+  }
+
+  const sheetName = workbook && workbook.SheetNames && workbook.SheetNames[0];
+  const worksheet = sheetName ? workbook.Sheets[sheetName] : null;
+  if (!worksheet) {
+   return [];
+  }
+
+  const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+  const headerRow = Array.isArray(data) && Array.isArray(data[0]) ? data[0] : [];
+  const seen = new Set();
+  return headerRow
+   .map((header) => String(header == null ? '' : header).trim())
+   .filter((header) => {
+    if (!header || seen.has(header)) return false;
+    seen.add(header);
+    return true;
+   });
+ } catch (error) {
+  console.warn('[Leap] getBatchExcelColumnNames:', error.message);
+  return [];
+ }
+}
+
 async function getProfileNamesFromExcel(styleCodes) {
  try {
   if (!styleCodes || !Array.isArray(styleCodes) || styleCodes.length === 0) {
@@ -1059,7 +1158,10 @@ async function getGraphicPlacementOptions(documentPath, teamCode) {
   }
 
   if (!excelFilePath && batchRecordsFromJson) {
-   const placementsRaw = getUniqueValuesFromBatchRecords(batchRecordsFromJson, 'Graphic Placement');
+   const placementsRaw = [
+    ...getUniqueValuesFromBatchRecords(batchRecordsFromJson, 'Graphic Placement'),
+    ...getUniqueValuesFromBatchRecords(batchRecordsFromJson, 'Graphic Position')
+   ];
    const placementSet = new Set();
    placementsRaw.forEach((value) => {
     value.split(',').forEach((item) => {
@@ -1102,27 +1204,33 @@ async function getGraphicPlacementOptions(documentPath, teamCode) {
   }
 
   const headerRow = data[0];
-  const graphicPlacementColIndex = headerRow.findIndex((col) => col === 'Graphic Placement');
+  const normalizedHeaders = headerRow.map((col) => String(col || '').trim().toLowerCase());
+  const graphicPlacementColIndices = normalizedHeaders
+   .map((header, index) => (header === 'graphic placement' || header === 'graphic position' ? index : -1))
+   .filter((index) => index >= 0);
 
-  if (graphicPlacementColIndex === -1) {
+  if (graphicPlacementColIndices.length === 0) {
    return [];
   }
 
   const placementSet = new Set();
   for (let row = 1; row < data.length; row++) {
    const rowData = data[row];
-   if (rowData && rowData[graphicPlacementColIndex]) {
-    const placementValue = String(rowData[graphicPlacementColIndex]).trim();
-    if (placementValue !== '') {
-     const placements = placementValue.split(',');
-     placements.forEach((placement) => {
-      const trimmedPlacement = placement.trim();
-      if (trimmedPlacement !== '') {
-       placementSet.add(trimmedPlacement);
-      }
-     });
+   if (!rowData) continue;
+   graphicPlacementColIndices.forEach((graphicPlacementColIndex) => {
+    if (rowData[graphicPlacementColIndex]) {
+     const placementValue = String(rowData[graphicPlacementColIndex]).trim();
+     if (placementValue !== '') {
+      const placements = placementValue.split(',');
+      placements.forEach((placement) => {
+       const trimmedPlacement = placement.trim();
+       if (trimmedPlacement !== '') {
+        placementSet.add(trimmedPlacement);
+       }
+      });
+     }
     }
-   }
+   });
   }
 
   const placements = Array.from(placementSet).sort();
@@ -1609,6 +1717,35 @@ class Leap {
     success: false,
     error: error.message,
     fields: {}
+   };
+  }
+ }
+
+ async getBatchExcelColumnNames(documentPath) {
+  try {
+   if (!documentPath) {
+    try {
+     const docPathResult = await scriptLoader.evalScript('handleGetActiveDocumentPath', {});
+     const docPathData = JSON.parse(docPathResult);
+     if (docPathData.success && docPathData.documentPath) {
+      documentPath = docPathData.documentPath;
+      this.log(`Retrieved document path from host: ${documentPath}`);
+     }
+    } catch (docPathError) {
+     this.log(`Could not get document path from host: ${docPathError.message}`);
+    }
+   }
+   const columns = await getBatchExcelColumnNames(documentPath);
+   return {
+    success: true,
+    columns: columns || []
+   };
+  } catch (error) {
+   this.log(`Error getBatchExcelColumnNames: ${error.message}`);
+   return {
+    success: false,
+    error: error.message,
+    columns: []
    };
   }
  }

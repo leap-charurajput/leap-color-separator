@@ -210,7 +210,7 @@ function applyStroke(doc, swatchName, strokeWidth) {
 function getGeneralSettingsFromDisk() {
  try {
   var documentsFolder = Folder.myDocuments || new Folder("~/Documents");
-  var settingsPath = documentsFolder.fsName + "/LEAP Settings/LEAP_Seps/general_Settings.json";
+  var settingsPath = documentsFolder.fsName + "/LEAP Settings/LEAP_Seps/general_settings.json";
   var settingsFile = new File(settingsPath);
   if (!settingsFile.exists) {
    return null;
@@ -235,7 +235,7 @@ function getGeneralSettingsFromDisk() {
  }
 }
 
-/** Choke stroke swatch from general_Settings.json, or GARMENT if unset, blank, or not in doc. */
+/** Choke stroke swatch from general_settings.json, or GARMENT if unset, blank, or not in doc. */
 function getChokeStrokeSwatchNameForDocument(doc) {
  var fallback = CONSTANTS.SWATCH_NAMES.GARMENT;
  var gen = getGeneralSettingsFromDisk();

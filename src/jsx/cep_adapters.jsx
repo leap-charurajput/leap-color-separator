@@ -933,17 +933,7 @@ function copyAndPrepareSEPDocument(templateFile, destinationFolder, docName, jso
    if (sepXmp.isXmpCreated) {
    sepXmp.setStructField("DocumentType", "Separation Document", false, false);
    if (profileMetadata) {
-    var metaForXmp = profileMetadata;
-    if (profileMetadata.batchVariableSource) {
-     metaForXmp = {};
-     for (var xk in profileMetadata) {
-      if (!profileMetadata.hasOwnProperty(xk) || xk === "batchVariableSource") {
-       continue;
-      }
-      metaForXmp[xk] = profileMetadata[xk];
-     }
-    }
-    sepXmp.setStructField("SeparationProfileMetadata", metaForXmp, true, false);
+    sepXmp.setStructField("SeparationProfileMetadata", profileMetadata, true, false);
    }
    try {
     var bodyNameForSwatch = "Body (Default)";

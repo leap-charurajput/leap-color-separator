@@ -1261,12 +1261,357 @@ export class ControllerService {
   });
  }
 
+ private buildExportPathResolverScript(): string {
+  return `
+function getDefaultExportSettings() {
+ return {
+  printGuideFilePath: "",
+  separationPreviewFilePath: "",
+  postscriptFilePath: ""
+ };
+}
+
+function parseExportJsonSafe(content) {
+ try {
+  if (!content || !content.length) return null;
+  if (typeof JSON !== "undefined" && JSON.parse) return JSON.parse(content);
+  return eval("(" + content + ")");
+ } catch (e) {
+  return null;
+ }
+}
+
+function getExportSettingsPath() {
+ var documentsFolder = Folder.myDocuments || new Folder("~/Documents");
+ return documentsFolder.fsName + "/LEAP Settings/LEAP_Seps/export_settings.json";
+}
+
+function readExportSettings() {
+ try {
+  var settingsFile = new File(getExportSettingsPath());
+  if (!settingsFile.exists) return getDefaultExportSettings();
+  if (!settingsFile.open("r")) return getDefaultExportSettings();
+  var content = settingsFile.read();
+  settingsFile.close();
+  var parsed = parseExportJsonSafe(content) || {};
+  var defaults = getDefaultExportSettings();
+  for (var key in parsed) {
+   if (parsed.hasOwnProperty(key)) defaults[key] = parsed[key];
+  }
+  return defaults;
+ } catch (e) {
+  return getDefaultExportSettings();
+ }
+}
+
+function trimExportString(value) {
+ return String(value == null ? "" : value).replace(/^\\s+|\\s+$/g, "");
+}
+
+function normalizeExportLookupKey(str) {
+ return String(str || "").toLowerCase().replace(/[\\s_#-]/g, "");
+}
+
+function setExportAlias(aliases, name, value) {
+ if (value == null || value === "") return;
+ aliases[name] = value;
+ aliases[normalizeExportLookupKey(name)] = value;
+}
+
+function findExportValueInObject(obj, key) {
+ if (!obj || typeof obj !== "object") return null;
+ var normalizedSearchKey = normalizeExportLookupKey(key);
+ if (obj.hasOwnProperty(key)) return obj[key];
+ for (var prop in obj) {
+  if (!obj.hasOwnProperty(prop)) continue;
+  if (normalizeExportLookupKey(prop) === normalizedSearchKey) return obj[prop];
+ }
+ for (var nestedProp in obj) {
+  if (!obj.hasOwnProperty(nestedProp)) continue;
+  var nested = obj[nestedProp];
+  if (nested && typeof nested === "object") {
+   var result = findExportValueInObject(nested, key);
+   if (result !== null && result !== undefined && result !== "") return result;
+  }
+ }
+ return null;
+}
+
+function sanitizeExportPathValue(value) {
+ var text;
+ if (value instanceof Array) {
+  text = value.join("_");
+ } else if (value && typeof value === "object") {
+  text = JSON.stringify(value);
+ } else {
+  text = String(value == null ? "" : value);
+ }
+ return trimExportString(text).replace(/[\\\\\\/:*?"<>|]+/g, "-");
+}
+
+function getExportXmpMetadata(doc) {
+ try {
+  if (typeof xmpModifier !== "object") return null;
+  var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
+  if (xmp.isXmpCreated && xmp.doesStructFieldExist("SeparationProfileMetadata")) {
+   return xmp.getStructField("SeparationProfileMetadata", true) || null;
+  }
+ } catch (e) {}
+ return null;
+}
+
+function getOriginalDocBaseName(docFile) {
+ var fileName = docFile.name || "";
+ var aiName = fileName.replace(/\\.ai$/i, "");
+ if (aiName.indexOf("-SEP") !== -1) return aiName.substring(0, aiName.indexOf("-SEP"));
+ return aiName.replace(/\\.[^\\.]+$/, "");
+}
+
+function getExportJsonData(docFile) {
+ try {
+  if (typeof findAndReadJSONFile !== "function") return null;
+  var docPath = docFile.fsName || "";
+  if (docPath.indexOf("09 SEPARATIONS") === -1) return null;
+  var graphicFolder = docFile.parent;
+  var teamCodeFolder = graphicFolder.parent;
+  var leagueSepFolder = teamCodeFolder.parent;
+  var separationsFolder = leagueSepFolder.parent;
+  var rootFolder = separationsFolder.parent;
+  var leagueFolder = new Folder(rootFolder.fsName + "/01 TEAMOUTS/" + leagueSepFolder.name);
+  if (!leagueFolder.exists) return null;
+  return findAndReadJSONFile(getOriginalDocBaseName(docFile), leagueFolder);
+ } catch (e) {
+  return null;
+ }
+}
+
+function getStyleCodesExportText(meta) {
+ try {
+  var codes = meta ? meta.styleCodes : null;
+  if (codes == null) return null;
+  if (codes instanceof Array) {
+   if (codes.length === 0) return null;
+   var parts = [];
+   for (var i = 0; i < codes.length; i++) {
+    if (codes[i] != null && String(codes[i]).trim() !== "") {
+     parts.push(String(codes[i]).trim());
+    }
+   }
+   if (parts.length === 0) return null;
+   if (parts.length === 1) return parts[0];
+   return parts.join("_");
+  }
+  var single = String(codes).trim();
+  return single !== "" ? single : null;
+ } catch (e) {
+  return null;
+ }
+}
+
+function getExportVariableContext(doc) {
+ var docFile = new File(doc.fullName);
+ var docName = docFile.name.replace(/\\.[^\\.]+$/, "");
+ var meta = getExportXmpMetadata(doc) || {};
+ var jsonData = getExportJsonData(docFile) || {};
+ var batch = meta.batchVariableSource || {};
+ var aliases = {};
+ var teamCodeFromPath = "";
+ var leagueFromPath = "";
+ try {
+  if ((docFile.fsName || "").indexOf("09 SEPARATIONS") !== -1) {
+   teamCodeFromPath = docFile.parent.parent.name;
+   leagueFromPath = docFile.parent.parent.parent.name;
+  }
+ } catch (e) {}
+ setExportAlias(aliases, "Document Name", docName);
+ setExportAlias(aliases, "Doc Name", docName);
+ setExportAlias(aliases, "File Name", docName);
+ setExportAlias(aliases, "Profile Code", meta.profileCode);
+ setExportAlias(aliases, "Profile Name", meta.profileName);
+ setExportAlias(aliases, "Graphic Position", meta.position || meta.graphicPosition);
+ setExportAlias(aliases, "Position", meta.position || meta.graphicPosition);
+ setExportAlias(aliases, "Art Code", meta.graphicName);
+ setExportAlias(aliases, "Graphic Name", meta.graphicName);
+ setExportAlias(aliases, "Color Code", meta.colorCodes);
+ var styleCodesText = getStyleCodesExportText(meta);
+ if (styleCodesText) {
+  setExportAlias(aliases, "style_code", styleCodesText);
+  setExportAlias(aliases, "STYLE_CODE", styleCodesText);
+  setExportAlias(aliases, "Style Code", styleCodesText);
+  setExportAlias(aliases, "Style#", styleCodesText);
+ } else {
+  setExportAlias(aliases, "Style#", meta.styleCodes);
+  setExportAlias(aliases, "Style Code", meta.styleCodes);
+ }
+ var lineupStyleCode = findExportValueInObject(batch, "Lineup Style Code");
+ if (!lineupStyleCode) lineupStyleCode = styleCodesText;
+ if (lineupStyleCode) setExportAlias(aliases, "Lineup Style Code", lineupStyleCode);
+ for (var batchKey in batch) {
+  if (batch.hasOwnProperty(batchKey)) {
+   setExportAlias(aliases, batchKey, batch[batchKey]);
+  }
+ }
+ setExportAlias(aliases, "Team Code", findExportValueInObject(jsonData, "TeamCode") || teamCodeFromPath || findExportValueInObject(batch, "Team Code"));
+ setExportAlias(aliases, "League", findExportValueInObject(jsonData, "League") || leagueFromPath);
+ return {
+  aliases: aliases,
+  batch: batch,
+  jsonData: jsonData,
+  meta: meta,
+  styleInfo: meta.styleInfo || {}
+ };
+}
+
+function getExportTemplateValue(token, context) {
+ var sources = [context.aliases, context.batch, context.jsonData, context.meta, context.styleInfo];
+ for (var i = 0; i < sources.length; i++) {
+  var value = findExportValueInObject(sources[i], token);
+  if (value !== null && value !== undefined && value !== "") return sanitizeExportPathValue(value);
+ }
+ return null;
+}
+
+function ensureExportFolder(folder) {
+ try {
+  if (!folder || folder.exists) return true;
+  var parent = folder.parent;
+  if (parent && !parent.exists) ensureExportFolder(parent);
+  return folder.create();
+ } catch (e) {
+  return false;
+ }
+}
+
+function isAbsoluteExportPath(pathValue) {
+ return /^~\\//.test(pathValue) || /^\\//.test(pathValue) || /^[A-Za-z]:[\\\\\\/]/.test(pathValue);
+}
+
+function ensureExportExtension(pathValue, extension) {
+ var slashNormalized = pathValue.replace(/\\\\/g, "/");
+ if (/\\/$/.test(slashNormalized)) return pathValue;
+ var fileName = slashNormalized.substring(slashNormalized.lastIndexOf("/") + 1);
+ if (/\\.[^\\.\\/]+$/.test(fileName)) return pathValue;
+ return pathValue + "." + extension;
+}
+
+function normalizeExportPathSlashes(pathValue) {
+ return String(pathValue || "").replace(/\\\\/g, "/");
+}
+
+function trimExportPathSlashes(pathValue) {
+ var normalized = normalizeExportPathSlashes(pathValue);
+ while (normalized.length > 1 && normalized.charAt(normalized.length - 1) === "/") {
+  normalized = normalized.substring(0, normalized.length - 1);
+ }
+ return normalized;
+}
+
+function joinExportPath(basePath, segment) {
+ var base = trimExportPathSlashes(basePath);
+ var part = trimExportPathSlashes(segment);
+ if (!part) return base;
+ if (!base) return part;
+ return base + "/" + part;
+}
+
+function resolveExportPathSegment(segment, context) {
+ if (!segment || segment.indexOf("[") === -1) {
+  return segment || "";
+ }
+ return segment.replace(/\\[([^\\]]+)\\]/g, function(match, token) {
+  var value = getExportTemplateValue(token, context);
+  return value === null || value === undefined ? match : value;
+ });
+}
+
+function resolveExportFilePathFromTokens(template, defaultFile, extension, context) {
+ if (!/\\[[^\\]]+\\]/.test(template)) return null;
+
+ var normalized = normalizeExportPathSlashes(trimExportString(template));
+ var parts = normalized.split("/");
+ while (parts.length > 0 && parts[parts.length - 1] === "") {
+  parts.pop();
+ }
+
+ var resolvedParts = [];
+ for (var i = 0; i < parts.length; i++) {
+  if (parts[i] === "" && i === 0) {
+   resolvedParts.push("");
+   continue;
+  }
+  if (parts[i] === "") continue;
+  resolvedParts.push(resolveExportPathSegment(parts[i], context));
+ }
+
+ var fileName = defaultFile.name;
+ if (resolvedParts.length > 0) {
+  var lastPart = resolvedParts[resolvedParts.length - 1];
+  if (lastPart && /\\.[^.\\/]+$/.test(lastPart)) {
+   fileName = lastPart;
+   resolvedParts.pop();
+  }
+ }
+
+ var dirPath = resolvedParts.join("/");
+ if (!dirPath) {
+  dirPath = trimExportPathSlashes(defaultFile.parent.fsName);
+ }
+
+ if (!isAbsoluteExportPath(dirPath)) {
+  dirPath = joinExportPath(defaultFile.parent.fsName, dirPath);
+ }
+
+ var targetFile = new File(joinExportPath(dirPath, fileName));
+ ensureExportFolder(targetFile.parent);
+ return targetFile;
+}
+
+function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
+ var settings = readExportSettings();
+ var template = settings && settings[settingsKey] != null ? trimExportString(settings[settingsKey]) : "";
+ if (!template) return defaultFile;
+ var context = getExportVariableContext(doc);
+
+ if (/\\[[^\\]]+\\]/.test(template)) {
+  var tokenBasedFile = resolveExportFilePathFromTokens(template, defaultFile, extension, context);
+  if (tokenBasedFile) return tokenBasedFile;
+ }
+
+ var resolvedPath = template.replace(/\\[([^\\]]+)\\]/g, function(match, token) {
+  var value = getExportTemplateValue(token, context);
+  return value === null || value === undefined ? match : value;
+ });
+ if (!resolvedPath) return defaultFile;
+ if (!isAbsoluteExportPath(resolvedPath)) {
+  resolvedPath = defaultFile.parent.fsName + "/" + resolvedPath;
+ }
+ var normalized = resolvedPath.replace(/\\\\/g, "/");
+ var defaultName = defaultFile.name;
+ var targetFile;
+ if (/\\/$/.test(normalized)) {
+  targetFile = new File(resolvedPath + defaultName);
+ } else {
+  var possibleFolder = new Folder(resolvedPath);
+  if (possibleFolder.exists) {
+   targetFile = new File(possibleFolder.fsName + "/" + defaultName);
+  } else {
+   targetFile = new File(ensureExportExtension(resolvedPath, extension));
+  }
+ }
+ ensureExportFolder(targetFile.parent);
+ return targetFile;
+}
+`;
+ }
+
  exportPrintGuidePDF(): Promise<any> {
   this.log('exportPrintGuidePDF called');
 
   return this.ensureSession().then(() => {
+   const exportPathResolverCode = this.buildExportPathResolverScript();
    const script = `
 (function() {
+  ${exportPathResolverCode}
   try {
     if (!app.documents.length) {
       return JSON.stringify({
@@ -1304,7 +1649,8 @@ export class ControllerService {
     var docFile = new File(doc.fullName);
     var docFolder = docFile.parent;
     var docName = docFile.name.replace(/\\.[^\\.]+$/, "");
-    var destFile = new File(docFolder.fsName + "/" + docName + "_PrintGuide.pdf");
+    var defaultDestFile = new File(docFolder.fsName + "/" + docName + "_PrintGuide.pdf");
+    var destFile = resolveExportFilePath("printGuideFilePath", defaultDestFile, doc, "pdf");
 
     var pdfOptions = new PDFSaveOptions();
     pdfOptions.artboardRange = (pgArtboardIndex + 1).toString(); // 1-based index as string
@@ -1457,8 +1803,10 @@ export class ControllerService {
   const safeInks = Array.isArray(inks) ? inks : [];
   const inksLiteral = JSON.stringify(safeInks);
   const ppdNameLiteral = JSON.stringify(ppdName || 'IBlock v2');
+  const exportPathResolverCode = this.buildExportPathResolverScript();
   return `
 (function() {
+  ${exportPathResolverCode}
   try {
     var inks = ${inksLiteral};
     if (!app.documents.length) {
@@ -1495,7 +1843,9 @@ export class ControllerService {
     var docFile = new File(doc.fullName);
     var docFolder = docFile.parent;
     var docName = docFile.name.replace(/\\.[^\\.]+$/, "");
-    var outputPath = docFolder.fsName + "/" + docName + ".ps";
+    var defaultOutputFile = new File(docFolder.fsName + "/" + docName + ".ps");
+    var outputFile = resolveExportFilePath("postscriptFilePath", defaultOutputFile, doc, "ps");
+    var outputPath = outputFile.fsName;
 
     // Flattener
     var flatOptions = new PrintFlattenerOptions();
@@ -1602,8 +1952,10 @@ export class ControllerService {
   this.log('exportSeparationsPreviewPDF called');
 
   return this.ensureSession().then(() => {
+   const exportPathResolverCode = this.buildExportPathResolverScript();
    const script = `
 (function() {
+  ${exportPathResolverCode}
   try {
     if (!app.documents.length) {
       return JSON.stringify({
@@ -1641,7 +1993,8 @@ export class ControllerService {
     var docFile = new File(doc.fullName);
     var docFolder = docFile.parent;
     var docName = docFile.name.replace(/\\.[^\\.]+$/, "");
-    var destFile = new File(docFolder.fsName + "/" + docName + "_SeparationsPreview.pdf");
+    var defaultDestFile = new File(docFolder.fsName + "/" + docName + "_SeparationsPreview.pdf");
+    var destFile = resolveExportFilePath("separationPreviewFilePath", defaultDestFile, doc, "pdf");
 
     var pdfOptions = new PDFSaveOptions();
     pdfOptions.artboardRange = (gridArtboardIndex + 1).toString();
@@ -1976,7 +2329,7 @@ export class ControllerService {
    const path = (window as any).cep_node.require('path');
    const homeDir = os.homedir();
    const settingsFolder = path.join(homeDir, 'Documents', 'LEAP Settings', 'LEAP_Seps');
-   const settingsFile = path.join(settingsFolder, 'general_Settings.json');
+   const settingsFile = path.join(settingsFolder, 'general_settings.json');
 
    const result = cep.fs.readFile(settingsFile);
    if (result.err === 0) {
@@ -2041,7 +2394,7 @@ export class ControllerService {
    const path = (window as any).cep_node.require('path');
    const homeDir = os.homedir();
    const settingsFolder = path.join(homeDir, 'Documents', 'LEAP Settings', 'LEAP_Seps');
-   const settingsFile = path.join(settingsFolder, 'general_Settings.json');
+   const settingsFile = path.join(settingsFolder, 'general_settings.json');
 
    const mkdirResult = cep.fs.makedir(settingsFolder);
    if (mkdirResult.err !== 0 && mkdirResult.err !== 17) {
@@ -2056,6 +2409,232 @@ export class ControllerService {
     resolve({ success: false, error: 'Error writing settings file: ' + writeResult.err });
    }
   });
+ }
+
+ loadExportSettings(): Promise<{ success: boolean; data?: any; error?: string }> {
+  return new Promise((resolve) => {
+   const defaultSettings = {
+    printGuideFilePath: '',
+    separationPreviewFilePath: '',
+    postscriptFilePath: ''
+   };
+   const cep = (window as any).cep;
+   if (!cep || !cep.fs) {
+    resolve({ success: true, data: defaultSettings });
+    return;
+   }
+
+   const os = (window as any).cep_node.require('os');
+   const path = (window as any).cep_node.require('path');
+   const homeDir = os.homedir();
+   const settingsFolder = path.join(homeDir, 'Documents', 'LEAP Settings', 'LEAP_Seps');
+   const settingsFile = path.join(settingsFolder, 'export_settings.json');
+
+   const result = cep.fs.readFile(settingsFile);
+   if (result.err === 0) {
+    try {
+     const data = JSON.parse(result.data);
+     resolve({ success: true, data: { ...defaultSettings, ...(data || {}) } });
+    } catch (e) {
+     resolve({ success: true, data: defaultSettings });
+    }
+   } else {
+    resolve({ success: true, data: defaultSettings });
+   }
+  });
+ }
+
+ saveExportSettings(settings: {
+  printGuideFilePath?: string;
+  separationPreviewFilePath?: string;
+  postscriptFilePath?: string;
+ }): Promise<{ success: boolean; error?: string }> {
+  return new Promise((resolve) => {
+   const cep = (window as any).cep;
+   if (!cep || !cep.fs) {
+    resolve({ success: true });
+    return;
+   }
+
+   const os = (window as any).cep_node.require('os');
+   const path = (window as any).cep_node.require('path');
+   const homeDir = os.homedir();
+   const settingsFolder = path.join(homeDir, 'Documents', 'LEAP Settings', 'LEAP_Seps');
+   const settingsFile = path.join(settingsFolder, 'export_settings.json');
+
+   const mkdirResult = cep.fs.makedir(settingsFolder);
+   if (mkdirResult.err !== 0 && mkdirResult.err !== 17) {
+    resolve({ success: false, error: 'Failed to create settings directory' });
+    return;
+   }
+
+   const normalizedSettings = {
+    printGuideFilePath: settings?.printGuideFilePath || '',
+    separationPreviewFilePath: settings?.separationPreviewFilePath || '',
+    postscriptFilePath: settings?.postscriptFilePath || ''
+   };
+   const writeResult = cep.fs.writeFile(settingsFile, JSON.stringify(normalizedSettings, null, 2));
+   if (writeResult.err === 0) {
+    resolve({ success: true });
+   } else {
+    resolve({ success: false, error: 'Error writing export settings file: ' + writeResult.err });
+   }
+  });
+ }
+
+ async getExportSettingsTokenData(): Promise<{
+  success: boolean;
+  excelColumns: string[];
+  graphicPositions: string[];
+  error?: string;
+ }> {
+  try {
+   const documentPath = await this.getActiveDocumentPathForClient();
+   let excelColumns = await this.getBatchExcelColumnNamesFromLeap(documentPath);
+   if (excelColumns.length === 0) {
+    excelColumns = this.getBatchExcelColumnNames(documentPath);
+   }
+   let graphicPositions: string[] = [];
+   try {
+    const positionsResult = await this.getGraphicPlacementOptions(undefined, documentPath);
+    if (positionsResult?.success && Array.isArray(positionsResult.placements)) {
+     graphicPositions = positionsResult.placements;
+    } else if (Array.isArray(positionsResult)) {
+     graphicPositions = positionsResult;
+    }
+   } catch (_) {
+    graphicPositions = [];
+   }
+   return {
+    success: true,
+    excelColumns,
+    graphicPositions: this.uniqueNonEmptyStrings(graphicPositions)
+   };
+  } catch (error: any) {
+   return {
+    success: false,
+    excelColumns: [],
+    graphicPositions: [],
+    error: error?.message || String(error)
+   };
+  }
+ }
+
+ private async getBatchExcelColumnNamesFromLeap(documentPath: string): Promise<string[]> {
+  try {
+   const result = await (window as any).leap.getBatchExcelColumnNames(documentPath);
+   return this.uniqueNonEmptyStrings(result?.success && Array.isArray(result.columns) ? result.columns : []);
+  } catch (_) {
+   return [];
+  }
+ }
+
+ private async getActiveDocumentPathForClient(): Promise<string> {
+  try {
+   const res = await (window as any).leap.scriptLoader().evalScript('handleGetActiveDocumentPath', {});
+   const data = JSON.parse(res);
+   return data?.success && data?.documentPath ? String(data.documentPath) : '';
+  } catch (_) {
+   return '';
+  }
+ }
+
+ private getBatchExcelColumnNames(documentPath: string): string[] {
+  try {
+   const req = (window as any)?.cep_node?.require;
+   if (!req || !documentPath) return [];
+   const fs = req('fs');
+   const path = req('path');
+   const XLSX = req('xlsx');
+   const excelFilePath = this.findBatchExcelFile(documentPath, fs, path);
+   if (!excelFilePath) return [];
+   let workbook;
+   try {
+    const fileBuffer = fs.readFileSync(excelFilePath);
+    workbook = XLSX.read(fileBuffer, { type: 'buffer' });
+   } catch (_) {
+    workbook = XLSX.readFile(excelFilePath);
+   }
+   const sheetName = workbook?.SheetNames?.[0];
+   const worksheet = sheetName ? workbook.Sheets[sheetName] : null;
+   if (!worksheet) return [];
+   const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+   const headerRow = Array.isArray(rows) && rows.length > 0 ? rows[0] : [];
+   return this.uniqueNonEmptyStrings(Array.isArray(headerRow) ? headerRow.map((value: any) => String(value || '')) : []);
+  } catch (_) {
+   return [];
+  }
+ }
+
+ private findBatchExcelFile(documentPath: string, fs: any, path: any): string {
+  try {
+   if (!documentPath || !fs.existsSync(documentPath)) return '';
+   const firstExcelFromBatchFolder = (batchFolderPath: string): string => {
+    if (!batchFolderPath || !fs.existsSync(batchFolderPath)) return '';
+    const files = fs
+     .readdirSync(batchFolderPath)
+     .filter((file: string) => {
+      const filePath = path.join(batchFolderPath, file);
+      return fs.statSync(filePath).isFile() && /\.xlsx$/i.test(file);
+     })
+     .sort((a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+    return files.length > 0 ? path.join(batchFolderPath, files[0]) : '';
+   };
+
+   let walkDir = path.dirname(documentPath);
+   while (walkDir) {
+    const entries = fs.existsSync(walkDir) ? fs.readdirSync(walkDir) : [];
+    const batchFolderName = entries.find((entry: string) => {
+     const entryPath = path.join(walkDir, entry);
+     return fs.statSync(entryPath).isDirectory() && entry.toUpperCase() === 'BATCH';
+    });
+    if (batchFolderName) {
+     const excelPath = firstExcelFromBatchFolder(path.join(walkDir, batchFolderName));
+     if (excelPath) return excelPath;
+    }
+    const parentWalkDir = path.dirname(walkDir);
+    if (!parentWalkDir || parentWalkDir === walkDir) break;
+    walkDir = parentWalkDir;
+   }
+
+   let currentDir = path.dirname(documentPath);
+   let teamoutsFolder = '';
+   while (currentDir) {
+    const folderName = path.basename(currentDir);
+    if (folderName.toUpperCase().includes('TEAMOUTS') || folderName.toUpperCase().includes('01')) {
+     teamoutsFolder = currentDir;
+     break;
+    }
+    const parentDir = path.dirname(currentDir);
+    if (!parentDir || parentDir === currentDir) break;
+    currentDir = parentDir;
+   }
+   if (!teamoutsFolder) return '';
+   const batchParentDir = path.dirname(path.dirname(teamoutsFolder));
+   const batchFolderPath = path.join(batchParentDir, 'BATCH');
+   if (!fs.existsSync(batchFolderPath) || !fs.statSync(batchFolderPath).isDirectory()) return '';
+   const files = fs
+    .readdirSync(batchFolderPath)
+    .filter((file: string) => {
+     const filePath = path.join(batchFolderPath, file);
+     return fs.statSync(filePath).isFile() && /\.xlsx$/i.test(file);
+    })
+    .sort((a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+   return files.length > 0 ? path.join(batchFolderPath, files[0]) : '';
+  } catch (_) {
+   return '';
+  }
+ }
+
+ private uniqueNonEmptyStrings(values: any[]): string[] {
+  const seen = new Set<string>();
+  return (Array.isArray(values) ? values : [])
+   .map((value) => String(value || '').trim())
+   .filter((value) => {
+    if (!value || seen.has(value)) return false;
+    seen.add(value);
+    return true;
+   });
  }
 
  getSepsTemplateFiles(): Promise<{ success: boolean; files: string[]; error?: string }> {

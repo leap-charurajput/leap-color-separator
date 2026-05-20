@@ -90,6 +90,15 @@
           (ngModelChange)="saveGeneralSettings()" />
       </div>
     </div>
+
+    <app-export-settings-panel
+      *ngIf="selectedSection === 'Export Settings'"
+      [exportSettings]="exportSettings"
+      [excelColumns]="exportExcelColumns"
+      [graphicPositions]="exportGraphicPositions"
+      [profileCodes]="exportProfileCodes"
+      (exportSettingChange)="onExportSettingChange($event)"
+    ></app-export-settings-panel>
   </div>
 
   <app-edit-separation-profile-modal [isOpen]="editModalOpen"
