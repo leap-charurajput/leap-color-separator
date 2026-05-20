@@ -629,6 +629,65 @@ function loadGraphicPositionLookup() {
  }
 }
 
+// Read/write profile ink exceptions JSON from the configured server base path.
+// Expected location: <ServerBasePath>/SETTINGS/LEAP_SEPS/Data/profile_ink_exceptions.json
+function getProfileInkExceptionsJsonPath() {
+ try {
+  if (typeof getServerBasePath !== "function") return null;
+  var serverBasePath = getServerBasePath();
+  if (!serverBasePath) return null;
+  var normalizedBasePath = String(serverBasePath).replace(/\/$/, "");
+  return normalizedBasePath + "/SETTINGS/LEAP_SEPS/Data/profile_ink_exceptions.json";
+ } catch (e) {
+  return null;
+ }
+}
+
+function loadProfileInkExceptionsJson() {
+ try {
+  var jsonPath = getProfileInkExceptionsJsonPath();
+  if (!jsonPath) return [];
+  var jsonFile = new File(jsonPath);
+  if (!jsonFile.exists) return [];
+  if (!jsonFile.open("r")) return [];
+  var content = jsonFile.read();
+  jsonFile.close();
+  if (!content || !content.length) return [];
+  var parsed;
+  if (typeof JSON !== "undefined" && JSON.parse) {
+   parsed = JSON.parse(content);
+  } else {
+   parsed = eval("(" + content + ")");
+  }
+  return (parsed && parsed instanceof Array) ? parsed : [];
+ } catch (e) {
+  return [];
+ }
+}
+
+function saveProfileInkExceptionsJson(entries) {
+ try {
+  var jsonPath = getProfileInkExceptionsJsonPath();
+  if (!jsonPath) {
+   return { success: false, error: "Could not determine profile_ink_exceptions.json path" };
+  }
+  var jsonFile = new File(jsonPath);
+  var jsonFolder = jsonFile.parent;
+  if (!jsonFolder.exists) {
+   jsonFolder.create();
+  }
+  if (!jsonFile.open("w")) {
+   return { success: false, error: "Failed to open profile_ink_exceptions.json for writing" };
+  }
+  var jsonString = JSON.stringify(entries, null, 2);
+  jsonFile.write(jsonString);
+  jsonFile.close();
+  return { success: true };
+ } catch (e) {
+  return { success: false, error: e.message || e.toString() };
+ }
+}
+
 // Return the ABBV for a given position DESC using the graphic position lookup.
 // Falls back to the original positionDesc when no match is found.
 function getGraphicPositionAbbreviation(positionDesc) {

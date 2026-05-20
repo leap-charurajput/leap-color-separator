@@ -709,6 +709,233 @@ export class ControllerService {
   });
  }
 
+ private getProfileInkExceptionsFilePath(basePath: string): string {
+  const path = (window as any).cep_node?.require('path');
+  if (!path || !basePath) return '';
+  const normalized = String(basePath).replace(/\/$/, '');
+  return path.join(normalized, 'SETTINGS', 'LEAP_SEPS', 'Data', 'profile_ink_exceptions.json');
+ }
+
+ private inkJsonEntryToRow(entry: any, index: number): any | null {
+  if (!entry || typeof entry !== 'object') return null;
+  const inkColor = entry.Ink_Color != null ? String(entry.Ink_Color).trim() : '';
+  const profile = entry.Profile != null ? String(entry.Profile).trim() : '';
+  const meshRaw = entry.Color_Mesh;
+  const mesh = meshRaw == null || meshRaw === '' ? '' : String(meshRaw).trim();
+  const twoHitsRaw = entry.Two_Hits != null ? String(entry.Two_Hits).trim().toUpperCase() : 'N';
+  const hitsCount = twoHitsRaw === 'Y' || twoHitsRaw === 'YES' ? 2 : 1;
+  let underbaseCount = entry.underbase_count != null ? parseInt(entry.underbase_count, 10) : 1;
+  if (isNaN(underbaseCount) || underbaseCount < 1) underbaseCount = 1;
+  if (underbaseCount > 4) underbaseCount = 4;
+  const profileCode = entry.profileCode != null ? String(entry.profileCode).trim() : '';
+  return {
+   id: `ink-${profile}-${inkColor}-${index}`,
+   enabled: true,
+   inkName: inkColor,
+   mesh,
+   underbaseCount,
+   hitsCount,
+   printMethod: entry.Print_Method != null ? String(entry.Print_Method).trim() : '',
+   profile,
+   profileCode
+  };
+ }
+
+ private inkRowToJsonEntry(row: any, profileName: string, profileCode: string): any {
+  const inkColor = row?.inkName != null ? String(row.inkName).trim() : '';
+  const enabled = row?.enabled !== false;
+  const meshTrimmed = enabled && row?.mesh != null ? String(row.mesh).trim() : '';
+  let colorMesh: string | number | null = null;
+  if (meshTrimmed !== '') {
+   const numeric = parseFloat(meshTrimmed);
+   colorMesh = isNaN(numeric) ? meshTrimmed : numeric;
+  }
+  let hitsCount = enabled && row?.hitsCount != null ? parseInt(row.hitsCount, 10) : 1;
+  if (isNaN(hitsCount) || hitsCount < 1) hitsCount = 1;
+  let underbaseCount = enabled && row?.underbaseCount != null ? parseInt(row.underbaseCount, 10) : 1;
+  if (isNaN(underbaseCount) || underbaseCount < 1) underbaseCount = 1;
+  if (underbaseCount > 4) underbaseCount = 4;
+  return {
+   Color_Mesh: colorMesh,
+   Ink_Color: inkColor,
+   Print_Method: row?.printMethod != null ? String(row.printMethod).trim() : '',
+   Profile: profileName,
+   profileCode: profileCode != null ? String(profileCode).trim() : '',
+   Two_Hits: hitsCount >= 2 ? 'Y' : 'N',
+   underbase_count: underbaseCount
+  };
+ }
+
+ private profileMatchesInkEntry(entry: any, profileCodeKey: string): boolean {
+  if (!entry || !profileCodeKey) return false;
+  const entryCode = entry.profileCode != null ? String(entry.profileCode).trim().toUpperCase() : '';
+  return entryCode !== '' && entryCode === profileCodeKey;
+ }
+
+ /**
+  * Load ink exceptions for one separation profile (matched by unique profileCode).
+  */
+ getInkExceptions(profileCode: string, profileName?: string): Promise<any> {
+  this.log('getInkExceptions called for code: ' + profileCode);
+
+  return this.getLeapServerDataPath().then((basePath) => {
+   if (!basePath || !String(basePath).trim()) {
+    return {
+     success: false,
+     error: 'LEAP Data folder path is not set. Set it under General Settings → Data Folder Path.'
+    };
+   }
+
+   const cep = (window as any).cep;
+   const fs = (window as any).cep_node?.require('fs');
+   if (!cep || !fs) {
+    return this.ensureSession().then(() => {
+     const params = {
+      profileCode: profileCode || '',
+      profileName: profileName || ''
+     };
+     return (window as any).leap
+      .scriptLoader()
+      .evalScript('handleGetInkExceptions', params)
+      .then((res: any) => this.parseHostJsonResult(res));
+    });
+   }
+
+   try {
+    const filePath = this.getProfileInkExceptionsFilePath(basePath);
+    if (!filePath || !fs.existsSync(filePath)) {
+     return { success: true, inkExceptions: [] };
+    }
+    const content = fs.readFileSync(filePath, 'utf8');
+    const allEntries = JSON.parse(content);
+    if (!Array.isArray(allEntries)) {
+     return { success: false, error: 'profile_ink_exceptions.json does not contain an array' };
+    }
+
+    const codeKey = profileCode != null ? String(profileCode).trim().toUpperCase() : '';
+    if (!codeKey) {
+     return { success: true, inkExceptions: [] };
+    }
+
+    const rows: any[] = [];
+    for (let i = 0; i < allEntries.length; i++) {
+     const entry = allEntries[i];
+     if (!this.profileMatchesInkEntry(entry, codeKey)) continue;
+     const row = this.inkJsonEntryToRow(entry, i);
+     if (row) rows.push(row);
+    }
+    return { success: true, inkExceptions: rows };
+   } catch (err: any) {
+    return {
+     success: false,
+     error: err?.message || String(err) || 'Failed to read profile_ink_exceptions.json'
+    };
+   }
+  });
+ }
+
+ saveInkExceptions(profileCode: string, inkRows: any[], profileName?: string): Promise<any> {
+  this.log('saveInkExceptions called for code: ' + profileCode);
+
+  return this.getLeapServerDataPath().then((basePath) => {
+   if (!basePath || !String(basePath).trim()) {
+    return {
+     success: false,
+     error: 'LEAP Data folder path is not set. Set it under General Settings → Data Folder Path.'
+    };
+   }
+
+   const cep = (window as any).cep;
+   const fs = (window as any).cep_node?.require('fs');
+   if (!cep || !fs) {
+    return this.ensureSession().then(() => {
+     const params = {
+      profileCode: profileCode || '',
+      profileName: profileName || '',
+      inkRows: inkRows || []
+     };
+     return (window as any).leap
+      .scriptLoader()
+      .evalScript('handleSaveInkExceptions', params)
+      .then((res: any) => this.parseHostJsonResult(res));
+    });
+   }
+
+   try {
+    const filePath = this.getProfileInkExceptionsFilePath(basePath);
+    if (!filePath) {
+     return { success: false, error: 'Could not resolve profile_ink_exceptions.json path' };
+    }
+
+    let allEntries: any[] = [];
+    if (fs.existsSync(filePath)) {
+     const content = fs.readFileSync(filePath, 'utf8');
+     const parsed = JSON.parse(content);
+     allEntries = Array.isArray(parsed) ? parsed : [];
+    }
+
+    const codeKey = profileCode != null ? String(profileCode).trim().toUpperCase() : '';
+    if (!codeKey) {
+     return { success: false, error: 'Profile code is required to save ink exceptions' };
+    }
+
+    const remaining = allEntries.filter((entry) => !this.profileMatchesInkEntry(entry, codeKey));
+
+    let defaultPrintMethod = '';
+    for (let i = 0; i < allEntries.length; i++) {
+     const sample = allEntries[i];
+     if (this.profileMatchesInkEntry(sample, codeKey) && sample?.Print_Method) {
+      defaultPrintMethod = String(sample.Print_Method).trim();
+      break;
+     }
+    }
+
+    const updatedProfileEntries: any[] = [];
+    for (const row of inkRows || []) {
+     if (!row) continue;
+     const inkName = row.inkName != null ? String(row.inkName).trim() : '';
+     if (!inkName) continue;
+     const rowWithMethod = {
+      ...row,
+      printMethod:
+       row.printMethod != null && String(row.printMethod).trim() !== ''
+        ? String(row.printMethod).trim()
+        : defaultPrintMethod
+     };
+     updatedProfileEntries.push(
+      this.inkRowToJsonEntry(rowWithMethod, profileName || '', profileCode)
+     );
+    }
+
+    const merged = remaining.concat(updatedProfileEntries);
+    const dir = (window as any).cep_node.require('path').dirname(filePath);
+    if (!fs.existsSync(dir)) {
+     fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(filePath, JSON.stringify(merged, null, 2), 'utf8');
+    return { success: true, message: 'Ink exceptions saved successfully' };
+   } catch (err: any) {
+    return {
+     success: false,
+     error: err?.message || String(err) || 'Failed to save profile_ink_exceptions.json'
+    };
+   }
+  });
+ }
+
+ private parseHostJsonResult(res: any): any {
+  if (res == null) return { success: false, error: 'Empty response from host' };
+  if (typeof res === 'object') return res;
+  if (typeof res !== 'string') return { success: false, error: String(res) };
+  const trimmed = res.trim();
+  if (!trimmed) return { success: false, error: 'Empty response from host' };
+  try {
+   return JSON.parse(trimmed);
+  } catch {
+   return { success: false, error: trimmed };
+  }
+ }
+
  async saveAppVersion(origin: string) {
   await checkForJSXUpdates(origin + '/');
 

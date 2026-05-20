@@ -1252,7 +1252,7 @@ async function getProfileInformation(profileCode) {
   }
 
   const normalizedBasePath = serverBasePath.replace(/\/$/, '');
-  const profilesFilePath = path.join(normalizedBasePath, 'SETTINGS', 'LEAP_SEPS', 'Profiles.json');
+  const profilesFilePath = path.join(normalizedBasePath, 'SETTINGS', 'LEAP_SEPS', 'Data', 'Profiles.json');
 
   if (!fs.existsSync(profilesFilePath)) {
    throw new Error(`Profiles.json file not found at: ${profilesFilePath}`);

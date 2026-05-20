@@ -19,6 +19,8 @@ interface InkExceptionRow {
  mesh: string;
  underbaseCount: number;
  hitsCount: number;
+ printMethod?: string;
+ profile?: string;
 }
 
 interface ProfileFormState {
@@ -67,9 +69,21 @@ const normalizeInkExceptionsList = (raw: any): InkExceptionRow[] => {
    const inkName = row.inkName != null ? String(row.inkName) : '';
    const mesh = row.mesh != null ? String(row.mesh) : '';
    const enabled = row.enabled !== false && row.disabled !== true;
-   const underbaseCount = clampCount(row.underbaseCount, 4);
+   const underbaseCount =
+    row.underbaseCount != null && !isNaN(parseInt(row.underbaseCount, 10))
+     ? Math.max(1, Math.min(4, parseInt(row.underbaseCount, 10)))
+     : 1;
    const hitsCount = clampCount(row.hitsCount, 2);
-   return { id, enabled, inkName, mesh, underbaseCount, hitsCount } as InkExceptionRow;
+   return {
+    id,
+    enabled,
+    inkName,
+    mesh,
+    underbaseCount,
+    hitsCount,
+    printMethod: row.printMethod != null ? String(row.printMethod) : '',
+    profile: row.profile != null ? String(row.profile) : ''
+   } as InkExceptionRow;
   })
   .filter(Boolean) as InkExceptionRow[];
 };
@@ -80,15 +94,10 @@ const createEmptyInkException = (): InkExceptionRow => ({
  inkName: 'New ink',
  mesh: '',
  underbaseCount: 1,
- hitsCount: 1
+ hitsCount: 1,
+ printMethod: '',
+ profile: ''
 });
-
-const createDefaultInkExceptions = (): InkExceptionRow[] =>
- normalizeInkExceptionsList([
-  { inkName: 'PMS 186', mesh: '110', underbaseCount: 2, hitsCount: 1, enabled: true },
-  { inkName: 'PMS 187', mesh: '122', underbaseCount: 1, hitsCount: 1, enabled: true },
-  { inkName: 'PMS 199', mesh: '157', underbaseCount: 2, hitsCount: 2, enabled: true }
- ]);
 
 const formatMeshDisplay = (mesh: any): string => {
  const s = mesh == null ? '' : String(mesh).trim();
@@ -97,6 +106,26 @@ const formatMeshDisplay = (mesh: any): string => {
  if (s.length >= 2 && s[0].toUpperCase() === 'M' && (s[1] === ' ' || s[1] === '\t')) return s;
  return `M ${s}`;
 };
+
+const parseMeshValuesList = (meshValues: string): string[] => {
+ if (!meshValues || !String(meshValues).trim()) return [];
+ return String(meshValues)
+  .split(/[,;]+/)
+  .map((part) => part.trim())
+  .filter(Boolean);
+};
+
+/** Normalize mesh for comparison (ink row vs Profile Defaults Color Mesh). */
+const normalizeMeshKey = (mesh: any): string => {
+ const s = mesh == null ? '' : String(mesh).trim();
+ if (!s || s === '—') return '';
+ let t = s.replace(/^m\s+/i, '').trim();
+ const num = parseFloat(t);
+ if (!isNaN(num) && t !== '') return String(num);
+ return t;
+};
+
+const PROFILE_DEFAULT_HITS_COUNT = 1;
 
 const buildDefaultProfile = (defaultBlackColorNames?: string): ProfileFormState => ({
  id: '',
@@ -117,7 +146,7 @@ const buildDefaultProfile = (defaultBlackColorNames?: string): ProfileFormState 
  formatInkNameLabel: false,
  colorNameLabelFormat: 'PANTONE XXX C',
  blackInksKnockoutDisplay: defaultBlackColorNames || 'Black, PANTONE Black C, PANTONE Black 6 C, BLACK 00A',
- inkExceptions: createDefaultInkExceptions()
+ inkExceptions: []
 });
 
 @Component({
@@ -129,6 +158,7 @@ export class EditSeparationProfileModalComponent implements OnInit, OnChanges {
  @Input() isOpen = false;
  @Input() profile: any = null;
  @Input() defaultBlackColorNames = '';
+ @Input() meshValues = '';
  @Output() close = new EventEmitter<void>();
  @Output() save = new EventEmitter<any>();
 
@@ -138,6 +168,8 @@ export class EditSeparationProfileModalComponent implements OnInit, OnChanges {
  editingInkExceptionId: string | null = null;
  draftInkExceptionName = '';
  inkExceptionRemoveId: string | null = null;
+ inkExceptionsLoading = false;
+ inkExceptionsLoadError = '';
 
  /** Fallback list used when no document is open or swatches fail to load. */
  private readonly fallbackSwatchOptions = ['White UB', 'SL White UB', 'GARMENT'];
@@ -186,6 +218,30 @@ export class EditSeparationProfileModalComponent implements OnInit, OnChanges {
   if (changes['isOpen'] && changes['isOpen'].currentValue === false) {
    this.inkExceptionRemoveId = null;
   }
+  // Reload inks when modal opens or when a different profile is selected for edit.
+  const profileChanged = !!changes['profile'];
+  const modalOpened = changes['isOpen']?.currentValue === true;
+  if (this.isOpen && this.profile && (profileChanged || modalOpened)) {
+   this.loadInkExceptionsFromServer();
+  }
+ }
+
+ /** Profile name used in profile_ink_exceptions.json "Profile" field (e.g. Fanatics-HSWB). */
+ private getInkProfileFilterName(): string {
+  const p = this.profile;
+  if (!p) return (this.formState.name || '').trim();
+  const fromJson =
+   p._jsonData && p._jsonData['Profile Name'] != null ? String(p._jsonData['Profile Name']).trim() : '';
+  return (p.name || fromJson || this.formState.name || '').trim();
+ }
+
+ /** Profile code from Profiles.json "Profile Code" (e.g. FAN_WB). */
+ private getInkProfileFilterCode(): string {
+  const p = this.profile;
+  if (!p) return (this.formState.code || '').trim();
+  const fromJson =
+   p._jsonData && p._jsonData['Profile Code'] != null ? String(p._jsonData['Profile Code']).trim() : '';
+  return (p.code || fromJson || this.formState.code || '').trim();
  }
 
  private updateFormState(): void {
@@ -194,7 +250,7 @@ export class EditSeparationProfileModalComponent implements OnInit, OnChanges {
    const ub = this.profile.underbaseMeshes || defaultProfile.underbaseMeshes;
    let ubEnabled = this.profile.underbaseEnabled ?? defaultProfile.underbaseEnabled;
    ubEnabled = Array.isArray(ubEnabled) ? [...ubEnabled] : [...defaultProfile.underbaseEnabled];
-   ubEnabled[0] = true; // Underbase 1 always checked
+   ubEnabled[0] = true;
    const ubKo = this.profile.underbaseKnockoutBlack ?? defaultProfile.underbaseKnockoutBlack;
    const ubSw =
     (this.profile as any).underbaseKnockoutSwatches ??
@@ -204,7 +260,6 @@ export class EditSeparationProfileModalComponent implements OnInit, OnChanges {
     ? [0, 1, 2, 3].map((j) => (ubSw[j] != null && String(ubSw[j]).trim() !== '' ? String(ubSw[j]) : defaultProfile.underbaseKnockoutSwatches[j]))
     : [...defaultProfile.underbaseKnockoutSwatches];
    const formatInkNameLabel = this.profile.formatInkNameLabel ?? (this.profile as any).colorNameFormat ?? defaultProfile.formatInkNameLabel;
-   const rawInkExceptions = (this.profile as any).inkExceptions;
    this.formState = {
     ...defaultProfile,
     ...this.profile,
@@ -228,13 +283,59 @@ export class EditSeparationProfileModalComponent implements OnInit, OnChanges {
     colorNameLabelFormat: this.profile.colorNameLabelFormat != null && this.profile.colorNameLabelFormat !== ''
      ? this.profile.colorNameLabelFormat
      : defaultProfile.colorNameLabelFormat,
-    inkExceptions: rawInkExceptions != null
-     ? normalizeInkExceptionsList(rawInkExceptions)
-     : [...defaultProfile.inkExceptions]
+    inkExceptions: []
    };
   } else {
-   this.formState = { ...defaultProfile, inkExceptions: [...defaultProfile.inkExceptions] };
+   this.formState = { ...defaultProfile, inkExceptions: [] };
   }
+ }
+
+ private formatInkLoadError(err: any): string {
+  if (!err) return 'Failed to load ink exceptions';
+  if (typeof err === 'string') return err;
+  if (typeof err.reason === 'string') return err.reason;
+  if (typeof err.message === 'string') return err.message;
+  if (typeof err.error === 'string') return err.error;
+  try {
+   return JSON.stringify(err);
+  } catch {
+   return 'Failed to load ink exceptions';
+  }
+ }
+
+ get activeInkProfileLabel(): string {
+  return this.getInkProfileFilterName() || '—';
+ }
+
+ loadInkExceptionsFromServer(): void {
+  const profileCode = this.getInkProfileFilterCode();
+  if (!profileCode) {
+   this.formState.inkExceptions = [];
+   this.inkExceptionsLoadError = '';
+   return;
+  }
+  const profileName = this.getInkProfileFilterName();
+  this.inkExceptionsLoading = true;
+  this.inkExceptionsLoadError = '';
+  this.controller
+   .getInkExceptions(profileCode, profileName)
+   .then((result) => {
+    if (result?.success && Array.isArray(result.inkExceptions)) {
+     this.formState.inkExceptions = normalizeInkExceptionsList(result.inkExceptions);
+     this.inkExceptionsLoadError = '';
+    } else {
+     this.formState.inkExceptions = [];
+     this.inkExceptionsLoadError = this.formatInkLoadError(result?.error || result);
+    }
+   })
+   .catch((err) => {
+    this.formState.inkExceptions = [];
+    this.inkExceptionsLoadError = this.formatInkLoadError(err);
+   })
+   .finally(() => {
+    this.inkExceptionsLoading = false;
+    this.cdr.markForCheck();
+   });
  }
 
  onOverlayInteraction(event: MouseEvent): void {
@@ -243,6 +344,9 @@ export class EditSeparationProfileModalComponent implements OnInit, OnChanges {
 
  setActiveTab(tab: ProfileModalTab): void {
   this.activeTab = tab;
+  if (tab === 'inkExceptions' && this.isOpen && this.profile && !this.inkExceptionsLoading) {
+   this.loadInkExceptionsFromServer();
+  }
  }
 
  onInputChange(field: string, event: Event): void {
@@ -262,7 +366,7 @@ export class EditSeparationProfileModalComponent implements OnInit, OnChanges {
  }
 
  onUnderbaseEnabledChange(index: number, event: Event): void {
-  if (index === 0) return; // Underbase 1 is always on, ignore
+  if (index === 0) return;
   const checked = (event.target as HTMLInputElement).checked;
   this.formState.underbaseEnabled = [...this.formState.underbaseEnabled];
   this.formState.underbaseEnabled[index] = checked;
@@ -280,7 +384,6 @@ export class EditSeparationProfileModalComponent implements OnInit, OnChanges {
   return !!this.formState.blocker && !!this.formState.blockerKnockoutBlack;
  }
 
- /** OP = overprint (false), KO = knockout black inks (true). */
  setUnderbaseDarkInkKnockout(index: number, knockout: boolean): void {
   if (!this.formState.underbaseEnabled[index]) {
    return;
@@ -302,7 +405,6 @@ export class EditSeparationProfileModalComponent implements OnInit, OnChanges {
   return !!this.formState.underbaseEnabled[index] && !!this.formState.underbaseKnockoutBlack[index];
  }
 
- /** Include saved swatch value even if it isn't in the live document list. */
  swatchSelectOptionsForIndex(index: number): string[] {
   const v = this.formState.underbaseKnockoutSwatches[index];
   if (v && this.knockoutSwatchOptions.indexOf(v) === -1) {
@@ -334,8 +436,80 @@ export class EditSeparationProfileModalComponent implements OnInit, OnChanges {
   return rows.filter(row => (row.inkName || '').toLowerCase().includes(query));
  }
 
- get defaultMeshLabel(): string {
-  return formatMeshDisplay(this.formState.colorMesh);
+ /** Profile default mesh from Profiles.json "Color Mesh" (ink exceptions column header). */
+ get profileDefaultMeshLabel(): string {
+  const key = this.profileDefaultMeshKey;
+  return key ? formatMeshDisplay(key) : '—';
+ }
+
+ /** Raw profile Color Mesh key for matching ink rows (Profiles.json / form). */
+ get profileDefaultMeshKey(): string {
+  const fromForm = String(this.formState.colorMesh || '').trim();
+  if (fromForm) return normalizeMeshKey(fromForm);
+  const raw = this.profile?._jsonData?.['Color Mesh'];
+  if (raw != null && raw !== '' && String(raw).trim() !== '' && String(raw) !== ' ') {
+   return normalizeMeshKey(raw);
+  }
+  return '';
+ }
+
+ inkMeshMatchesProfileDefault(row: InkExceptionRow): boolean {
+  if (!row?.enabled) return false;
+  const defaultKey = this.profileDefaultMeshKey;
+  if (!defaultKey) return !normalizeMeshKey(row.mesh);
+  return normalizeMeshKey(row.mesh) === defaultKey;
+ }
+
+ inkHitsMatchesProfileDefault(row: InkExceptionRow): boolean {
+  if (!row?.enabled) return false;
+  const hits = row.hitsCount != null ? parseInt(String(row.hitsCount), 10) : PROFILE_DEFAULT_HITS_COUNT;
+  return (isNaN(hits) ? PROFILE_DEFAULT_HITS_COUNT : hits) === PROFILE_DEFAULT_HITS_COUNT;
+ }
+
+ inkUnderbaseMatchesProfileDefault(row: InkExceptionRow): boolean {
+  if (!row?.enabled) return false;
+  const count = row.underbaseCount != null ? parseInt(String(row.underbaseCount), 10) : 1;
+  const safe = isNaN(count) ? 1 : Math.max(1, Math.min(4, count));
+  return safe === this.profileDefaultUnderbaseCount;
+ }
+
+ /**
+  * Profile Defaults header only (roller column) — from Profiles.json Underbase 2–4, not ink exceptions.
+  * Underbase 1 is always counted; does not use per-ink underbase_count from profile_ink_exceptions.json.
+  */
+ get profileDefaultUnderbaseCount(): number {
+  const toEnabled = (value: any): boolean => {
+   if (value === true || value === 1) return true;
+   if (typeof value === 'string') {
+    const v = value.trim().toUpperCase();
+    return v === 'Y' || v === 'YES' || v === 'TRUE' || v === '1';
+   }
+   return false;
+  };
+  const countFromEnabledFlags = (enabled: boolean[]): number => {
+   if (!Array.isArray(enabled) || enabled.length === 0) return 1;
+   return Math.max(1, Math.min(4, enabled.filter(Boolean).length));
+  };
+
+  const json = this.profile?._jsonData;
+  if (json) {
+   let count = 1;
+   if (toEnabled(json['Underbase 2'])) count++;
+   if (toEnabled(json['Underbase 3'])) count++;
+   if (toEnabled(json['Underbase 4'])) count++;
+   return Math.max(1, Math.min(4, count));
+  }
+
+  const profileEnabled = this.profile?.underbaseEnabled;
+  if (Array.isArray(profileEnabled) && profileEnabled.length > 0) {
+   return countFromEnabledFlags(profileEnabled);
+  }
+
+  return 1;
+ }
+
+ get meshOptions(): string[] {
+  return parseMeshValuesList(this.meshValues);
  }
 
  get pendingInkExceptionRemove(): InkExceptionRow | null {
@@ -359,8 +533,43 @@ export class EditSeparationProfileModalComponent implements OnInit, OnChanges {
   return current >= 2 ? 1 : current + 1;
  }
 
- cycleRollerCount(current: number): number {
-  return current >= 4 ? 1 : current + 1;
+ /** Ink exception rows only — cycles 1→4 from profile_ink_exceptions.json, not Profiles.json underbase settings. */
+ cycleInkExceptionUnderbaseCount(current: number): number {
+  const safe = Math.max(1, Math.min(4, Math.floor(Number(current) || 1)));
+  return safe >= 4 ? 1 : safe + 1;
+ }
+
+ formatInkMeshDisplay(mesh: string): string {
+  return formatMeshDisplay(mesh);
+ }
+
+ canCycleMesh(): boolean {
+  return this.meshOptions.length > 1;
+ }
+
+ cycleInkExceptionMesh(id: string): void {
+  const options = this.meshOptions;
+  if (options.length <= 1) return;
+  const rows = normalizeInkExceptionsList(this.formState.inkExceptions);
+  const row = rows.find((item) => item.id === id);
+  if (!row || !row.enabled) return;
+  const current = String(row.mesh || '').trim();
+  let nextIndex = 0;
+  if (current) {
+   const currentIndex = options.findIndex((value) => value === current);
+   nextIndex = currentIndex >= 0 ? (currentIndex + 1) % options.length : 0;
+  }
+  this.updateInkException(id, { mesh: options[nextIndex] });
+ }
+
+ cycleInkExceptionHits(id: string, current: number): void {
+  const nextHits = this.cycleBrushCount(current || 1);
+  this.updateInkException(id, { hitsCount: nextHits });
+ }
+
+ cycleInkExceptionUnderbases(id: string, current: number): void {
+  const nextCount = this.cycleInkExceptionUnderbaseCount(current || 1);
+  this.updateInkException(id, { underbaseCount: nextCount });
  }
 
  handleInkExceptionAdd(): void {
@@ -427,24 +636,47 @@ export class EditSeparationProfileModalComponent implements OnInit, OnChanges {
 
  onSubmit(event: Event): void {
   event.preventDefault();
-  this.save.emit({
-   ...this.formState,
-   underbaseMeshes: [...this.formState.underbaseMeshes],
-   underbaseEnabled: [...this.formState.underbaseEnabled],
-   underbaseKnockoutBlack: [...this.formState.underbaseKnockoutBlack],
-   underbaseKnockoutSwatches: [...this.formState.underbaseKnockoutSwatches],
-   blockerKnockoutBlack: !!this.formState.blockerKnockoutBlack,
-   blockerKnockoutSwatch: this.formState.blockerKnockoutSwatch,
-   underbaseSwatch: this.formState.underbaseSwatch,
-   inkExceptions: normalizeInkExceptionsList(this.formState.inkExceptions)
-  });
+  const profileCode = this.getInkProfileFilterCode() || (this.formState.code || '').trim();
+  const profileName = this.getInkProfileFilterName() || (this.formState.name || '').trim();
+  const inkRows = normalizeInkExceptionsList(this.formState.inkExceptions);
+
+  const emitSave = (): void => {
+   this.save.emit({
+    ...this.formState,
+    underbaseMeshes: [...this.formState.underbaseMeshes],
+    underbaseEnabled: [...this.formState.underbaseEnabled],
+    underbaseKnockoutBlack: [...this.formState.underbaseKnockoutBlack],
+    underbaseKnockoutSwatches: [...this.formState.underbaseKnockoutSwatches],
+    blockerKnockoutBlack: !!this.formState.blockerKnockoutBlack,
+    blockerKnockoutSwatch: this.formState.blockerKnockoutSwatch,
+    underbaseSwatch: this.formState.underbaseSwatch,
+    inkExceptions: inkRows
+   });
+  };
+
+  if (!profileCode) {
+   emitSave();
+   return;
+  }
+
+  this.controller
+   .saveInkExceptions(profileCode, inkRows, profileName)
+   .then((result) => {
+    if (!result?.success) {
+     console.error('Failed to save ink exceptions:', result?.error);
+    }
+    emitSave();
+   })
+   .catch((err) => {
+    console.error('Failed to save ink exceptions:', err);
+    emitSave();
+   });
  }
 
  onCancel(): void {
   this.close.emit();
  }
 
- /** True when any "k/o black inks" is on (underbases OR blocker). */
  isAnyKnockoutBlackChecked(): boolean {
   return this.formState.underbaseKnockoutBlack.some(b => b) || !!this.formState.blockerKnockoutBlack;
  }

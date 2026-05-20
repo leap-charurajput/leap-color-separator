@@ -2709,7 +2709,7 @@ function getProfilesJsonPath() {
    return null;
   }
   var normalizedBasePath = serverBasePath.replace(/\/$/, "");
-  var profilesPath = normalizedBasePath + "/SETTINGS/LEAP_SEPS/Profiles.json";
+  var profilesPath = normalizedBasePath + "/SETTINGS/LEAP_SEPS/Data/Profiles.json";
   return profilesPath;
  } catch (error) {
   return null;
@@ -2810,6 +2810,172 @@ function handleSaveSeparationProfiles(params_string) {
   });
  }
 }
+
+function normalizeInkProfileName(value) {
+ if (value == null) return "";
+ return String(value).trim();
+}
+
+function meshValueFromJsonEntry(value) {
+ if (value == null || value === "") return "";
+ return String(value).trim();
+}
+
+function meshValueToJsonEntry(mesh, enabled) {
+ if (!enabled) return null;
+ var trimmed = mesh != null ? String(mesh).trim() : "";
+ if (trimmed === "") return null;
+ var numeric = parseFloat(trimmed);
+ return isNaN(numeric) ? trimmed : numeric;
+}
+
+function inkJsonEntryToRow(entry, index) {
+ if (!entry || typeof entry !== "object") return null;
+ var inkColor = entry.Ink_Color != null ? String(entry.Ink_Color).trim() : "";
+ var profile = entry.Profile != null ? String(entry.Profile).trim() : "";
+ var mesh = meshValueFromJsonEntry(entry.Color_Mesh);
+ var twoHitsRaw = entry.Two_Hits != null ? String(entry.Two_Hits).trim().toUpperCase() : "N";
+ var hitsCount = (twoHitsRaw === "Y" || twoHitsRaw === "YES") ? 2 : 1;
+ var underbaseCount = entry.underbase_count != null ? parseInt(entry.underbase_count, 10) : 1;
+ if (isNaN(underbaseCount) || underbaseCount < 1) underbaseCount = 1;
+ if (underbaseCount > 4) underbaseCount = 4;
+ var id = "ink-" + profile + "-" + inkColor + "-" + index;
+ return {
+  id: id,
+  enabled: true,
+  inkName: inkColor,
+  mesh: mesh,
+  underbaseCount: underbaseCount,
+  hitsCount: hitsCount,
+  printMethod: entry.Print_Method != null ? String(entry.Print_Method).trim() : "",
+  profile: profile
+ };
+}
+
+function inkRowToJsonEntry(row, profileName, profileCode) {
+ var inkColor = row && row.inkName != null ? String(row.inkName).trim() : "";
+ var enabled = row && row.enabled !== false;
+ var hitsCount = enabled && row.hitsCount != null ? parseInt(row.hitsCount, 10) : 1;
+ if (isNaN(hitsCount) || hitsCount < 1) hitsCount = 1;
+ var underbaseCount = enabled && row.underbaseCount != null ? parseInt(row.underbaseCount, 10) : 1;
+ if (isNaN(underbaseCount) || underbaseCount < 1) underbaseCount = 1;
+ if (underbaseCount > 4) underbaseCount = 4;
+ return {
+  Color_Mesh: meshValueToJsonEntry(row && row.mesh != null ? row.mesh : "", enabled),
+  Ink_Color: inkColor,
+  Print_Method: row && row.printMethod != null ? String(row.printMethod).trim() : "",
+  Profile: profileName,
+  profileCode: profileCode != null ? String(profileCode).trim() : "",
+  Two_Hits: hitsCount >= 2 ? "Y" : "N",
+  underbase_count: underbaseCount
+ };
+}
+
+function inkProfileMatchesEntry(entry, profileCodeKey) {
+ if (!entry || !profileCodeKey) return false;
+ var entryCode = entry.profileCode != null ? String(entry.profileCode).trim().toUpperCase() : "";
+ return entryCode !== "" && entryCode === profileCodeKey;
+}
+
+function handleGetInkExceptions(params_string) {
+ try {
+  var params = params_string ? JSON.parse(params_string) : {};
+  var profileCode = params.profileCode != null ? String(params.profileCode).trim().toUpperCase() : "";
+  if (!profileCode) {
+   return JSON.stringify({
+    success: false,
+    error: "Profile code is required"
+   });
+  }
+  var allEntries = loadProfileInkExceptionsJson();
+  var rows = [];
+  for (var i = 0; i < allEntries.length; i++) {
+   var entry = allEntries[i];
+   if (!entry) continue;
+   if (inkProfileMatchesEntry(entry, profileCode)) {
+    var row = inkJsonEntryToRow(entry, i);
+    if (row) rows.push(row);
+   }
+  }
+  return JSON.stringify({
+   success: true,
+   inkExceptions: rows
+  });
+ } catch (e) {
+  return JSON.stringify({
+   success: false,
+   error: e.message || e.toString()
+  });
+ }
+}
+
+function handleSaveInkExceptions(params_string) {
+ try {
+  var params = JSON.parse(params_string);
+  var profileName = normalizeInkProfileName(params.profileName);
+  var profileCode = params.profileCode != null ? String(params.profileCode).trim().toUpperCase() : "";
+  var inkRows = params && params.inkRows ? params.inkRows : null;
+  if (!profileCode) {
+   return JSON.stringify({
+    success: false,
+    error: "Profile code is required"
+   });
+  }
+  if (!inkRows || !(inkRows instanceof Array)) {
+   return JSON.stringify({
+    success: false,
+    error: "No ink exception data provided or invalid format"
+   });
+  }
+  var allEntries = loadProfileInkExceptionsJson();
+  var remaining = [];
+  for (var i = 0; i < allEntries.length; i++) {
+   var entry = allEntries[i];
+   if (!entry) continue;
+   if (!inkProfileMatchesEntry(entry, profileCode)) {
+    remaining.push(entry);
+   }
+  }
+  var updatedProfileEntries = [];
+  for (var j = 0; j < inkRows.length; j++) {
+   var row = inkRows[j];
+   if (!row) continue;
+   var inkName = row.inkName != null ? String(row.inkName).trim() : "";
+   if (!inkName) continue;
+   var printMethod = row.printMethod != null ? String(row.printMethod).trim() : "";
+   if (!printMethod && remaining.length > 0) {
+    for (var k = 0; k < allEntries.length; k++) {
+     var sample = allEntries[k];
+     if (!sample) continue;
+     if (inkProfileMatchesEntry(sample, profileCode) && sample.Print_Method) {
+      printMethod = String(sample.Print_Method).trim();
+      break;
+     }
+    }
+   }
+   row.printMethod = printMethod;
+   updatedProfileEntries.push(inkRowToJsonEntry(row, profileName, profileCode));
+  }
+  var merged = remaining.concat(updatedProfileEntries);
+  var saveResult = saveProfileInkExceptionsJson(merged);
+  if (!saveResult || !saveResult.success) {
+   return JSON.stringify({
+    success: false,
+    error: saveResult && saveResult.error ? saveResult.error : "Failed to save profile_ink_exceptions.json"
+   });
+  }
+  return JSON.stringify({
+   success: true,
+   message: "Ink exceptions saved successfully"
+  });
+ } catch (e) {
+  return JSON.stringify({
+   success: false,
+   error: e.message || e.toString()
+  });
+ }
+}
+
 function handleSaveGraphicsData(params_string) {
  try {
   if (!app.documents.length) {
@@ -2916,7 +3082,7 @@ function getProfilesJsonPath() {
    return null;
   }
   var normalizedBasePath = serverBasePath.replace(/\/$/, "");
-  var profilesPath = normalizedBasePath + "/SETTINGS/LEAP_SEPS/Profiles.json";
+  var profilesPath = normalizedBasePath + "/SETTINGS/LEAP_SEPS/Data/Profiles.json";
   return profilesPath;
  } catch (error) {
   return null;
