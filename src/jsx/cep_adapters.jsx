@@ -992,21 +992,21 @@ function copyAndPrepareSEPDocument(templateFile, destinationFolder, docName, jso
      };
      sepXmp.setStructField("BodyColor", defaultBodyColorData, true, false);
     }
-    // Update $BODY swatch in SEP document so garment and backgrounds update (match React)
+    // Update GARMENT swatch CMYK only (swatch name unchanged; $BODY no longer in template)
     try {
-     var bodySwatch = sepDoc.swatches.getByName("$BODY");
-     if (bodySwatch && bodySwatch.color && bodySwatch.color.typename === "SpotColor" && bodySwatch.color.spot) {
-      var spot = bodySwatch.color.spot;
-      spot.name = bodyNameForSwatch;
-      if (spot.color && spot.color.typename === "CMYKColor") {
-       spot.color.cyan = Math.max(0, Math.min(100, bodyC));
-       spot.color.magenta = Math.max(0, Math.min(100, bodyM));
-       spot.color.yellow = Math.max(0, Math.min(100, bodyY));
-       spot.color.black = Math.max(0, Math.min(100, bodyK));
+     var garmentSwatchName = getChokeStrokeSwatchNameForDocument(sepDoc);
+     var garmentSwatch = sepDoc.swatches.getByName(garmentSwatchName);
+     if (garmentSwatch && garmentSwatch.color && garmentSwatch.color.typename === "SpotColor" && garmentSwatch.color.spot) {
+      var garmentSpot = garmentSwatch.color.spot;
+      if (garmentSpot.color && garmentSpot.color.typename === "CMYKColor") {
+       garmentSpot.color.cyan = Math.max(0, Math.min(100, bodyC));
+       garmentSpot.color.magenta = Math.max(0, Math.min(100, bodyM));
+       garmentSpot.color.yellow = Math.max(0, Math.min(100, bodyY));
+       garmentSpot.color.black = Math.max(0, Math.min(100, bodyK));
       }
      }
     } catch (swatchErr) {
-     $.writeln("[SEPARATION] Error updating $BODY swatch: " + swatchErr.message);
+     $.writeln("[SEPARATION] Error updating GARMENT swatch CMYK: " + swatchErr.message);
     }
    } catch (bodyColorError) {
     $.writeln("[SEPARATION] Error extracting/storing body color: " + bodyColorError.message);
@@ -2687,6 +2687,30 @@ function handleCheckSeparatedDocument(params_string) {
     _dataFromXMP.isSeparatedDoc = true;
     var graphicFolder = docFile.parent;
     _dataFromXMP.graphicName = graphicFolder.name;
+   }
+  }
+
+  // Sync GARMENT swatch CMYK from BodyColor XMP (name unchanged; match React getDocumentInfo)
+  if (_dataFromXMP.isSeparatedDoc && _dataFromXMP.bodyColor && _dataFromXMP.bodyColor.cmyk) {
+   try {
+    var garmentCmyk = _dataFromXMP.bodyColor.cmyk;
+    var gc = Math.max(0, Math.min(100, Number(garmentCmyk.c) || 0));
+    var gm = Math.max(0, Math.min(100, Number(garmentCmyk.m) || 0));
+    var gy = Math.max(0, Math.min(100, Number(garmentCmyk.y) || 0));
+    var gk = Math.max(0, Math.min(100, Number(garmentCmyk.k) || 0));
+    var garmentSwatchNameOnOpen = getChokeStrokeSwatchNameForDocument(activeDoc);
+    var garmentSwatchOnOpen = activeDoc.swatches.getByName(garmentSwatchNameOnOpen);
+    if (garmentSwatchOnOpen && garmentSwatchOnOpen.color && garmentSwatchOnOpen.color.typename === "SpotColor" && garmentSwatchOnOpen.color.spot) {
+     var garmentSpotOnOpen = garmentSwatchOnOpen.color.spot;
+     if (garmentSpotOnOpen.color && garmentSpotOnOpen.color.typename === "CMYKColor") {
+      garmentSpotOnOpen.color.cyan = gc;
+      garmentSpotOnOpen.color.magenta = gm;
+      garmentSpotOnOpen.color.yellow = gy;
+      garmentSpotOnOpen.color.black = gk;
+     }
+    }
+   } catch (garmentSwatchErr) {
+    // GARMENT swatch may not exist or may not be spot color - ignore
    }
   }
 

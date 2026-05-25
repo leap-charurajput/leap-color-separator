@@ -1937,8 +1937,18 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
       const str = typeof res === 'string' ? res : '';
       const result = str ? JSON.parse(str) : { success: false, error: 'No result' };
 
+      if (result?.success) {
+       const msg = result.message || 'PostScript exported successfully';
+       console.log('[exportPostscript]', msg, result.filePath ? `→ ${result.filePath}` : '');
+       if (result.inkDebug) {
+        console.log('[exportPostscript] requested inks:', result.requestedInks);
+        console.table(result.inkDebug);
+       }
+      } else {
+       console.error('[exportPostscript]', result?.error || 'Failed');
+      }
+
       if (result?.success && result?.filePath) {
-       console.log('[exportPostscript] PS exported:', result.filePath);
        const distiller = await this.launchDistiller(result.filePath);
        console.log('[exportPostscript] Distiller launch result:', distiller);
        return {
@@ -2102,21 +2112,41 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
     colorSepOptions.convertSpotColors = false;
     colorSepOptions.overprintBlack = false;
 
-    var _inkList = doc.inkList;
-    var printInks = [];
+    // Normalize like React exportPostscript.script.ts (collapse whitespace + trim + lowercase)
+    function normalizeInkName(name) {
+      return String(name == null ? "" : name)
+        .replace(/\\s+/g, " ")
+        .replace(/^\\s+|\\s+$/g, "")
+        .toLowerCase();
+    }
+
     var inksLookup = {};
     for (var i = 0; i < inks.length; i++) {
-      inksLookup[inks[i].toUpperCase()] = true;
+      inksLookup[normalizeInkName(inks[i])] = true;
     }
-    for (var i = 0; i < _inkList.length; i++) {
-      var ink = _inkList[i];
-      var inkName = ink.name.toUpperCase();
-      if (inksLookup[inkName]) {
-        printInks.push(ink);
+
+    // ExtendScript has no console.log — return inkDebug for panel DevTools
+    var inkDebug = [];
+
+    // Read ink list once; set printingStatus on each ink (do not filter the list)
+    var inkList = doc.inkList;
+    for (var i = 0; i < inkList.length; i++) {
+      var ink = inkList[i];
+      var normalizedName = normalizeInkName(ink.name);
+      var enabled = !!inksLookup[normalizedName];
+      inkDebug.push({
+        name: String(ink.name),
+        normalized: normalizedName,
+        enabled: enabled
+      });
+      if (enabled) {
+        ink.inkInfo.printingStatus = InkPrintStatus.ENABLEINK;
+      } else {
+        ink.inkInfo.printingStatus = InkPrintStatus.DISABLEINK;
       }
     }
 
-    colorSepOptions.inkList = printInks;
+    colorSepOptions.inkList = inkList;
 
 
  		// Page marks options
@@ -2163,7 +2193,9 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
       message: "PostScript exported successfully",
       filePath: outputPath,
       artboardName: "GRID",
-      artboardIndex: gridArtboardIndex
+      artboardIndex: gridArtboardIndex,
+      requestedInks: inks,
+      inkDebug: inkDebug
     });
   } catch (e) {
     return JSON.stringify({
