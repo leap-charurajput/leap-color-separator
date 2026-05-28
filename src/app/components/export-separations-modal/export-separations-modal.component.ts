@@ -11,7 +11,7 @@ export class ExportSeparationsModalComponent implements OnInit, OnChanges {
 	@Output() export = new EventEmitter<any>();
 
 	exportPrintGuide = true;
-	exportSeparationsPreview = true;
+	/** Export Postscript (.ps) and Separations Preview PDF (Distiller) together. */
 	exportPostscript = true;
 
 	ngOnInit(): void {
@@ -26,14 +26,12 @@ export class ExportSeparationsModalComponent implements OnInit, OnChanges {
 
 	private resetCheckboxes(): void {
 		this.exportPrintGuide = true;
-		this.exportSeparationsPreview = true;
 		this.exportPostscript = true;
 	}
 
 	onExport(): void {
 		const exportOptions = {
 			exportPrintGuide: this.exportPrintGuide,
-			exportSeparationsPreview: this.exportSeparationsPreview,
 			exportPostscript: this.exportPostscript
 		};
 		this.export.emit(exportOptions);
@@ -50,10 +48,6 @@ export class ExportSeparationsModalComponent implements OnInit, OnChanges {
 
 	handlePrintGuideChange(event: Event): void {
 		this.exportPrintGuide = (event.target as HTMLInputElement).checked;
-	}
-
-	handleSeparationsPreviewChange(event: Event): void {
-		this.exportSeparationsPreview = (event.target as HTMLInputElement).checked;
 	}
 
 	handlePostscriptChange(event: Event): void {

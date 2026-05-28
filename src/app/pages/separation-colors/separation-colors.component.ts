@@ -991,79 +991,47 @@ private getProfileBlockerMesh(profileInfo?: any): string {
    this.checkExportCompletion(exportOptions, exportResults, exportErrors);
   }
 
-  // Export Postscript
+  const postscriptDelay = exportOptions.exportPrintGuide ? 500 : 0;
+
+  // Postscript (.ps at postscriptFilePath) + Separations Preview PDF (Distiller → separationPreviewFilePath)
   if (exportOptions.exportPostscript) {
    const postscriptInks = this.getAvailableColors();
-   setTimeout(
-    () => {
-     this.controller
-      .exportPostscript(postscriptInks)
-      .then((result) => {
-       if (result && result.success) {
-        exportResults.push('PostScript');
+   setTimeout(() => {
+    this.controller
+     .exportPostscript(postscriptInks)
+     .then(async (psResult) => {
+      const label = 'Postscript and Seps Preview';
+      if (!psResult?.success || !psResult?.filePath) {
+       exportErrors.push(label + ': ' + (psResult?.error || 'PostScript export failed'));
+       this.checkExportCompletion(exportOptions, exportResults, exportErrors);
+       return;
+      }
+
+      try {
+       const distillResult = await this.controller.distillSeparationsPreviewPDF(psResult.filePath);
+       if (distillResult && distillResult.success) {
+        exportResults.push(label);
        } else {
-        exportErrors.push('PostScript: ' + (result?.error || 'Failed'));
+        exportErrors.push(label + ': ' + (distillResult?.error || 'Distiller failed'));
        }
-       return this.checkExportCompletion(exportOptions, exportResults, exportErrors);
-      })
-      .catch((err) => {
-       exportErrors.push('PostScript: ' + (err.message || err.reason || 'Unknown error'));
-       return this.checkExportCompletion(exportOptions, exportResults, exportErrors);
-      });
-    },
-    exportOptions.exportPrintGuide ? 500 : 0
-   );
+      } catch (err: any) {
+       exportErrors.push(label + ': ' + (err?.message || err?.reason || 'Unknown error'));
+      }
+
+      this.checkExportCompletion(exportOptions, exportResults, exportErrors);
+     })
+     .catch((err) => {
+      exportErrors.push(
+       'Postscript and Seps Preview: ' + (err.message || err.reason || 'Unknown error')
+      );
+      this.checkExportCompletion(exportOptions, exportResults, exportErrors);
+     });
+   }, postscriptDelay);
 
    this.ngZone.run(() => {
     this.isExportModalOpen = false;
     this.cdr.detectChanges();
    });
-  }
-
-  // Export Separations Preview PDF (requires PostScript to be exported first)
-  if (exportOptions.exportSeparationsPreview) {
-   setTimeout(
-    () => {
-     if (exportOptions.exportPostscript) {
-      setTimeout(() => {
-       this.controller
-        .exportSeparationsPreviewPDF()
-        .then((result) => {
-         if (result && result.success) {
-          exportResults.push('Separations Preview PDF');
-         } else {
-          exportErrors.push('Separations Preview PDF: ' + (result?.error || 'Failed'));
-         }
-         this.checkExportCompletion(exportOptions, exportResults, exportErrors);
-        })
-        .catch((err) => {
-         exportErrors.push(
-          'Separations Preview PDF: ' + (err.message || err.reason || 'Unknown error')
-         );
-         this.checkExportCompletion(exportOptions, exportResults, exportErrors);
-        });
-      }, 500);
-     } else {
-      this.controller
-       .exportSeparationsPreviewPDF()
-       .then((result) => {
-        if (result && result.success) {
-         exportResults.push('Separations Preview PDF');
-        } else {
-         exportErrors.push('Separations Preview PDF: ' + (result?.error || 'Failed'));
-        }
-        this.checkExportCompletion(exportOptions, exportResults, exportErrors);
-       })
-       .catch((err) => {
-        exportErrors.push(
-         'Separations Preview PDF: ' + (err.message || err.reason || 'Unknown error')
-        );
-        this.checkExportCompletion(exportOptions, exportResults, exportErrors);
-       });
-     }
-    },
-    exportOptions.exportPrintGuide ? 1000 : 0
-   );
   }
  }
 
@@ -1073,9 +1041,7 @@ private getProfileBlockerMesh(profileInfo?: any): string {
   exportErrors: string[]
  ): void {
   const totalExports =
-   (exportOptions.exportPrintGuide ? 1 : 0) +
-   (exportOptions.exportPostscript ? 1 : 0) +
-   (exportOptions.exportSeparationsPreview ? 1 : 0);
+   (exportOptions.exportPrintGuide ? 1 : 0) + (exportOptions.exportPostscript ? 1 : 0);
 
   if (exportResults.length + exportErrors.length >= totalExports) {
    if (exportErrors.length > 0 && exportResults.length === 0) {

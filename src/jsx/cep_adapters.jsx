@@ -245,6 +245,34 @@ function createSeparationsFolders(rootFolder, league, teamCode, graphicName) {
  }
  return graphicNameFolder;
 }
+
+/** Keep SIZED_ART visible; hide only SIZED_GRAPHICS (guides/PNG stay on SIZED_ART). */
+function hideSizedGraphicsSublayer(doc) {
+ if (!doc) return;
+ try {
+  var sizedArt = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_ART);
+  sizedArt.visible = true;
+  try {
+   var sizedGraphics = sizedArt.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_GRAPHICS);
+   sizedGraphics.visible = false;
+  } catch (sgErr) {}
+ } catch (e) {}
+}
+
+function showSizedLayersForProcessing(doc) {
+ if (!doc) return;
+ try {
+  var sizedArt = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_ART);
+  sizedArt.visible = true;
+  sizedArt.locked = false;
+  try {
+   var sizedGraphics = sizedArt.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_GRAPHICS);
+   sizedGraphics.visible = true;
+   sizedGraphics.locked = false;
+  } catch (sgErr) {}
+ } catch (e) {}
+}
+
 function findPageItemByName(container, itemName) {
  if (!container || !itemName) {
   return null;
@@ -1121,8 +1149,7 @@ function handlePerformSeparation(params_string) {
   deleteNonFillStrokeItems();
   generateUnderbase(graphicName, null, profileMetadata);
   setOverprintOnSeparatedArt(sepDoc, true);
-  var _sizedArtLayer = app.activeDocument.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_ART);
-  _sizedArtLayer.visible = false;
+  hideSizedGraphicsSublayer(sepDoc);
   unloadLEAPColorSepsActions();
 
   try {
@@ -1257,9 +1284,6 @@ function handlePerformSeparation(params_string) {
 function handleRecreatePlatesInActiveDocument(params_string) {
  try {
   var params = JSON.parse(params_string);
-  var _sizedArtLayer = app.activeDocument.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_ART);
-  _sizedArtLayer.visible = true;
-  _sizedArtLayer.locked = false;
 
   var graphicName = params.graphicName;
   if (!graphicName) {
@@ -1275,6 +1299,7 @@ function handleRecreatePlatesInActiveDocument(params_string) {
    });
   }
   var doc = app.activeDocument;
+  showSizedLayersForProcessing(doc);
   loadLEAPColorSepsActions();
   var profileMetadata = params.profileMetadata || null;
   if (!profileMetadata) {
@@ -1299,8 +1324,7 @@ function handleRecreatePlatesInActiveDocument(params_string) {
   }
   generateUnderbase(graphicName, cleanupOpts, profileMetadata);
   setOverprintOnSeparatedArt(doc, true);
-  var _sizedArtLayer = app.activeDocument.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_ART);
-  _sizedArtLayer.visible = false;
+  hideSizedGraphicsSublayer(doc);
   unloadLEAPColorSepsActions();
 
   try {
@@ -1462,15 +1486,7 @@ function handleToggleInkVisibility(params_string) {
 
   var doc = app.activeDocument;
 
-  // Requirement 1: Hide SIZED_GRAPHICS sublayer
-  try {
-   var sizedArtLayer = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_ART);
-   var sizedGraphicsLayer = sizedArtLayer.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_GRAPHICS);
-   sizedGraphicsLayer.visible = false;
-   // Postpone redraw until end to prevent flicker, or do it here if needed immediately
-  } catch (e) {
-   // Layer might not exist
-  }
+  hideSizedGraphicsSublayer(doc);
 
   var separatedArtLayer = getSeparatedArtLayer(doc);
 
@@ -1616,14 +1632,7 @@ function handleResetInkVisibility(params_string) {
   if (state.mode === "allVisible") {
    // Toggle to Hide All
 
-   // Requirement 1: Hide SIZED_GRAPHICS when hiding
-   try {
-    var sizedArtLayer = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_ART);
-    var sizedGraphicsLayer = sizedArtLayer.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_GRAPHICS);
-    sizedGraphicsLayer.visible = false;
-   } catch (e) {
-    // Ignore
-   }
+   hideSizedGraphicsSublayer(doc);
 
    for (var i = 0; i < separatedArtLayer.layers.length; i++) {
     separatedArtLayer.layers[i].visible = false;

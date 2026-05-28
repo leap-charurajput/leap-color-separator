@@ -1545,12 +1545,17 @@ function setExportAlias(aliases, name, value) {
  aliases[normalizeExportLookupKey(name)] = value;
 }
 
+function isExportScalarValue(value) {
+ return value != null && typeof value !== "object";
+}
+
 function findExportValueInObject(obj, key) {
  if (!obj || typeof obj !== "object") return null;
  var normalizedSearchKey = normalizeExportLookupKey(key);
- if (obj.hasOwnProperty(key)) return obj[key];
+ if (obj.hasOwnProperty(key) && isExportScalarValue(obj[key])) return obj[key];
  for (var prop in obj) {
   if (!obj.hasOwnProperty(prop)) continue;
+  if (!isExportScalarValue(obj[prop])) continue;
   if (normalizeExportLookupKey(prop) === normalizedSearchKey) return obj[prop];
  }
  for (var nestedProp in obj) {
@@ -1562,6 +1567,47 @@ function findExportValueInObject(obj, key) {
   }
  }
  return null;
+}
+
+function normalizeExportBatchFields(raw) {
+ var fields = {};
+ if (!raw) return fields;
+ if (typeof raw === "string") {
+  try {
+   if (typeof JSON !== "undefined" && JSON.parse) raw = JSON.parse(raw);
+   else raw = eval("(" + raw + ")");
+  } catch (e) {
+   return fields;
+  }
+ }
+ if (typeof raw !== "object") return fields;
+ for (var key in raw) {
+  if (!raw.hasOwnProperty(key)) continue;
+  var val = raw[key];
+  if (!isExportScalarValue(val)) continue;
+  var text = trimExportString(val);
+  if (text !== "") fields[key] = text;
+ }
+ return fields;
+}
+
+function getExportBatchFields(meta, jsonData) {
+ var batch = normalizeExportBatchFields(meta && meta.batchVariableSource ? meta.batchVariableSource : null);
+ var fallbackKeys = [
+  "Item_ID", "Item ID", "Item Id", "ITEM_ID",
+  "Player Code", "Color Code", "Style#", "Style Code", "STYLE_CODE",
+  "Team Code", "TeamCode", "League", "Art Code", "Graphic Name",
+  "Player Jersey Name", "Lineup Style Code", "Document Name"
+ ];
+ for (var i = 0; i < fallbackKeys.length; i++) {
+  var lookupKey = fallbackKeys[i];
+  if (batch[lookupKey]) continue;
+  var fromJson = findExportValueInObject(jsonData, lookupKey);
+  if (fromJson !== null && fromJson !== undefined && fromJson !== "") {
+   batch[lookupKey] = trimExportString(fromJson);
+  }
+ }
+ return batch;
 }
 
 function sanitizeExportPathValue(value) {
@@ -1640,7 +1686,7 @@ function getExportVariableContext(doc) {
  var docName = docFile.name.replace(/\\.[^\\.]+$/, "");
  var meta = getExportXmpMetadata(doc) || {};
  var jsonData = getExportJsonData(docFile) || {};
- var batch = meta.batchVariableSource || {};
+ var batch = getExportBatchFields(meta, jsonData);
  var aliases = {};
  var teamCodeFromPath = "";
  var leagueFromPath = "";
@@ -1690,11 +1736,16 @@ function getExportVariableContext(doc) {
 }
 
 function getExportTemplateValue(token, context) {
- var sources = [context.aliases, context.batch, context.jsonData, context.meta, context.styleInfo];
- for (var i = 0; i < sources.length; i++) {
-  var value = findExportValueInObject(sources[i], token);
-  if (value !== null && value !== undefined && value !== "") return sanitizeExportPathValue(value);
- }
+ var value = findExportValueInObject(context.aliases, token);
+ if (value !== null && value !== undefined && value !== "") return sanitizeExportPathValue(value);
+ value = findExportValueInObject(context.jsonData, token);
+ if (value !== null && value !== undefined && value !== "") return sanitizeExportPathValue(value);
+ value = findExportValueInObject(context.batch, token);
+ if (value !== null && value !== undefined && value !== "") return sanitizeExportPathValue(value);
+ value = findExportValueInObject(context.meta, token);
+ if (value !== null && value !== undefined && value !== "") return sanitizeExportPathValue(value);
+ value = findExportValueInObject(context.styleInfo, token);
+ if (value !== null && value !== undefined && value !== "") return sanitizeExportPathValue(value);
  return null;
 }
 
@@ -1741,6 +1792,72 @@ function joinExportPath(basePath, segment) {
  return base + "/" + part;
 }
 
+function getSeparationsFolderFromDocFile(docFile) {
+ try {
+  var docPath = docFile.fsName || "";
+  if (docPath.indexOf("09 SEPARATIONS") === -1) return null;
+  var graphicFolder = docFile.parent;
+  var teamCodeFolder = graphicFolder.parent;
+  var leagueSepFolder = teamCodeFolder.parent;
+  return leagueSepFolder.parent;
+ } catch (e) {
+  return null;
+ }
+}
+
+function ensureExportFileNameExtension(fileName, extension) {
+ if (!fileName) return fileName;
+ var ext = String(extension || "").replace(/^\\./, "").toLowerCase();
+ if (!ext) return fileName;
+ // User supplied an extension (.pdf, .ps, .PDF, etc.) — do not append again
+ if (/\\.[^.\\/]+$/i.test(fileName)) return fileName;
+ return fileName + "." + ext;
+}
+
+function buildExportDestinationFromResolvedPath(resolvedPath, defaultFile, extension) {
+ var normalized = normalizeExportPathSlashes(trimExportString(resolvedPath));
+ if (!normalized) return defaultFile;
+
+ var endsWithSlash = /\\/$/.test(normalized);
+ var parts = normalized.split("/");
+ while (parts.length > 0 && parts[parts.length - 1] === "") {
+  parts.pop();
+ }
+
+ var rootRelativeToSeparations = parts.length > 0 && parts[0] === "";
+ if (rootRelativeToSeparations) {
+  parts.shift();
+ }
+
+ var dirParts = parts;
+ var fileName = defaultFile.name;
+
+ if (!endsWithSlash && parts.length > 0) {
+  fileName = parts[parts.length - 1];
+  dirParts = parts.slice(0, parts.length - 1);
+  fileName = ensureExportFileNameExtension(fileName, extension);
+ }
+
+ var basePath = defaultFile.parent.fsName;
+ if (rootRelativeToSeparations) {
+  var separationsFolder = getSeparationsFolderFromDocFile(defaultFile);
+  if (separationsFolder) basePath = separationsFolder.fsName;
+ }
+
+ var dirPath = dirParts.join("/");
+ if (dirPath && isAbsoluteExportPath(dirPath)) {
+  basePath = "";
+ } else if (dirPath) {
+  dirPath = joinExportPath(basePath, dirPath);
+ } else {
+  dirPath = basePath;
+ }
+
+ var targetFile = new File(joinExportPath(dirPath, fileName));
+ ensureExportFolder(targetFile.parent);
+ return targetFile;
+}
+
 function resolveExportPathSegment(segment, context) {
  if (!segment || segment.indexOf("[") === -1) {
   return segment || "";
@@ -1755,42 +1872,29 @@ function resolveExportFilePathFromTokens(template, defaultFile, extension, conte
  if (!/\\[[^\\]]+\\]/.test(template)) return null;
 
  var normalized = normalizeExportPathSlashes(trimExportString(template));
+ var endsWithSlash = /\\/$/.test(normalized);
  var parts = normalized.split("/");
  while (parts.length > 0 && parts[parts.length - 1] === "") {
   parts.pop();
  }
 
+ var rootRelativeToSeparations = parts.length > 0 && parts[0] === "";
+ if (rootRelativeToSeparations) {
+  parts.shift();
+ }
+
  var resolvedParts = [];
  for (var i = 0; i < parts.length; i++) {
-  if (parts[i] === "" && i === 0) {
-   resolvedParts.push("");
-   continue;
-  }
   if (parts[i] === "") continue;
   resolvedParts.push(resolveExportPathSegment(parts[i], context));
  }
 
- var fileName = defaultFile.name;
- if (resolvedParts.length > 0) {
-  var lastPart = resolvedParts[resolvedParts.length - 1];
-  if (lastPart && /\\.[^.\\/]+$/.test(lastPart)) {
-   fileName = lastPart;
-   resolvedParts.pop();
-  }
- }
+ var reconstructed = "";
+ if (rootRelativeToSeparations) reconstructed = "/";
+ reconstructed += resolvedParts.join("/");
+ if (endsWithSlash) reconstructed += "/";
 
- var dirPath = resolvedParts.join("/");
- if (!dirPath) {
-  dirPath = trimExportPathSlashes(defaultFile.parent.fsName);
- }
-
- if (!isAbsoluteExportPath(dirPath)) {
-  dirPath = joinExportPath(defaultFile.parent.fsName, dirPath);
- }
-
- var targetFile = new File(joinExportPath(dirPath, fileName));
- ensureExportFolder(targetFile.parent);
- return targetFile;
+ return buildExportDestinationFromResolvedPath(reconstructed, defaultFile, extension);
 }
 
 function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
@@ -1809,24 +1913,7 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
   return value === null || value === undefined ? match : value;
  });
  if (!resolvedPath) return defaultFile;
- if (!isAbsoluteExportPath(resolvedPath)) {
-  resolvedPath = defaultFile.parent.fsName + "/" + resolvedPath;
- }
- var normalized = resolvedPath.replace(/\\\\/g, "/");
- var defaultName = defaultFile.name;
- var targetFile;
- if (/\\/$/.test(normalized)) {
-  targetFile = new File(resolvedPath + defaultName);
- } else {
-  var possibleFolder = new Folder(resolvedPath);
-  if (possibleFolder.exists) {
-   targetFile = new File(possibleFolder.fsName + "/" + defaultName);
-  } else {
-   targetFile = new File(ensureExportExtension(resolvedPath, extension));
-  }
- }
- ensureExportFolder(targetFile.parent);
- return targetFile;
+ return buildExportDestinationFromResolvedPath(resolvedPath, defaultFile, extension);
 }
 `;
  }
@@ -1919,8 +2006,422 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
   });
  }
 
+ /** Export GRID artboard to PostScript (postscriptFilePath). Does not run Distiller. */
  exportPostscript(inks: string[]): Promise<any> {
-  this.log('exportPostscript called with ' + (inks?.length ?? 0) + ' inks');
+  return this.exportGridPostscript(
+   Array.isArray(inks) ? inks : [],
+   'postscriptFilePath',
+   '.ps',
+   'exportPostscript',
+   'PostScript exported successfully'
+  );
+ }
+
+ /** Resolve postscriptFilePath for the active document (does not export). */
+ resolvePostscriptExportPath(): Promise<{ success: boolean; filePath?: string; error?: string }> {
+  return this.ensureSession().then(() => {
+   const exportPathResolverCode = this.buildExportPathResolverScript();
+   const script = `
+(function() {
+  ${exportPathResolverCode}
+  try {
+    if (!app.documents.length) {
+      return JSON.stringify({ success: false, error: "No active document found" });
+    }
+    var doc = app.activeDocument;
+    var docFile = new File(doc.fullName);
+    var docFolder = docFile.parent;
+    var docName = docFile.name.replace(/\\.[^\\.]+$/, "");
+    var defaultOutputFile = new File(docFolder.fsName + "/" + docName + ".ps");
+    var outputFile = resolveExportFilePath("postscriptFilePath", defaultOutputFile, doc, "ps");
+    var outputPath = outputFile.fsName;
+    if (/\\.pdf$/i.test(outputPath)) {
+      outputPath = outputPath.replace(/\\.pdf$/i, ".ps");
+    }
+    return JSON.stringify({ success: true, filePath: outputPath });
+  } catch (e) {
+    return JSON.stringify({
+      success: false,
+      error: "Error resolving PostScript path: " + (e.message || e.toString())
+    });
+  }
+})();
+`;
+   return evalScript(script).then((res: unknown) => {
+    const str = typeof res === 'string' ? res : '';
+    try {
+     return str ? JSON.parse(str) : { success: false, error: 'Empty response from host' };
+    } catch {
+     return { success: false, error: 'Invalid JSON response from host', raw: str };
+    }
+   });
+  });
+ }
+
+ /** Check whether the resolved PostScript export file already exists on disk. */
+ findExistingPostscriptExportFile(): Promise<{
+  exists: boolean;
+  filePath?: string;
+  error?: string;
+ }> {
+  return this.resolvePostscriptExportPath().then((resolved) => {
+   if (!resolved?.success || !resolved.filePath) {
+    return {
+     exists: false,
+     error: resolved?.error || 'Could not resolve PostScript export path'
+    };
+   }
+   try {
+    const fs = (window as any).cep_node?.require?.('fs');
+    if (!fs) {
+     return { exists: false, filePath: resolved.filePath, error: 'CEP filesystem is unavailable' };
+    }
+    return { exists: fs.existsSync(resolved.filePath), filePath: resolved.filePath };
+   } catch (e: any) {
+    return {
+     exists: false,
+     filePath: resolved.filePath,
+     error: e?.message || String(e)
+    };
+   }
+  });
+ }
+
+ /** Resolve separationPreviewFilePath for the active document (PDF only; does not export). */
+ resolveSeparationsPreviewExportPath(): Promise<{
+  success: boolean;
+  filePath?: string;
+  error?: string;
+ }> {
+  return this.ensureSession().then(() => {
+   const exportPathResolverCode = this.buildExportPathResolverScript();
+   const script = `
+(function() {
+  ${exportPathResolverCode}
+  try {
+    if (!app.documents.length) {
+      return JSON.stringify({ success: false, error: "No active document found" });
+    }
+    var doc = app.activeDocument;
+    var docFile = new File(doc.fullName);
+    var docFolder = docFile.parent;
+    var docName = docFile.name.replace(/\\.[^\\.]+$/, "");
+    var defaultPdfFile = new File(docFolder.fsName + "/" + docName + "_SeparationsPreview.pdf");
+    var pdfFile = resolveExportFilePath("separationPreviewFilePath", defaultPdfFile, doc, "pdf");
+    ensureExportFolder(pdfFile.parent);
+    return JSON.stringify({ success: true, filePath: pdfFile.fsName });
+  } catch (e) {
+    return JSON.stringify({
+      success: false,
+      error: "Error resolving Separations Preview path: " + (e.message || e.toString())
+    });
+  }
+})();
+`;
+   return evalScript(script).then((res: unknown) => {
+    const str = typeof res === 'string' ? res : '';
+    try {
+     return str ? JSON.parse(str) : { success: false, error: 'Empty response from host' };
+    } catch {
+     return { success: false, error: 'Invalid JSON response from host', raw: str };
+    }
+   });
+  });
+ }
+
+ private companionPdfPathForPs(psPath: string): string {
+  if (/\.ps$/i.test(psPath)) {
+   return psPath.replace(/\.ps$/i, '.pdf');
+  }
+  return psPath + '.pdf';
+ }
+
+ /** Find PDF Distiller wrote (checks Postscript folder and Separation Preview folder). */
+ private findDistillerPdfPath(
+  sourcePsPath: string,
+  targetPdfPath: string,
+  distillerStartedAtMs: number
+ ): string | null {
+  try {
+   const req = (window as any).cep_node?.require;
+   if (!req) return null;
+   const fs = req('fs');
+   const path = req('path');
+   const minMtime = distillerStartedAtMs - 3000;
+   const sourceDir = path.dirname(sourcePsPath);
+   const targetDir = path.dirname(targetPdfPath);
+   const baseName = path.basename(sourcePsPath, path.extname(sourcePsPath));
+
+   const isFreshPdf = (filePath: string): boolean => {
+    try {
+     if (!fs.existsSync(filePath)) return false;
+     const stat = fs.statSync(filePath);
+     return stat.isFile() && stat.size > 0 && stat.mtimeMs >= minMtime;
+    } catch (_) {
+     return false;
+    }
+   };
+
+   const dirs: string[] = [];
+   const addDir = (dir: string) => {
+    if (!dir || dirs.indexOf(dir) !== -1) return;
+    dirs.push(dir);
+   };
+   addDir(sourceDir);
+   addDir(targetDir);
+
+   const explicitCandidates: string[] = [
+    targetPdfPath,
+    this.companionPdfPathForPs(sourcePsPath)
+   ];
+   for (let d = 0; d < dirs.length; d++) {
+    explicitCandidates.push(path.join(dirs[d], baseName.replace(/_PS$/i, '') + '.pdf'));
+    explicitCandidates.push(path.join(dirs[d], baseName + '.pdf'));
+    explicitCandidates.push(path.join(dirs[d], path.basename(targetPdfPath)));
+   }
+
+   for (let i = 0; i < explicitCandidates.length; i++) {
+    if (isFreshPdf(explicitCandidates[i])) {
+     return explicitCandidates[i];
+    }
+   }
+
+   let newestPath: string | null = null;
+   let newestMtime = 0;
+   for (let d = 0; d < dirs.length; d++) {
+    let entries: string[] = [];
+    try {
+     entries = fs.readdirSync(dirs[d]);
+    } catch (_) {
+     continue;
+    }
+    for (let i = 0; i < entries.length; i++) {
+     const name = entries[i];
+     if (!/\.pdf$/i.test(name)) continue;
+     const fullPath = path.join(dirs[d], name);
+     try {
+      const stat = fs.statSync(fullPath);
+      if (!stat.isFile() || stat.size <= 0 || stat.mtimeMs < minMtime) continue;
+      if (stat.mtimeMs > newestMtime) {
+       newestMtime = stat.mtimeMs;
+       newestPath = fullPath;
+      }
+     } catch (_) { }
+    }
+   }
+   return newestPath;
+  } catch (e: any) {
+   console.warn('[findDistillerPdfPath] Error:', e?.message || e);
+   return null;
+  }
+ }
+
+ private delayMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+ }
+
+ /** Move a file (rename); falls back to copy + delete source if cross-volume. */
+ private moveFileOnDisk(fs: any, pathModule: any, fromPath: string, toPath: string): void {
+  if (pathModule.resolve(fromPath) === pathModule.resolve(toPath)) return;
+  if (fs.existsSync(toPath)) {
+   fs.unlinkSync(toPath);
+  }
+  try {
+   fs.renameSync(fromPath, toPath);
+  } catch (_) {
+   fs.copyFileSync(fromPath, toPath);
+   fs.unlinkSync(fromPath);
+  }
+ }
+
+ /**
+  * Distiller writes PDF beside the PostScript file; move it to separationPreviewFilePath (PDF only).
+  */
+ private async placeDistillerPdfAtSeparationsPreviewPath(
+  sourcePsPath: string,
+  targetPdfPath: string,
+  distillerStartedAtMs: number,
+  timeoutMs = 300000,
+  intervalMs = 2000
+ ): Promise<{ success: boolean; pdfPath?: string; distillerPdfPath?: string; error?: string }> {
+  try {
+   const req = (window as any).cep_node?.require;
+   if (!req) {
+    return { success: false, error: 'CEP node runtime is unavailable' };
+   }
+   const fs = req('fs');
+   const path = req('path');
+
+   console.log(
+    '[placeDistillerPdfAtSeparationsPreviewPath] Waiting for Distiller PDF in:',
+    path.dirname(sourcePsPath),
+    'or',
+    path.dirname(targetPdfPath),
+    '| target:',
+    targetPdfPath
+   );
+
+   let distillerPdfPath: string | null = null;
+   const deadline = distillerStartedAtMs + timeoutMs;
+   let pollCount = 0;
+   while (Date.now() < deadline) {
+    pollCount++;
+    distillerPdfPath = this.findDistillerPdfPath(sourcePsPath, targetPdfPath, distillerStartedAtMs);
+    if (distillerPdfPath) break;
+    if (pollCount === 1 || pollCount % 5 === 0) {
+     console.log(
+      '[placeDistillerPdfAtSeparationsPreviewPath] Still waiting for Distiller PDF (poll',
+      pollCount + ')...'
+     );
+    }
+    await this.delayMs(intervalMs);
+   }
+
+   if (!distillerPdfPath) {
+    return {
+     success: false,
+     error:
+      'Timed out waiting for Distiller PDF in folder: ' +
+      path.dirname(sourcePsPath) +
+      ' (expected a new .pdf after processing ' +
+      path.basename(sourcePsPath) +
+      ')'
+    };
+   }
+
+   const targetDir = path.dirname(targetPdfPath);
+   if (!fs.existsSync(targetDir)) {
+    fs.mkdirSync(targetDir, { recursive: true });
+   }
+
+   if (path.resolve(distillerPdfPath) !== path.resolve(targetPdfPath)) {
+    this.moveFileOnDisk(fs, path, distillerPdfPath, targetPdfPath);
+    console.log(
+     '[placeDistillerPdfAtSeparationsPreviewPath] Moved PDF:',
+     distillerPdfPath,
+     '→',
+     targetPdfPath
+    );
+   } else {
+    console.log(
+     '[placeDistillerPdfAtSeparationsPreviewPath] PDF already at Separation Preview path:',
+     targetPdfPath
+    );
+   }
+
+   // Remove duplicate PDF left in Postscript folder after move (Distiller output beside .ps)
+   const postscriptFolderPdf = this.companionPdfPathForPs(sourcePsPath);
+   if (
+    fs.existsSync(postscriptFolderPdf) &&
+    path.resolve(postscriptFolderPdf) !== path.resolve(targetPdfPath)
+   ) {
+    try {
+     fs.unlinkSync(postscriptFolderPdf);
+     console.log(
+      '[placeDistillerPdfAtSeparationsPreviewPath] Removed duplicate PDF from Postscript folder:',
+      postscriptFolderPdf
+     );
+    } catch (_) { }
+   }
+
+   // Remove legacy .ps mistakenly placed at Separation Preview path by older builds
+   const legacyPsAtPreview = /\.pdf$/i.test(targetPdfPath)
+    ? targetPdfPath.replace(/\.pdf$/i, '.ps')
+    : targetPdfPath + '.ps';
+   if (
+    fs.existsSync(legacyPsAtPreview) &&
+    path.resolve(legacyPsAtPreview) !== path.resolve(sourcePsPath)
+   ) {
+    try {
+     fs.unlinkSync(legacyPsAtPreview);
+    } catch (_) { }
+   }
+
+   return { success: true, pdfPath: targetPdfPath, distillerPdfPath: targetPdfPath };
+  } catch (e: any) {
+   return { success: false, error: e?.message || String(e) };
+  }
+ }
+
+ /** Distill PostScript at postscript path; place PDF at separationPreviewFilePath only. */
+ async distillSeparationsPreviewPDF(sourcePsPath: string): Promise<any> {
+  this.log('distillSeparationsPreviewPDF called for: ' + sourcePsPath);
+  if (!sourcePsPath) {
+   return {
+    success: false,
+    error: 'PostScript file path is required for Separations Preview PDF'
+   };
+  }
+
+  const resolved = await this.resolveSeparationsPreviewExportPath();
+  if (!resolved?.success || !resolved.filePath) {
+   return {
+    success: false,
+    error: resolved?.error || 'Could not resolve Separations Preview export path'
+   };
+  }
+  const targetPdfPath = resolved.filePath;
+  console.log('[distillSeparationsPreviewPDF] source PS:', sourcePsPath);
+  console.log('[distillSeparationsPreviewPDF] target Separation Preview PDF:', targetPdfPath);
+
+  const distillerStartedAt = Date.now();
+  const distiller = await this.launchDistiller(sourcePsPath);
+  console.log('[distillSeparationsPreviewPDF] Distiller launch result:', distiller);
+
+  if (!distiller.success) {
+   return {
+    success: false,
+    filePath: targetPdfPath,
+    sourcePostscriptPath: sourcePsPath,
+    distiller,
+    error: distiller.error || 'Adobe Distiller could not be launched.'
+   };
+  }
+
+  const placed = await this.placeDistillerPdfAtSeparationsPreviewPath(
+   sourcePsPath,
+   targetPdfPath,
+   distillerStartedAt
+  );
+  if (!placed.success) {
+   console.error('[distillSeparationsPreviewPDF] Failed to place PDF:', placed.error);
+   return {
+    success: false,
+    filePath: targetPdfPath,
+    sourcePostscriptPath: sourcePsPath,
+    distiller,
+    error:
+     placed.error ||
+     'Distiller was launched but the PDF could not be placed at the Separation Preview path.'
+   };
+  }
+
+  console.log(
+   '[distillSeparationsPreviewPDF] Success. Distiller PDF:',
+   placed.distillerPdfPath,
+   '| Separation Preview PDF:',
+   placed.pdfPath
+  );
+
+  return {
+   success: true,
+   filePath: placed.pdfPath,
+   distillerPdfPath: placed.distillerPdfPath,
+   sourcePostscriptPath: sourcePsPath,
+   distiller,
+   message: 'Separations Preview PDF created via Distiller.',
+   note: 'PDF moved to Separation Preview file path. PostScript (.ps) remains at Postscript file path only.'
+  };
+ }
+
+ private exportGridPostscript(
+  inks: string[],
+  settingsKey: 'postscriptFilePath',
+  defaultPsSuffix: string,
+  logPrefix: string,
+  successMessage: string
+ ): Promise<any> {
+  this.log(logPrefix + ' called with ' + (inks?.length ?? 0) + ' inks');
 
   return this.ensureSession().then(() => {
    return this.loadGeneralSettings().then((settingsResult) => {
@@ -1929,37 +2430,27 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
       ? String(settingsResult.data.ppdName).trim() || 'IBlock v2'
       : 'IBlock v2';
     const script = this.buildExportPostscriptScript(
-     Array.isArray(inks) ? inks : [],
-     resolvedPpdName
+     inks,
+     resolvedPpdName,
+     settingsKey,
+     defaultPsSuffix
     );
     return evalScript(script)
-     .then(async (res: unknown) => {
+     .then((res: unknown) => {
       const str = typeof res === 'string' ? res : '';
       const result = str ? JSON.parse(str) : { success: false, error: 'No result' };
 
       if (result?.success) {
-       const msg = result.message || 'PostScript exported successfully';
-       console.log('[exportPostscript]', msg, result.filePath ? `→ ${result.filePath}` : '');
+       const msg = result.message || successMessage;
+       console.log('[' + logPrefix + ']', msg, result.filePath ? `→ ${result.filePath}` : '');
        if (result.inkDebug) {
-        console.log('[exportPostscript] requested inks:', result.requestedInks);
+        console.log('[' + logPrefix + '] requested inks:', result.requestedInks);
         console.table(result.inkDebug);
        }
-      } else {
-       console.error('[exportPostscript]', result?.error || 'Failed');
+       return { ...result, message: successMessage };
       }
 
-      if (result?.success && result?.filePath) {
-       const distiller = await this.launchDistiller(result.filePath);
-       console.log('[exportPostscript] Distiller launch result:', distiller);
-       return {
-        ...result,
-        distiller,
-        note: distiller.success
-         ? 'Adobe Distiller launched to process PostScript.'
-         : 'PostScript exported, but Adobe Distiller could not be launched automatically.'
-       };
-      }
-
+      console.error('[' + logPrefix + ']', result?.error || 'Failed');
       return result;
      })
      .catch((err: any) => {
@@ -1985,7 +2476,7 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
     const cp = req('child_process');
     const fs = req('fs');
     const appCandidates = [
-     '/Applications/Adobe Acrobat DC/Acrobat Distiller.app',
+     '/Applications/Adobe Acrobat DC/Acrobat Distiller.app'
     ];
     let foundAppPath = '';
     for (let i = 0; i < appCandidates.length; i++) {
@@ -2006,6 +2497,13 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
      }
     })();
 
+    if (!psExists) {
+     const msg = 'PostScript file not found: ' + psPath;
+     console.error('[launchDistiller] ' + msg);
+     resolve({ success: false, error: msg });
+     return;
+    }
+
     console.log('[launchDistiller] PS exists:', psExists);
     console.log('[launchDistiller] Distiller app found:', foundAppPath || 'not found in known paths');
 
@@ -2013,20 +2511,26 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
     const openArgs = ['-a', appNameOrPath, psPath];
     console.log('[launchDistiller] Running command: open ' + openArgs.join(' '));
 
-    cp.execFile('open', openArgs, (err: any, stdout: string, stderr: string) => {
-     if (err) {
-      const errMsg = err.message || String(err);
-      console.error('[launchDistiller] Launch failed:', errMsg);
-      if (stderr) console.error('[launchDistiller] stderr:', stderr);
-      if (stdout) console.log('[launchDistiller] stdout:', stdout);
-      resolve({ success: false, error: errMsg + (stderr ? ' | ' + stderr : '') });
-      return;
-     }
-     if (stderr) console.warn('[launchDistiller] stderr:', stderr);
-     if (stdout) console.log('[launchDistiller] stdout:', stdout);
-     console.log('[launchDistiller] Launch command completed successfully');
-     resolve({ success: true });
+    // execFile('open', ...) often never calls back when Distiller opens a document — spawn detached instead.
+    let settled = false;
+    const finish = (result: { success: boolean; error?: string }) => {
+     if (settled) return;
+     settled = true;
+     resolve(result);
+    };
+    const child = cp.spawn('open', openArgs, { detached: true, stdio: 'ignore' });
+    child.on('error', (spawnErr: any) => {
+     const errMsg = spawnErr?.message || String(spawnErr);
+     console.error('[launchDistiller] Spawn failed:', errMsg);
+     finish({ success: false, error: errMsg });
     });
+    if (!child.pid) {
+     finish({ success: false, error: 'Failed to start Distiller process' });
+     return;
+    }
+    child.unref();
+    console.log('[launchDistiller] Distiller launch spawned (non-blocking), pid:', child.pid);
+    finish({ success: true });
    } catch (e: any) {
     const msg = e?.message || String(e);
     console.error('[launchDistiller] Exception:', msg);
@@ -2036,10 +2540,17 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
  }
 
  /** ExtendScript body aligned with React exportPostscript.script.ts (LEAP Color Separator). */
- private buildExportPostscriptScript(inks: string[], ppdName: string): string {
+ private buildExportPostscriptScript(
+  inks: string[],
+  ppdName: string,
+  settingsKey: string,
+  defaultPsSuffix: string
+ ): string {
   const safeInks = Array.isArray(inks) ? inks : [];
   const inksLiteral = JSON.stringify(safeInks);
   const ppdNameLiteral = JSON.stringify(ppdName || 'IBlock v2');
+  const settingsKeyLiteral = JSON.stringify(settingsKey);
+  const defaultPsSuffixLiteral = JSON.stringify(defaultPsSuffix);
   const exportPathResolverCode = this.buildExportPathResolverScript();
   return `
 (function() {
@@ -2080,9 +2591,14 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
     var docFile = new File(doc.fullName);
     var docFolder = docFile.parent;
     var docName = docFile.name.replace(/\\.[^\\.]+$/, "");
-    var defaultOutputFile = new File(docFolder.fsName + "/" + docName + ".ps");
-    var outputFile = resolveExportFilePath("postscriptFilePath", defaultOutputFile, doc, "ps");
+    var defaultOutputFile = new File(docFolder.fsName + "/" + docName + ${defaultPsSuffixLiteral});
+    var outputFile = resolveExportFilePath(${settingsKeyLiteral}, defaultOutputFile, doc, "ps");
     var outputPath = outputFile.fsName;
+    // Settings may target the final PDF path; Distiller needs a .ps source file
+    if (/\\.pdf$/i.test(outputPath)) {
+      outputPath = outputPath.replace(/\\.pdf$/i, ".ps");
+      outputFile = new File(outputPath);
+    }
 
     // Flattener
     var flatOptions = new PrintFlattenerOptions();
@@ -2205,93 +2721,6 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
   }
 })();
 `;
- }
-
- exportSeparationsPreviewPDF(): Promise<any> {
-  this.log('exportSeparationsPreviewPDF called');
-
-  return this.ensureSession().then(() => {
-   const exportPathResolverCode = this.buildExportPathResolverScript();
-   const script = `
-(function() {
-  ${exportPathResolverCode}
-  try {
-    if (!app.documents.length) {
-      return JSON.stringify({
-        success: false,
-        error: "No active document found"
-      });
-    }
-
-    var doc = app.activeDocument;
-
-    if (!doc.artboards || doc.artboards.length === 0) {
-      return JSON.stringify({
-        success: false,
-        error: "No artboards found in document"
-      });
-    }
-
-    var gridArtboardIndex = -1;
-    for (var i = 0; i < doc.artboards.length; i++) {
-      var ab = doc.artboards[i];
-      var name = (ab && ab.name != null) ? ab.name.toString() : "";
-      if (name && name.toUpperCase() === "GRID") {
-        gridArtboardIndex = i;
-        break;
-      }
-    }
-
-    if (gridArtboardIndex === -1) {
-      return JSON.stringify({
-        success: false,
-        error: "Artboard named \\"Grid\\" not found"
-      });
-    }
-
-    var docFile = new File(doc.fullName);
-    var docFolder = docFile.parent;
-    var docName = docFile.name.replace(/\\.[^\\.]+$/, "");
-    var defaultDestFile = new File(docFolder.fsName + "/" + docName + "_SeparationsPreview.pdf");
-    var destFile = resolveExportFilePath("separationPreviewFilePath", defaultDestFile, doc, "pdf");
-
-    var pdfOptions = new PDFSaveOptions();
-    pdfOptions.artboardRange = (gridArtboardIndex + 1).toString();
-    pdfOptions.compatibility = PDFCompatibility.ACROBAT5;
-    pdfOptions.generateThumbnails = true;
-    pdfOptions.preserveEditability = false;
-
-    doc.saveAs(destFile, pdfOptions);
-
-    return JSON.stringify({
-      success: true,
-      message: "Separations Preview PDF exported successfully",
-      filePath: destFile.fsName,
-      artboardName: "Grid",
-      artboardIndex: gridArtboardIndex
-    });
-  } catch (e) {
-    return JSON.stringify({
-      success: false,
-      error: "Error exporting Separations Preview PDF: " + (e.message || e.toString())
-    });
-  }
-})();
-`;
-
-   return evalScript(script)
-    .then((res: any) => {
-     const str = typeof res === 'string' ? res : '';
-     try {
-      return str ? JSON.parse(str) : { success: false, error: 'Empty response from host' };
-     } catch (e) {
-      return { success: false, error: 'Invalid JSON response from host', raw: str };
-     }
-    })
-    .catch((err: any) => {
-     throw err;
-    });
-  });
  }
 
  getInkInformationBatch(inkNames: string[], profileName?: string): Promise<any> {
