@@ -796,6 +796,16 @@ body.medium-light .profile-ink-pill--ub.is-matches-default:not(:disabled):not(.i
  background: var(--profile-ink-editing-bg);
 }
 
+.profile-ink-name-edit .profile-input.profile-ink-name-input.is-duplicate-name {
+ border-color: #d32f2f;
+ box-shadow: 0 0 0 1px #d32f2f;
+}
+
+.profile-ink-name-edit .profile-input.profile-ink-name-input.is-duplicate-name:focus {
+ border-color: #d32f2f;
+ box-shadow: 0 0 0 1px #d32f2f;
+}
+
 .profile-ink-mini-btn {
  flex: 0 0 auto;
  width: 20px;

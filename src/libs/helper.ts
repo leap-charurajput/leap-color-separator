@@ -1,17 +1,77 @@
 export const csInterface = new (window as any).CSInterface();
 export const fs = new (window as any).cep_node.require('fs');
 
-export async function evalScript(script: any) {
-  let res = await new Promise((resolve, reject) => {
-    // console.log("executing evalscript")
-    csInterface.evalScript(script, function (result: any) {
-      if (result !== 'null') {
-        resolve(result);
-      } else {
-        resolve(null);
+function compactEvalResult(res: unknown): string | undefined {
+  if (res == null) return undefined;
+  if (typeof res !== 'string') return undefined;
+  const trimmed = res.trim();
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+    return trimmed.length > 120 ? trimmed.slice(0, 120) + '…' : trimmed;
+  }
+  try {
+    const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+    if (parsed && typeof parsed === 'object') {
+      const summary: Record<string, unknown> = { success: parsed['success'] };
+      if (parsed['error']) summary['error'] = parsed['error'];
+      if (parsed['message']) summary['message'] = parsed['message'];
+      if (Array.isArray(parsed['layerNames'])) {
+        summary['plates'] = (parsed['layerNames'] as unknown[]).length;
       }
+      if (parsed['separatedDocumentPath']) {
+        summary['sepFile'] = String(parsed['separatedDocumentPath']).split('/').pop();
+      }
+      return JSON.stringify(summary);
+    }
+  } catch {
+    /* not JSON */
+  }
+  return trimmed.length > 120 ? trimmed.slice(0, 120) + '…' : trimmed;
+}
+
+function leapSepsLogEval(level: string, message: string, detail?: unknown): void {
+  const w = (window as any).leapSepsWrite;
+  if (typeof w === 'function') {
+    w(level, 'ExtendScript', message, detail);
+  }
+}
+
+function evalScriptLabel(script: unknown): string {
+  if (typeof script !== 'string') return 'evalScript';
+  if (script.indexOf('unusedsw') !== -1 || script.indexOf('swtchdel') !== -1) {
+    return 'removeUnusedSwatches';
+  }
+  if (script.indexOf('checkSeparatedDocument') !== -1 || script.indexOf('handleCheckSeparatedDocument') !== -1) {
+    return 'checkSeparatedDocument';
+  }
+  if (script.indexOf('handlePerformSeparation') !== -1) {
+    return 'performSeparation';
+  }
+  if (script.indexOf('09 SEPARATIONS') !== -1) {
+    return 'openSeparationDocument';
+  }
+  return 'evalScript';
+}
+
+export async function evalScript(script: any) {
+  const label = evalScriptLabel(script);
+  leapSepsLogEval('PROCESS', label + ' start');
+
+  let res: unknown;
+  try {
+    res = await new Promise((resolve, reject) => {
+      csInterface.evalScript(script, function (result: any) {
+        if (result !== 'null') {
+          resolve(result);
+        } else {
+          resolve(null);
+        }
+      });
     });
-  });
+    leapSepsLogEval('PROCESS', label + ' done', compactEvalResult(res));
+  } catch (err) {
+    leapSepsLogEval('ERROR', label + ' failed', err instanceof Error ? err.message : err);
+    throw err;
+  }
   return res;
 }
 

@@ -1,7 +1,8 @@
-import { ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, HostListener, OnDestroy, OnInit } from '@angular/core';
 import { checkForJSXUpdates } from '../libs/helper';
 import { ControllerService } from './services/controller.service';
 import { GraphicsDataService } from './services/graphics-data.service';
+import { LeapSepsLogService } from './services/leap-seps-log.service';
 
 @Component({
  selector: 'app-root',
@@ -11,7 +12,7 @@ import { GraphicsDataService } from './services/graphics-data.service';
 export class AppComponent implements OnInit, OnDestroy {
  private readonly panelVersion = '1.0.1';
  /** Bump this string when you ship a new build (same format as before: "Mon DD, YYYY"). */
- private readonly panelDeployDate = 'May 28, 2026';
+ private readonly panelDeployDate = 'June 05, 2026';
  activeTab: number | null = 0;
  selectedMenuOption: string | null = null;
  documentRefreshKey = 0;
@@ -24,10 +25,19 @@ export class AppComponent implements OnInit, OnDestroy {
   return `${this.panelDeployDate} | v${this.panelVersion}`;
  }
 
- constructor(private controller: ControllerService, private cdr: ChangeDetectorRef, private graphicsDataService: GraphicsDataService) { }
+ constructor(
+  private controller: ControllerService,
+  private cdr: ChangeDetectorRef,
+  private graphicsDataService: GraphicsDataService,
+  private leapSepsLog: LeapSepsLogService
+ ) {}
 
  ngOnInit(): void {
   document.body.classList.add('dark');
+  this.leapSepsLog.logProcess('LEAP Color Separator panel opened', {
+   version: this.panelVersion,
+   deployDate: this.panelDeployDate
+  });
 
     checkForJSXUpdates((window as any).location.origin).then((res) => {
       console.log('check update status ref', res);
@@ -40,21 +50,47 @@ export class AppComponent implements OnInit, OnDestroy {
 
     (window as any).__LEAP_TAB_NAVIGATION__ = {
      navigateToTab: (index: number) => {
-      this.activeTab = index;
-      this.selectedMenuOption = null;
-      this.cdr.detectChanges();
+      this.onTabChange(index);
      }
     };
    })
-   .catch(() => {
+   .catch((err) => {
+    this.leapSepsLog.logError('App', err, 'waitForSession failed');
     (window as any).__LEAP_TAB_NAVIGATION__ = {
      navigateToTab: (index: number) => {
-      this.activeTab = index;
-      this.selectedMenuOption = null;
-      this.cdr.detectChanges();
+      this.onTabChange(index);
      }
     };
    });
+ }
+
+ @HostListener('document:click', ['$event'])
+ onDocumentClick(event: MouseEvent): void {
+  const target = event.target as HTMLElement | null;
+  if (!target) return;
+  const interactive = target.closest(
+    'button, a, [role="button"], [role="tab"], input[type="button"], input[type="submit"], .profile-modal-tab, .current-sep-action-link'
+  ) as HTMLElement | null;
+  if (!interactive) return;
+
+  const label =
+    interactive.getAttribute('aria-label') ||
+    interactive.getAttribute('title') ||
+    interactive.textContent?.trim().slice(0, 120) ||
+    interactive.className ||
+    interactive.tagName;
+
+  const section =
+    interactive.closest(
+      'app-separations, app-separation-colors, app-graphics, app-settings, app-edit-separation-profile-modal'
+    )?.tagName || 'app-root';
+
+  this.leapSepsLog.logClick('Click: ' + label, {
+   section,
+   tag: interactive.tagName,
+   id: interactive.id || undefined,
+   class: interactive.className || undefined
+  });
  }
 
  private waitForSession(maxRetries: number = 50, delayMs: number = 100): Promise<void> {
@@ -91,6 +127,8 @@ export class AppComponent implements OnInit, OnDestroy {
  }
 
  onTabChange(index: number): void {
+  const tabNames = ['Graphics', 'Separations', 'Separation Colors', 'Settings'];
+  this.leapSepsLog.logClick('Tab: ' + (tabNames[index] ?? String(index)), { index });
   this.activeTab = index;
   this.selectedMenuOption = null;
   // Refetch document/XMP when switching to Separations tab so UI shows correct hasVersionDocument / isSeparatedDoc

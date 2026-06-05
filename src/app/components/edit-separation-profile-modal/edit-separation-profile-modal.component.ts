@@ -6,7 +6,9 @@ import {
  OnInit,
  OnChanges,
  SimpleChanges,
- ChangeDetectorRef
+ ChangeDetectorRef,
+ ViewChild,
+ ElementRef
 } from '@angular/core';
 import { ControllerService } from '../../services/controller.service';
 
@@ -99,6 +101,34 @@ const createEmptyInkException = (): InkExceptionRow => ({
  profile: ''
 });
 
+const normalizeInkNameKey = (name: string): string => (name ?? '').trim().toLowerCase();
+
+/** Id of the later row when two inks share the same name (case-insensitive). */
+const findDuplicateInkExceptionRowId = (rows: InkExceptionRow[]): string | null => {
+ const seen = new Set<string>();
+ for (const row of rows) {
+  const key = normalizeInkNameKey(row.inkName);
+  if (!key) continue;
+  if (seen.has(key)) {
+   return row.id;
+  }
+  seen.add(key);
+ }
+ return null;
+};
+
+const inkNameExistsInExceptions = (
+ rows: InkExceptionRow[],
+ candidateName: string,
+ excludeId: string
+): boolean => {
+ const key = normalizeInkNameKey(candidateName);
+ if (!key) return false;
+ return rows.some(
+  row => row.id !== excludeId && normalizeInkNameKey(row.inkName) === key
+ );
+};
+
 const formatMeshDisplay = (mesh: any): string => {
  const s = mesh == null ? '' : String(mesh).trim();
  if (!s) return '—';
@@ -162,11 +192,15 @@ export class EditSeparationProfileModalComponent implements OnInit, OnChanges {
  @Output() close = new EventEmitter<void>();
  @Output() save = new EventEmitter<any>();
 
+ @ViewChild('inkExceptionsTableBody', { read: ElementRef })
+ inkExceptionsTableBody?: ElementRef<HTMLElement>;
+
  formState: ProfileFormState = buildDefaultProfile();
  activeTab: ProfileModalTab = 'general';
  inkExceptionQuery = '';
  editingInkExceptionId: string | null = null;
  draftInkExceptionName = '';
+ inkExceptionNameDuplicate = false;
  inkExceptionRemoveId: string | null = null;
  inkExceptionsLoading = false;
  inkExceptionsLoadError = '';
@@ -212,6 +246,7 @@ export class EditSeparationProfileModalComponent implements OnInit, OnChanges {
    this.activeTab = 'general';
    this.inkExceptionQuery = '';
    this.editingInkExceptionId = null;
+   this.inkExceptionNameDuplicate = false;
    this.inkExceptionRemoveId = null;
    this.loadDocumentSwatches();
   }
@@ -574,9 +609,37 @@ export class EditSeparationProfileModalComponent implements OnInit, OnChanges {
 
  handleInkExceptionAdd(): void {
   this.formState.inkExceptions = [
-   ...normalizeInkExceptionsList(this.formState.inkExceptions),
-   createEmptyInkException()
+   createEmptyInkException(),
+   ...normalizeInkExceptionsList(this.formState.inkExceptions)
   ];
+  this.cdr.detectChanges();
+  setTimeout(() => this.scrollInkExceptionsToTop(), 0);
+ }
+
+ /** Scroll ink list (and any parent scroll containers) so the new top row is visible. */
+ private scrollInkExceptionsToTop(): void {
+  const tableBody = this.inkExceptionsTableBody?.nativeElement;
+  if (!tableBody) return;
+
+  const scrollables: HTMLElement[] = [tableBody];
+  let parent: HTMLElement | null = tableBody.parentElement;
+  while (parent) {
+   const { overflowY } = getComputedStyle(parent);
+   if (
+    (overflowY === 'auto' || overflowY === 'scroll') &&
+    parent.scrollHeight > parent.clientHeight
+   ) {
+    scrollables.push(parent);
+   }
+   if (parent.classList.contains('profile-modal-body')) break;
+   parent = parent.parentElement;
+  }
+
+  for (const el of scrollables) {
+   if (el.scrollTop > 0) {
+    el.scrollTo({ top: 0, behavior: 'smooth' });
+   }
+  }
  }
 
  updateInkException(id: string, patch: Partial<InkExceptionRow>): void {
@@ -595,16 +658,64 @@ export class EditSeparationProfileModalComponent implements OnInit, OnChanges {
   if (!row.enabled) return;
   this.editingInkExceptionId = row.id;
   this.draftInkExceptionName = row.inkName || '';
+  this.updateInkExceptionNameDuplicateState();
+ }
+
+ onInkExceptionNameInput(event: Event): void {
+  this.draftInkExceptionName = (event.target as HTMLInputElement).value;
+  this.updateInkExceptionNameDuplicateState();
+ }
+
+ private updateInkExceptionNameDuplicateState(): void {
+  if (!this.editingInkExceptionId) {
+   this.inkExceptionNameDuplicate = false;
+   return;
+  }
+  const rows = normalizeInkExceptionsList(this.formState.inkExceptions);
+  this.inkExceptionNameDuplicate = inkNameExistsInExceptions(
+   rows,
+   this.draftInkExceptionName,
+   this.editingInkExceptionId
+  );
  }
 
  commitInkExceptionNameEdit(): void {
   if (!this.editingInkExceptionId) return;
-  this.updateInkException(this.editingInkExceptionId, { inkName: this.draftInkExceptionName });
+  const trimmed = this.draftInkExceptionName.trim();
+  const rows = normalizeInkExceptionsList(this.formState.inkExceptions);
+  if (inkNameExistsInExceptions(rows, trimmed, this.editingInkExceptionId)) {
+   this.inkExceptionNameDuplicate = true;
+   return;
+  }
+  this.inkExceptionNameDuplicate = false;
+  this.updateInkException(this.editingInkExceptionId, { inkName: trimmed });
   this.editingInkExceptionId = null;
  }
 
  cancelInkExceptionNameEdit(): void {
   this.editingInkExceptionId = null;
+  this.inkExceptionNameDuplicate = false;
+ }
+
+ private focusInkExceptionDuplicateName(): void {
+  const inkRows = normalizeInkExceptionsList(this.formState.inkExceptions);
+  const duplicateId = findDuplicateInkExceptionRowId(inkRows);
+  if (!duplicateId) return;
+
+  const row = inkRows.find(r => r.id === duplicateId);
+  if (!row) return;
+
+  this.activeTab = 'inkExceptions';
+  this.beginInkExceptionNameEdit(row);
+  this.cdr.detectChanges();
+
+  setTimeout(() => {
+   const tableBody = this.inkExceptionsTableBody?.nativeElement;
+   const rowEl = tableBody?.querySelector(
+    `[data-ink-row-id="${duplicateId}"]`
+   ) as HTMLElement | null;
+   rowEl?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, 0);
  }
 
  onInkExceptionNameKeydown(event: KeyboardEvent): void {
@@ -636,9 +747,27 @@ export class EditSeparationProfileModalComponent implements OnInit, OnChanges {
 
  onSubmit(event: Event): void {
   event.preventDefault();
+
+  if (this.editingInkExceptionId) {
+   const trimmed = this.draftInkExceptionName.trim();
+   const rows = normalizeInkExceptionsList(this.formState.inkExceptions);
+   if (inkNameExistsInExceptions(rows, trimmed, this.editingInkExceptionId)) {
+    this.inkExceptionNameDuplicate = true;
+    return;
+   }
+   this.inkExceptionNameDuplicate = false;
+   this.updateInkException(this.editingInkExceptionId, { inkName: trimmed });
+   this.editingInkExceptionId = null;
+  }
+
   const profileCode = this.getInkProfileFilterCode() || (this.formState.code || '').trim();
   const profileName = this.getInkProfileFilterName() || (this.formState.name || '').trim();
   const inkRows = normalizeInkExceptionsList(this.formState.inkExceptions);
+
+  if (findDuplicateInkExceptionRowId(inkRows) !== null) {
+   this.focusInkExceptionDuplicateName();
+   return;
+  }
 
   const emitSave = (): void => {
    this.save.emit({

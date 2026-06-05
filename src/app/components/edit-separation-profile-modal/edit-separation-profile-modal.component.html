@@ -178,7 +178,7 @@
        </div>
       </div>
 
-      <div class="profile-ink-table-body" role="rowgroup">
+      <div #inkExceptionsTableBody class="profile-ink-table-body" role="rowgroup">
        <div *ngIf="inkExceptionsLoading" class="profile-ink-empty" role="status">Loading ink exceptions…</div>
        <div *ngIf="!inkExceptionsLoading && inkExceptionsLoadError" class="profile-ink-empty profile-ink-error" role="alert">{{ inkExceptionsLoadError }}</div>
 
@@ -186,7 +186,7 @@
         {{ formState.inkExceptions.length > 0 ? 'No inks match your search.' : ('No ink exceptions for profile “' + activeInkProfileLabel + '”.') }}
        </div>
 
-       <div *ngFor="let row of filteredInkExceptions; trackBy: trackByInkException" class="profile-ink-row" [class.is-disabled]="!row.enabled" role="row">
+       <div *ngFor="let row of filteredInkExceptions; trackBy: trackByInkException" class="profile-ink-row" [class.is-disabled]="!row.enabled" [attr.data-ink-row-id]="row.id" role="row">
         <div class="profile-ink-cell profile-ink-cell--status" role="cell">
          <button type="button" class="profile-ink-icon-btn profile-ink-row-toggle" [class.is-row-disabled]="!row.enabled" (click)="toggleInkException(row.id)" [title]="row.enabled ? 'Click to disable this ink exception' : 'Click to enable this ink exception'" [attr.aria-label]="row.enabled ? 'Disable ink exception' : 'Enable ink exception'" [attr.aria-pressed]="row.enabled">
           <svg class="profile-ink-row-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18.58 18.58" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M0,1.16C0,.52.52,0,1.16,0h4.65c.64,0,1.16.52,1.16,1.16v13.94c0,1.92-1.56,3.48-3.48,3.48s-3.48-1.56-3.48-3.48V1.16ZM4.65,2.32h-2.32v2.32h2.32v-2.32ZM2.32,6.97v2.32h2.32v-2.32h-2.32ZM3.48,15.97c.48,0,.87-.39.87-.87s-.39-.87-.87-.87-.87.39-.87.87.39.87.87.87ZM6.63,18.58l6.97-6.97h3.82c.64,0,1.16.52,1.16,1.16v4.65c0,.64-.52,1.16-1.16,1.16H6.63ZM8.12,15.46c.01-.12.01-.24.01-.36V5.59l2.74-2.74c.45-.45,1.19-.45,1.64,0l3.28,3.28c.45.45.45,1.19,0,1.65l-7.68,7.68Z"></path></svg>
@@ -195,7 +195,7 @@
 
         <div class="profile-ink-cell profile-ink-cell--name" role="cell">
          <div *ngIf="editingInkExceptionId === row.id; else inkNameView" class="profile-ink-name-edit">
-          <input type="text" class="settings-field-input profile-input profile-ink-name-input" [value]="draftInkExceptionName" (input)="draftInkExceptionName = $any($event.target).value" (keydown)="onInkExceptionNameKeydown($event)" />
+          <input type="text" class="settings-field-input profile-input profile-ink-name-input" [class.is-duplicate-name]="inkExceptionNameDuplicate" [attr.aria-invalid]="inkExceptionNameDuplicate || null" [value]="draftInkExceptionName" (input)="onInkExceptionNameInput($event)" (keydown)="onInkExceptionNameKeydown($event)" />
           <button type="button" class="profile-ink-mini-btn" (click)="cancelInkExceptionNameEdit()" aria-label="Cancel edit" title="Cancel">×</button>
           <button type="button" class="profile-ink-mini-btn" (click)="commitInkExceptionNameEdit()" aria-label="Save ink name" title="Save">✓</button>
          </div>

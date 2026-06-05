@@ -27,7 +27,9 @@
       "outputPath": "dist/leap-color-separator",
       "index": "src/index.html",
       "main": "src/main.ts",
-      "polyfills": ["zone.js"],
+      "polyfills": [
+       "zone.js"
+      ],
       "tsConfig": "tsconfig.app.json",
       "assets": [
        "src/favicon.ico",
@@ -35,14 +37,21 @@
        "src/libs",
        "src/leap-dist.js",
        "src/leap-dist.js.map",
+       "src/leap-seps-file-logger.js",
        {
         "glob": "**/*",
         "input": "src/jsx",
         "output": "/jsx"
        }
       ],
-      "styles": ["src/styles.css"],
-      "scripts": ["src/libs/CSInterface.js", "src/leap-dist.js"]
+      "styles": [
+       "src/styles.css"
+      ],
+      "scripts": [
+       "src/libs/CSInterface.js",
+       "src/leap-seps-file-logger.js",
+       "src/leap-dist.js"
+      ]
      },
      "configurations": {
       "production": {

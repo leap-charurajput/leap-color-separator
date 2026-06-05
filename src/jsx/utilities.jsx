@@ -1,5 +1,21 @@
 #include "./constants.jsx"
 
+/** Append one line to ~/Documents/LEAP Settings/Logs/leap_seps.log */
+function appendLeapSepLog(message) {
+ try {
+  var logFolder = new Folder(Folder.myDocuments.fsName + "/LEAP Settings/Logs");
+  if (!logFolder.exists) {
+   logFolder.create();
+  }
+  var logFile = new File(logFolder.fsName + "/leap_seps.log");
+  logFile.encoding = "UTF-8";
+  if (logFile.open("a")) {
+   logFile.writeln("[" + new Date().toISOString() + "] [JSX] " + message);
+   logFile.close();
+  }
+ } catch (e) {}
+}
+
 function cmykToRgb(c, m, y, k) {
  c = c / 100;
  m = m / 100;
@@ -184,6 +200,285 @@ function getSwatchByName(doc, swatchName) {
  } catch (e) {
   return null;
  }
+}
+
+function swatchNameHasTrailingNumber(name) {
+ return /\s+\d+$/.test(String(name || ""));
+}
+
+function getSwatchCmykComponentsFromColor(color) {
+ if (!color) {
+  return null;
+ }
+ var base = color;
+ if (color.typename === CONSTANTS.COLOR_TYPES.SPOT && color.spot && color.spot.color) {
+  base = color.spot.color;
+ }
+ if (base.typename === CONSTANTS.COLOR_TYPES.CMYK) {
+  return {
+   c: Number(base.cyan) || 0,
+   m: Number(base.magenta) || 0,
+   y: Number(base.yellow) || 0,
+   k: Number(base.black) || 0
+  };
+ }
+ if (base.typename === CONSTANTS.COLOR_TYPES.GRAY) {
+  return { c: 0, m: 0, y: 0, k: Number(base.gray) || 0 };
+ }
+ return null;
+}
+
+function getSwatchCmykSum(doc, swatch) {
+ if (!doc || !swatch || !swatch.color) {
+  return null;
+ }
+ var cmyk = getSwatchCmykComponentsFromColor(swatch.color);
+ if (!cmyk) {
+  return null;
+ }
+ return cmyk.c + cmyk.m + cmyk.y + cmyk.k;
+}
+
+/**
+ * Default white swatch for UB2+ layers during separation generation.
+ * 1) Prefer a document swatch whose name contains "White", excluding White UB variants.
+ * 2) If several match, use the sole swatch without a trailing number; otherwise the first match.
+ * 3) If none match, use the swatch with the lowest C+M+Y+K total.
+ */
+function isWhiteUbLayerName(name) {
+ return /^white\s*ub(\s+\d+)?$/i.test(String(name || ""));
+}
+
+function getWhiteUbLayerNumber(name) {
+ var match = String(name || "").match(/^white\s*ub(?:\s+(\d+))?$/i);
+ if (!match) {
+  return -1;
+ }
+ return match[1] ? parseInt(match[1], 10) : 1;
+}
+
+function getFirstFillColorFromContainer(container) {
+ if (!container) {
+  return null;
+ }
+ try {
+  if (container.typename === "PathItem" && container.filled && container.fillColor) {
+   return container.fillColor;
+  }
+  if (container.typename === "CompoundPathItem" && container.pathItems && container.pathItems.length > 0) {
+   var firstPath = container.pathItems[0];
+   if (firstPath && firstPath.filled && firstPath.fillColor) {
+    return firstPath.fillColor;
+   }
+  }
+  if (container.pageItems && container.pageItems.length > 0) {
+   for (var i = 0; i < container.pageItems.length; i++) {
+    var found = getFirstFillColorFromContainer(container.pageItems[i]);
+    if (found) {
+     return found;
+    }
+   }
+  }
+  if (container.layers && container.layers.length > 0) {
+   for (var l = 0; l < container.layers.length; l++) {
+    var layerFill = getFirstFillColorFromContainer(container.layers[l]);
+    if (layerFill) {
+     return layerFill;
+    }
+   }
+  }
+ } catch (e) { }
+ return null;
+}
+
+function getFirstFillColorFromSeparatedArtSublayer(doc, layerName) {
+ try {
+  var separatedArtLayer = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SEPARATED_ART);
+  if (!separatedArtLayer || !separatedArtLayer.layers) {
+   return null;
+  }
+  var targetLayer = null;
+  for (var i = 0; i < separatedArtLayer.layers.length; i++) {
+   if (String(separatedArtLayer.layers[i].name) === String(layerName)) {
+    targetLayer = separatedArtLayer.layers[i];
+    break;
+   }
+  }
+  if (!targetLayer) {
+   return null;
+  }
+  return getFirstFillColorFromContainer(targetLayer);
+ } catch (e) {
+  return null;
+ }
+}
+
+function buildSwatchDataFromColor(swatchName, color) {
+ var swatchData = {
+  name: swatchName,
+  hex: "#808080",
+  cmyk: null,
+  rgb: null,
+  fillSwatchName: null
+ };
+ if (!color) {
+  return swatchData;
+ }
+
+ swatchData.hex = getColorHex(color);
+ swatchData.fillSwatchName = getColorName(color);
+
+ if (color.typename === CONSTANTS.COLOR_TYPES.SPOT) {
+  var spotColor = color.spot.color;
+  if (spotColor.typename === CONSTANTS.COLOR_TYPES.CMYK) {
+   swatchData.cmyk = {
+    c: Math.round(spotColor.cyan),
+    m: Math.round(spotColor.magenta),
+    y: Math.round(spotColor.yellow),
+    k: Math.round(spotColor.black)
+   };
+  }
+ } else if (color.typename === CONSTANTS.COLOR_TYPES.CMYK) {
+  swatchData.cmyk = {
+   c: Math.round(color.cyan),
+   m: Math.round(color.magenta),
+   y: Math.round(color.yellow),
+   k: Math.round(color.black)
+  };
+ }
+
+ if (color.typename === CONSTANTS.COLOR_TYPES.RGB) {
+  swatchData.rgb = {
+   r: Math.round(color.red),
+   g: Math.round(color.green),
+   b: Math.round(color.blue)
+  };
+ } else if (swatchData.cmyk) {
+  swatchData.rgb = cmykToRgb(
+   swatchData.cmyk.c,
+   swatchData.cmyk.m,
+   swatchData.cmyk.y,
+   swatchData.cmyk.k
+  );
+ }
+
+ return swatchData;
+}
+
+function buildSwatchDataFromDocumentSwatch(doc, swatchName) {
+ var swatch = getSwatchByName(doc, swatchName);
+ if (swatch && swatch.color) {
+  return buildSwatchDataFromColor(swatchName, swatch.color);
+ }
+ return null;
+}
+
+/**
+ * Resolve swatch display data for a SEPARATED_ART layer name.
+ * For White UB 2+, prefers the actual layer fill swatch (e.g. PANTONE White C).
+ */
+function resolveLayerSwatchData(doc, layerName) {
+ var name = String(layerName || "");
+
+ if (isWhiteUbLayerName(name) && getWhiteUbLayerNumber(name) >= 2) {
+  var ubFillColor = getFirstFillColorFromSeparatedArtSublayer(doc, name);
+  if (ubFillColor) {
+   return buildSwatchDataFromColor(name, ubFillColor);
+  }
+  var defaultWhiteName = getDefaultUnderbaseWhiteSwatchName(doc);
+  var defaultSwatchData = buildSwatchDataFromDocumentSwatch(doc, defaultWhiteName);
+  if (defaultSwatchData) {
+   defaultSwatchData.name = name;
+   return defaultSwatchData;
+  }
+ }
+
+ var swatchData = buildSwatchDataFromDocumentSwatch(doc, name);
+ if (swatchData && (swatchData.cmyk !== null || swatchData.rgb !== null)) {
+  return swatchData;
+ }
+
+ var fillColor = getFirstFillColorFromSeparatedArtSublayer(doc, name);
+ if (fillColor) {
+  return buildSwatchDataFromColor(name, fillColor);
+ }
+
+ if (swatchData) {
+  return swatchData;
+ }
+
+ return buildSwatchDataFromColor(name, null);
+}
+
+function getDefaultUnderbaseWhiteSwatchName(doc) {
+ var fallback = CONSTANTS.SWATCH_NAMES.WHITE_UB;
+ try {
+  if (!doc || !doc.swatches || doc.swatches.length === 0) {
+   return fallback;
+  }
+
+  var whiteSwatches = [];
+  for (var i = 0; i < doc.swatches.length; i++) {
+   var swatch = doc.swatches[i];
+   if (!swatch || !swatch.name || !swatch.color) {
+    continue;
+   }
+   var name = String(swatch.name);
+   var isWhiteUbVariant = /^white\s*ub(\s*\d+)?$/i.test(name);
+   if (name.charAt(0) === "[") {
+    continue;
+   }
+   if (isWhiteUbVariant) {
+    continue;
+   }
+   if (name.toLowerCase().indexOf("white") === -1) {
+    continue;
+   }
+   whiteSwatches.push(swatch);
+  }
+
+  if (whiteSwatches.length === 1) {
+   return whiteSwatches[0].name;
+  }
+  if (whiteSwatches.length > 1) {
+   var withoutTrailingNumber = [];
+   for (var w = 0; w < whiteSwatches.length; w++) {
+    if (!swatchNameHasTrailingNumber(whiteSwatches[w].name)) {
+     withoutTrailingNumber.push(whiteSwatches[w]);
+    }
+   }
+   if (withoutTrailingNumber.length === 1) {
+    return withoutTrailingNumber[0].name;
+   }
+   return whiteSwatches[0].name;
+  }
+
+  var lowestSum = null;
+  var lowestName = null;
+  for (var s = 0; s < doc.swatches.length; s++) {
+   var candidate = doc.swatches[s];
+   if (!candidate || !candidate.name || !candidate.color) {
+    continue;
+   }
+   var candidateName = String(candidate.name);
+   if (candidateName.charAt(0) === "[") {
+    continue;
+   }
+   var sum = getSwatchCmykSum(doc, candidate);
+   if (sum === null) {
+    continue;
+   }
+   if (lowestSum === null || sum < lowestSum) {
+    lowestSum = sum;
+    lowestName = candidateName;
+   }
+  }
+
+  if (lowestName && getSwatchByName(doc, lowestName)) {
+   return lowestName;
+  }
+ } catch (e) { }
+ return fallback;
 }
 
 function applySwatchToFill(doc, swatchName) {

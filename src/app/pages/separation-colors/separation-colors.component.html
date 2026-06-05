@@ -217,11 +217,11 @@
        <div class="d-flex gap-5 align-center">
         <div class="fieldIcon">
          <span
-          *ngIf="isCompoundPlate(row) || isWhiteUB(row.colorName)"
+          *ngIf="isCompoundPlate(row)"
           class="icon-colorIcon"
          ></span>
          <span
-          *ngIf="!isCompoundPlate(row) && !isWhiteUB(row.colorName)"
+          *ngIf="!isCompoundPlate(row)"
           class="squareColorIcon"
           [style.background]="getSeparationColor(row)"
          ></span>

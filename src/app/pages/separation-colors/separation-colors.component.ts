@@ -532,13 +532,15 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
      // Step 2: Get ink names for batch lookup (only from valid swatches)
      const inkNames = validSwatches.map((s: any) => s.name);
 
-     // Get profile name from document metadata if available
      const profileName = this.documentProfileMetadata
       ? this.documentProfileMetadata.profileName
       : null;
+     const profileCode = this.documentProfileMetadata
+      ? this.documentProfileMetadata.profileCode
+      : null;
 
-     // Step 3: Fetch ink information from Inks.xlsx (includes mesh, micron, profile info)
-     return this.controller.getInkInformationBatch(inkNames, profileName);
+     // Inks.xlsx + profile_ink_exceptions.json (hits/mesh overrides by profileCode)
+     return this.controller.getInkInformationBatch(inkNames, profileName, profileCode);
     } else {
      console.error(
       '[SEPARATION] Failed to load swatches from SeparatedLayerNames:',
@@ -772,6 +774,18 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   return lowerName.includes('white ub') || lowerName.includes('whiteub');
  }
 
+ private getSwatchHexByName(name: string): string | undefined {
+  const key = (name || '').trim().toLowerCase();
+  if (!key) {
+   return undefined;
+  }
+  const swatch = this.graphicSwatches.find(
+   (s: any) => (s?.name || '').trim().toLowerCase() === key
+  );
+  const hex = swatch?.hex;
+  return hex && String(hex).trim() !== '' ? String(hex).trim() : undefined;
+ }
+
  isBlocker(colorName: string): boolean {
   if (!colorName) return false;
   const t = String(colorName).trim().toLowerCase();
@@ -859,17 +873,18 @@ private getProfileBlockerMesh(profileInfo?: any): string {
   const enabled = Array.isArray(meta.underbaseEnabled) ? meta.underbaseEnabled : [];
 
   if (enabled.length > 0) {
-   const ub1 = enabled[0] !== false;
-   const ub2 = !!enabled[1];
-   const ub3 = !!enabled[2];
-   if (ub3) return 3;
-   if (ub2) return 2;
-   return ub1 ? 1 : 1;
+   let count = enabled[0] !== false ? 1 : 0;
+   for (let i = 1; i < Math.min(4, enabled.length); i++) {
+    if (enabled[i] === true) count = i + 1;
+   }
+   return Math.max(1, Math.min(4, count));
   }
 
+  const ub4 = isEnabled(meta.underbase4Enabled) || isEnabled(meta.ub4Enabled) || isEnabled(meta.underbase4) || isEnabled(meta['Underbase 4']);
   const ub3 = isEnabled(meta.underbase3Enabled) || isEnabled(meta.ub3Enabled) || isEnabled(meta.underbase3) || isEnabled(meta['Underbase 3']);
   const ub2 = isEnabled(meta.underbase2Enabled) || isEnabled(meta.ub2Enabled) || isEnabled(meta.underbase2) || isEnabled(meta['Underbase 2']);
 
+  if (ub4) return 4;
   if (ub3) return 3;
   if (ub2) return 2;
   return 1;
@@ -908,10 +923,13 @@ private getProfileBlockerMesh(profileInfo?: any): string {
   for (let i = 0; i < expandedCount; i++) {
    const sourceRow = sortedWhiteRows[i] || whiteTemplate;
    const meshFromProfile = underbaseMeshes[i] || '';
+   const rowColorName = i === 0 ? baseWhiteName : `${baseWhiteName} ${i + 1}`;
+   const hexFromDocument = this.getSwatchHexByName(rowColorName);
    expandedWhiteRows.push({
     ...sourceRow,
-    colorName: i === 0 ? baseWhiteName : `${baseWhiteName} ${i + 1}`,
-    mesh: meshFromProfile || sourceRow.mesh
+    colorName: rowColorName,
+    mesh: meshFromProfile || sourceRow.mesh,
+    layerColor: hexFromDocument || sourceRow.layerColor
    });
   }
 
@@ -1170,9 +1188,10 @@ private getProfileBlockerMesh(profileInfo?: any): string {
    (swatchFromGraphic && swatchFromGraphic.hex) ||
    this.getRandomColor();
   const profileName = this.documentProfileMetadata ? this.documentProfileMetadata.profileName : null;
+  const profileCode = this.documentProfileMetadata ? this.documentProfileMetadata.profileCode : null;
 
   return this.controller
-   .getInkInformationBatch([inkName], profileName)
+   .getInkInformationBatch([inkName], profileName, profileCode)
    .then((inkResult) => {
     this.ngZone.run(() => {
      const inkInfo =
@@ -1679,7 +1698,14 @@ private getProfileBlockerMesh(profileInfo?: any): string {
  }
 
  getSeparationColor(row: ColorRow): string {
-  return row.layerColor || '#FF6B6B';
+  if (row.layerColor) {
+   return row.layerColor;
+  }
+  const fromDocument = this.getSwatchHexByName(row.colorName);
+  if (fromDocument) {
+   return fromDocument;
+  }
+  return '#FF6B6B';
  }
 
  // Mesh editing functionality

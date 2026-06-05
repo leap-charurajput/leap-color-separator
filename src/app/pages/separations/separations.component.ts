@@ -13,6 +13,7 @@ import { SeparationProfileActionDialogResult } from '../../components/separation
 import { AddSeparationDialogResult, AddSeparationDialogStyleOption } from '../../components/add-separation-dialog/add-separation-dialog.component';
 import { ControllerService } from '../../services/controller.service';
 import { GraphicsDataService } from '../../services/graphics-data.service';
+import { LeapSepsLogService } from '../../services/leap-seps-log.service';
 
 interface Separation {
  id: number;
@@ -124,7 +125,8 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
  constructor(
   private controller: ControllerService,
   private cdr: ChangeDetectorRef,
-  private graphicsDataService: GraphicsDataService
+  private graphicsDataService: GraphicsDataService,
+  private leapSepsLog: LeapSepsLogService
  ) {
   this.isRunningInBrowser = !(window as any).__adobe_cep__ && !(window as any).leap;
  }
@@ -734,6 +736,13 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
    return;
   }
 
+  this.leapSepsLog.logClick('Generate separation', {
+   separationId,
+   graphicName,
+   profile: separation.profile,
+   styles: separation.styles
+  });
+
   const styleCodes = separation.styles || [];
   const profileName = separation.profile || '';
   const graphicColors = this.getGraphicColors(graphicName);
@@ -919,6 +928,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 
   getProfileCodeAndCreateSeparation()
    .then((result) => {
+    console.log('[SEPARATIONS] performSeparation result:', result);
     if (result.success) {
      setTimeout(() => {
       this.loadSeparationPaths();
@@ -947,9 +957,19 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
       }, 500);
      }
     } else {
+     const message =
+      result?.error ||
+      'Separation failed. See leap_seps.log in Documents/LEAP Settings/Logs.';
+     this.leapSepsLog.logError('Separations', message, result);
+     console.error('[SEPARATIONS] performSeparation failed:', result);
+     alert(message);
     }
    })
-   .catch((err) => { });
+   .catch((err) => {
+    this.leapSepsLog.logError('Separations', err);
+    console.error('[SEPARATIONS] performSeparation error:', err);
+    alert(err?.message || String(err));
+   });
  }
 
  handleOpenSeparation(filePath: string): void {
@@ -976,6 +996,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
  }
 
  handleSeparationMenuClick(item: string, separationId: number, graphicName: string): void {
+  this.leapSepsLog.logClick('Separation menu: ' + item, { separationId, graphicName });
   if (this.isRunningInBrowser) {
    return;
   }

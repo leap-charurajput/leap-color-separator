@@ -60,7 +60,11 @@ class ScriptLoader {
   return { reason, data };
  }
 
- log(val) {}
+ log(val) {
+  if (typeof window !== 'undefined' && typeof window.leapSepsWrite === 'function') {
+   window.leapSepsWrite('LOG', 'LeapSrc', String(val));
+  }
+ }
 
  get name() {
   return 'ScriptLoader:: ';
@@ -1415,7 +1419,88 @@ async function getProfileInformation(profileCode) {
  }
 }
 
-async function getInkInformation(inkName, profileName) {
+function inkExceptionNameMatchesInk(inkName, exceptionInkColor) {
+ const needle =
+  exceptionInkColor != null ? String(exceptionInkColor).trim().toUpperCase() : '';
+ const inkUpper = inkName != null ? String(inkName).trim().toUpperCase() : '';
+ if (!needle || !inkUpper) return false;
+ if (inkUpper === needle || inkUpper.indexOf(needle) !== -1 || needle.indexOf(inkUpper) !== -1) {
+  return true;
+ }
+ const needleParts = needle.match(/\d+[A-Z]*/g);
+ const inkParts = inkUpper.match(/\d+[A-Z]*/g);
+ if (needleParts && inkParts) {
+  for (const inkPart of needleParts) {
+   for (const excelPart of inkParts) {
+    if (inkPart === excelPart) return true;
+   }
+  }
+ }
+ return false;
+}
+
+async function loadInkExceptionsForProfileCode(profileCode) {
+ try {
+  if (!profileCode) return [];
+  const codeKey = String(profileCode).trim().toUpperCase();
+  if (!codeKey) return [];
+  const serverBasePath = await getServerBasePathWithRetry();
+  if (!serverBasePath) return [];
+  const jsonPath = path.join(
+   serverBasePath.replace(/\/$/, ''),
+   'SETTINGS',
+   'LEAP_SEPS',
+   'Data',
+   'profile_ink_exceptions.json'
+  );
+  if (!fs.existsSync(jsonPath)) return [];
+  const parsed = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter((entry) => {
+   if (!entry) return false;
+   const entryCode =
+    entry.profileCode != null ? String(entry.profileCode).trim().toUpperCase() : '';
+   return entryCode !== '' && entryCode === codeKey;
+  });
+ } catch (e) {
+  return [];
+ }
+}
+
+function inkExceptionEntryToInfo(entry) {
+ if (!entry) return null;
+ const twoHitsRaw = entry.Two_Hits != null ? String(entry.Two_Hits).trim().toUpperCase() : 'N';
+ let hitsCount = twoHitsRaw === 'Y' || twoHitsRaw === 'YES' ? 2 : 1;
+ if (entry.hitsCount != null) {
+  const parsed = parseInt(entry.hitsCount, 10);
+  if (!isNaN(parsed) && parsed >= 1) hitsCount = parsed;
+ }
+ const meshRaw = entry.Color_Mesh;
+ const mesh = meshRaw == null || meshRaw === '' ? '110' : String(meshRaw).trim();
+ return { mesh, twoHits: hitsCount >= 2, hitsCount };
+}
+
+async function resolveInkExceptionOverride(inkName, profileCode) {
+ const entries = await loadInkExceptionsForProfileCode(profileCode);
+ for (let i = 0; i < entries.length; i++) {
+  const entry = entries[i];
+  const inkColor = entry.Ink_Color != null ? String(entry.Ink_Color).trim() : '';
+  if (!inkColor || !inkExceptionNameMatchesInk(inkName, inkColor)) continue;
+  const info = inkExceptionEntryToInfo(entry);
+  if (!info) continue;
+  return {
+   found: true,
+   mesh: info.mesh,
+   twoHits: info.twoHits,
+   inkName,
+   profileCode,
+   source: 'inkException'
+  };
+ }
+ return null;
+}
+
+async function getInkInformation(inkName, profileName, inkExceptionProfileCode) {
  try {
   if (!inkName) {
    throw new Error('Ink name is required');
@@ -1497,7 +1582,16 @@ async function getInkInformation(inkName, profileName) {
    }
   }
 
+  const codeForException =
+   inkExceptionProfileCode != null && String(inkExceptionProfileCode).trim() !== ''
+    ? String(inkExceptionProfileCode).trim()
+    : null;
+
   if (!matchedRow) {
+   const fromException = await resolveInkExceptionOverride(inkName, codeForException);
+   if (fromException) {
+    return fromException;
+   }
    return {
     found: false,
     mesh: '110',
@@ -1526,7 +1620,7 @@ async function getInkInformation(inkName, profileName) {
    profileInfo = await getProfileInformation(profileCode);
   }
 
-  return {
+  let result = {
    found: true,
    mesh: meshValue,
    twoHits: twoHits,
@@ -1535,7 +1629,24 @@ async function getInkInformation(inkName, profileName) {
    profileName: matchedProfileName,
    profileInfo: profileInfo
   };
+  const exceptionOverride = await resolveInkExceptionOverride(inkName, codeForException);
+  if (exceptionOverride) {
+   result = {
+    ...result,
+    mesh: exceptionOverride.mesh || result.mesh,
+    twoHits: exceptionOverride.twoHits,
+    source: 'inkException'
+   };
+  }
+  return result;
  } catch (error) {
+  const fromException = await resolveInkExceptionOverride(
+   inkName,
+   inkExceptionProfileCode != null ? String(inkExceptionProfileCode).trim() : null
+  );
+  if (fromException) {
+   return fromException;
+  }
   return {
    found: false,
    mesh: '110',
@@ -1547,7 +1658,7 @@ async function getInkInformation(inkName, profileName) {
  }
 }
 
-async function getInkInformationBatch(inkNames, profileName) {
+async function getInkInformationBatch(inkNames, profileName, profileCode) {
  try {
   if (!inkNames || !Array.isArray(inkNames) || inkNames.length === 0) {
    throw new Error('Ink names array is required');
@@ -1573,7 +1684,7 @@ async function getInkInformationBatch(inkNames, profileName) {
   for (let i = 0; i < inkNames.length; i++) {
    const inkName = inkNames[i];
    const profileNameForInk = profileNames ? profileNames[i] : null;
-   const inkInfo = await getInkInformation(inkName, profileNameForInk);
+   const inkInfo = await getInkInformation(inkName, profileNameForInk, profileCode);
    results.push(inkInfo);
   }
 
@@ -1843,9 +1954,9 @@ class Leap {
   }
  }
 
- async getInkInformation(inkName, profileName) {
+ async getInkInformation(inkName, profileName, inkExceptionProfileCode) {
   try {
-   const inkInfo = await getInkInformation(inkName, profileName);
+   const inkInfo = await getInkInformation(inkName, profileName, inkExceptionProfileCode);
    return {
     success: true,
     inkInfo: inkInfo
@@ -1859,9 +1970,9 @@ class Leap {
   }
  }
 
- async getInkInformationBatch(inkNames, profileName) {
+ async getInkInformationBatch(inkNames, profileName, profileCode) {
   try {
-   const inkInfoList = await getInkInformationBatch(inkNames, profileName);
+   const inkInfoList = await getInkInformationBatch(inkNames, profileName, profileCode);
    return {
     success: true,
     inkInfoList: inkInfoList
@@ -1891,7 +2002,11 @@ class Leap {
   }
  }
 
- log(val) {}
+ log(val) {
+  if (typeof window !== 'undefined' && typeof window.leapSepsWrite === 'function') {
+   window.leapSepsWrite('LOG', 'LeapSrc', String(val));
+  }
+ }
 
  get name() {
   return 'LEAP:: ';

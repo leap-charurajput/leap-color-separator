@@ -1,11 +1,12 @@
 import { Injectable } from '@angular/core';
 import { checkForJSXUpdates, csInterface, evalScript } from '../../libs/helper';
+import { LeapSepsLogService } from './leap-seps-log.service';
 
 @Injectable({
  providedIn: 'root'
 })
 export class ControllerService {
- constructor() {
+ constructor(private leapSepsLog: LeapSepsLogService) {
   this.init();
  }
 
@@ -2006,6 +2007,41 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
   });
  }
 
+ /** Remove swatches not used in the given or active document (Illustrator action set). */
+ removeUnusedSwatches(
+  documentPath?: string
+ ): Promise<{ success: boolean; message?: string; error?: string }> {
+  this.log(
+   'removeUnusedSwatches called' + (documentPath ? ' doc=' + documentPath : '')
+  );
+  this.leapSepsLog.logProcess('removeUnusedSwatches start', {
+   doc: documentPath ? documentPath.split('/').pop() : '(active)'
+  });
+
+  return this.ensureSession().then(() => {
+   const script = this.buildRemoveUnusedSwatchesScript(documentPath);
+   return evalScript(script)
+    .then((res: unknown) => {
+     const str = typeof res === 'string' ? res : '';
+     const result = str
+      ? JSON.parse(str)
+      : { success: false, error: 'No result from removeUnusedSwatches' };
+
+     if (result?.success) {
+      console.log('[removeUnusedSwatches]', result.message || 'Unused swatches removed');
+     } else {
+      console.warn('[removeUnusedSwatches]', result?.error || 'Failed');
+     }
+     return result;
+    })
+    .catch((err: any) => {
+     const message = err?.message || String(err);
+     console.error('[removeUnusedSwatches]', message);
+     return { success: false, error: message };
+    });
+  });
+ }
+
  /** Export GRID artboard to PostScript (postscriptFilePath). Does not run Distiller. */
  exportPostscript(inks: string[]): Promise<any> {
   return this.exportGridPostscript(
@@ -2539,6 +2575,166 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
   });
  }
 
+ /** ExtendScript: remove unused swatches via Illustrator action (LEAP Variables / colorVariable.jsx). */
+ private buildRemoveUnusedSwatchesScript(documentPath?: string): string {
+  const docPathLiteral = JSON.stringify(documentPath || '');
+  return `
+(function() {
+  try {
+    if (!app.documents.length) {
+      return JSON.stringify({ success: false, error: "No active document found" });
+    }
+    var docPath = ${docPathLiteral};
+    var doc = app.activeDocument;
+    if (docPath) {
+      var found = null;
+      for (var d = 0; d < app.documents.length; d++) {
+        var openDoc = app.documents[d];
+        if (openDoc.fullName && openDoc.fullName.fsName === docPath) {
+          found = openDoc;
+          break;
+        }
+      }
+      if (!found) {
+        return JSON.stringify({
+          success: false,
+          error: "Document not open: " + docPath
+        });
+      }
+      doc = found;
+    }
+    var prevDoc = null;
+    try {
+      prevDoc = app.activeDocument;
+      app.activeDocument = doc;
+    } catch (activateErr) { }
+
+    var tempItems = [];
+    var swatches = doc.swatches;
+    for (var s = 0; s < swatches.length; s++) {
+      var swatchName = swatches[s].name;
+      if (swatchName && swatchName.indexOf("$") === 0) {
+        try {
+          var tempRect = doc.pathItems.rectangle(0, 0, 25, 25);
+          tempRect.fillColor = doc.swatches.getByName(swatchName).color;
+          tempItems.push(tempRect);
+        } catch (tempErr) { }
+      }
+    }
+
+    var actionSetName = "unusedsw";
+    var actionName = "swtchdel";
+    var actionString = [
+      "/version 3",
+      "/name [ 8",
+      "756e757365647377",
+      "]",
+      "/isOpen 1",
+      "/actionCount 1",
+      "/action-1 {",
+      "/name [ 8",
+      "737774636864656c",
+      "]",
+      "/keyIndex 0",
+      "/colorIndex 0",
+      "/isOpen 0",
+      "/eventCount 2",
+      "/event-1 {",
+      "/useRulersIn1stQuadrant 0",
+      "/internalName (ai_plugin_swatches)",
+      "/localizedName [ 8",
+      "5377617463686573",
+      "]",
+      "/isOpen 0",
+      "/isOn 1",
+      "/hasDialog 0",
+      "/parameterCount 1",
+      "/parameter-1 {",
+      "/key 1835363957",
+      "/showInPalette 4294967295",
+      "/type (enumerated)",
+      "/name [ 17",
+      "    53656c65637420416c6c20556e75736564",
+      "]",
+      "/value 11",
+      "}",
+      "}",
+      "/event-2 {",
+      "/useRulersIn1stQuadrant 0",
+      "/internalName (ai_plugin_swatches)",
+      "/localizedName [ 8",
+      "5377617463686573",
+      "]",
+      "/isOpen 0",
+      "/isOn 1",
+      "/hasDialog 1",
+      "/showDialog 0",
+      "/parameterCount 1",
+      "/parameter-1 {",
+      "/key 1835363957",
+      "/showInPalette 4294967295",
+      "/type (enumerated)",
+      "/name [ 13",
+      "    44656c65746520537761746368",
+      "]",
+      "/value 3",
+      "}",
+      "}",
+      "}"
+    ].join("\\n");
+
+    var tempFile = new File(Folder.temp.fsName + "/leap_unusedswatches.aia");
+    if (tempFile.exists) {
+      tempFile.remove();
+    }
+    tempFile.open("w");
+    tempFile.write(actionString);
+    tempFile.close();
+    app.loadAction(tempFile);
+    app.doScript(actionName, actionSetName);
+    app.unloadAction(actionSetName, "");
+    tempFile.remove();
+
+    if (tempItems.length) {
+      for (var t = tempItems.length - 1; t >= 0; t--) {
+        try {
+          tempItems[t].remove();
+        } catch (removeTempErr) { }
+      }
+    }
+
+    try {
+      doc.save();
+    } catch (saveErr) { }
+
+    if (prevDoc) {
+      try {
+        app.activeDocument = prevDoc;
+      } catch (restoreErr) { }
+    }
+
+    var docLabel = "document";
+    try {
+      docLabel = doc.name;
+    } catch (nameErr) { }
+
+    return JSON.stringify({
+      success: true,
+      message: "Unused swatches removed from " + docLabel
+    });
+  } catch (e) {
+    try {
+      app.unloadAction("unusedsw", "");
+    } catch (unloadErr) { }
+    return JSON.stringify({
+      success: false,
+      error: e && e.message ? e.message : String(e)
+    });
+  }
+})();
+`;
+ }
+
  /** ExtendScript body aligned with React exportPostscript.script.ts (LEAP Color Separator). */
  private buildExportPostscriptScript(
   inks: string[],
@@ -2723,12 +2919,16 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
 `;
  }
 
- getInkInformationBatch(inkNames: string[], profileName?: string): Promise<any> {
+ getInkInformationBatch(
+  inkNames: string[],
+  profileName?: string,
+  profileCode?: string
+ ): Promise<any> {
   this.log('getInkInformationBatch called with ' + inkNames.length + ' ink names');
 
   return this.ensureSession().then(() => {
    return (window as any).leap
-    .getInkInformationBatch(inkNames, profileName)
+    .getInkInformationBatch(inkNames, profileName, profileCode)
     .then((result: any) => {
      return result;
     })
@@ -2848,6 +3048,12 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
    graphicName +
    (options?.recreateInActiveDoc ? ' (recreate in active doc)' : '')
   );
+  this.leapSepsLog.logProcess('performSeparation start', {
+   graphicName,
+   styleCodes,
+   profileCode: profileMetadata?.profileCode,
+   profileName: profileMetadata?.profileName
+  });
 
   return this.ensureSession().then(() => {
    const params: any = {
@@ -2867,10 +3073,28 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
     .evalScript('handlePerformSeparation', params)
     .then((res: string) => {
      const result = JSON.parse(res);
-
-     return result;
+     console.log('[Controller] performSeparation result:', result);
+     if (!result?.success) {
+      this.leapSepsLog.logError('performSeparation', result?.error || 'Failed', result);
+      return result;
+     }
+     this.leapSepsLog.logProcess('performSeparation JSX success', {
+      plates: result.layerNames?.length,
+      sepFile: result.separatedDocumentPath
+        ? String(result.separatedDocumentPath).split('/').pop()
+        : undefined
+     });
+     return this.removeUnusedSwatches(result.separatedDocumentPath).then((swResult) => {
+      if (!swResult?.success) {
+       this.leapSepsLog.logWarn('performSeparation', 'removeUnusedSwatches failed', swResult?.error);
+      } else {
+       this.leapSepsLog.logProcess('removeUnusedSwatches complete', swResult.message);
+      }
+      return { ...result, removeUnusedSwatches: swResult };
+     });
     })
     .catch((err: any) => {
+     this.leapSepsLog.logError('performSeparation', err);
      throw err;
     });
   });
@@ -2895,7 +3119,13 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
     .evalScript('handleRecreatePlatesInActiveDocument', params)
     .then((res: string) => {
      const result = JSON.parse(res);
-     return result;
+     if (!result?.success) {
+      return result;
+     }
+     return this.removeUnusedSwatches().then((swResult) => ({
+      ...result,
+      removeUnusedSwatches: swResult
+     }));
     })
     .catch((err: any) => {
      throw err;
@@ -3371,7 +3601,9 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
   });
  }
 
- private log(val: string): void { }
+ private log(val: string): void {
+  this.leapSepsLog.logInfo('Controller', val);
+ }
 
  private get name(): string {
   return 'Client Controller:: ';
