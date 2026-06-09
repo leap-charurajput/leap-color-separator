@@ -1278,11 +1278,11 @@ export class ControllerService {
   });
  }
 
- saveGraphicsData(graphicsData: any[]): Promise<any> {
+ saveGraphicsData(graphicsData: any[], underbase2Swatch?: string): Promise<any> {
   this.log('saveGraphicsData called with ' + graphicsData.length + ' graphics');
 
   return this.ensureSession().then(() => {
-   const params = { graphicsData: graphicsData };
+   const params = { graphicsData: graphicsData, underbase2Swatch: underbase2Swatch || '' };
    return (window as any).leap
     .scriptLoader()
     .evalScript('handleSaveGraphicsData', params)
@@ -2796,101 +2796,96 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
       outputFile = new File(outputPath);
     }
 
-    // Flattener
-    var flatOptions = new PrintFlattenerOptions();
-    flatOptions.clipComplexRegions = false;
-    flatOptions.convertStrokesToOutlines = false;
-    flatOptions.convertTextToOutlines = false;
-    flatOptions.flatteningBalance = 100;
-    flatOptions.gradientResolution = 300;
-    flatOptions.rasterizationResolution = 300;
+    // ─────────────────────────────────────────────────────────────────────
+    // AI 2026 (v30+) / macOS 26: the ExtendScript PPD-enumeration API
+    // throws error 'FPVI' and returns no printers.  Setting printerName /
+    // PPDName on a fresh PrintOptions leaves an internal null printer
+    // pointer → SIGSEGV inside doc.print() that ExtendScript try/catch
+    // cannot intercept.
+    //
+    // Safe path: load PrintOptions from a named preset that was created
+    // through the Print dialog UI.  The UI creates a real printer object;
+    // getPrintPresetSettings() returns that already-initialised reference.
+    // We then override only the dynamic parts (output file, artboard range,
+    // ink enable/disable) and call doc.print() with a valid printer object.
+    //
+    // ONE-TIME SETUP for the user:
+    //   File > Print → choose PostScript printer / IBlock v2 PPD →
+    //   click "Save Preset…" → name it exactly: LEAP_SEPS_POSTSCRIPT
+    // ─────────────────────────────────────────────────────────────────────
+    var PRESET_NAME = 'LEAP_SEPS_POSTSCRIPT';
 
-     // Font options
-    var fontOptions = new PrintFontOptions();
-    fontOptions.downloadFonts = PrintFontDownloadMode.DOWNLOADSUBSET;
+    // Check preset list (this API call does NOT touch the PPD subsystem,
+    // so it succeeds even when PPD enumeration fails).
+    var presetExists = false;
+    try {
+      var allPresets = app.printPresetsList;
+      for (var p = 0; p < allPresets.length; p++) {
+        if (allPresets[p] === PRESET_NAME) { presetExists = true; break; }
+      }
+    } catch (presetListErr) { /* will fall through to NOT-FOUND below */ }
 
+    if (!presetExists) {
+      return JSON.stringify({
+        success: false,
+        error: "PRESET_NOT_FOUND",
+        message:
+          'Print preset \\"LEAP_SEPS_POSTSCRIPT\\" not found. ' +
+          'One-time setup: in Illustrator go to Edit > Print Presets, ' +
+          'create a new preset with your PostScript printer and the IBlock v2 PPD, ' +
+          'and name it exactly LEAP_SEPS_POSTSCRIPT.'
+      });
+    }
 
-    // Job options for the print job
-    var jobOptions = new PrintJobOptions();
-    jobOptions.copies = 1;
-    jobOptions.printArea = PrintingBounds.ARTBOARDBOUNDS;
-    jobOptions.printAllArtboards = false;
-    jobOptions.artboardRange = (gridArtboardIndex + 1).toString();
-    jobOptions.file = new File(outputPath);
+    // Load the preset — returns a PrintOptions whose printer reference is
+    // already initialised (created by the UI, not the broken script API).
+    var printOptions;
+    try {
+      printOptions = app.getPrintPresetSettings(PRESET_NAME);
+    } catch (presetLoadErr) {
+      return JSON.stringify({
+        success: false,
+        error: "PRESET_LOAD_FAILED",
+        message: 'Could not load print preset \\"' + PRESET_NAME + '\\": ' +
+                 (presetLoadErr.message || presetLoadErr.toString())
+      });
+    }
 
-     // Color separation options
-    var colorSepOptions = new PrintColorSeparationOptions();
-    colorSepOptions.colorSeparationMode = PrintColorSeparationMode.HOSTBASEDSEPARATION;
-    colorSepOptions.convertSpotColors = false;
-    colorSepOptions.overprintBlack = false;
-
-    // Normalize like React exportPostscript.script.ts (collapse whitespace + trim + lowercase)
+    // ── Normalise ink names ──────────────────────────────────────────────
     function normalizeInkName(name) {
       return String(name == null ? "" : name)
         .replace(/\\s+/g, " ")
         .replace(/^\\s+|\\s+$/g, "")
         .toLowerCase();
     }
-
     var inksLookup = {};
     for (var i = 0; i < inks.length; i++) {
       inksLookup[normalizeInkName(inks[i])] = true;
     }
 
-    // ExtendScript has no console.log — return inkDebug for panel DevTools
+    // ── Set ink enable/disable on the live document ink objects ─────────
     var inkDebug = [];
-
-    // Read ink list once; set printingStatus on each ink (do not filter the list)
     var inkList = doc.inkList;
     for (var i = 0; i < inkList.length; i++) {
       var ink = inkList[i];
       var normalizedName = normalizeInkName(ink.name);
       var enabled = !!inksLookup[normalizedName];
-      inkDebug.push({
-        name: String(ink.name),
-        normalized: normalizedName,
-        enabled: enabled
-      });
-      if (enabled) {
-        ink.inkInfo.printingStatus = InkPrintStatus.ENABLEINK;
-      } else {
-        ink.inkInfo.printingStatus = InkPrintStatus.DISABLEINK;
-      }
+      inkDebug.push({ name: String(ink.name), normalized: normalizedName, enabled: enabled });
+      try {
+        ink.inkInfo.printingStatus = enabled ? InkPrintStatus.ENABLEINK : InkPrintStatus.DISABLEINK;
+      } catch (inkErr) { /* process inks may not support DISABLE — ignore */ }
     }
 
-    colorSepOptions.inkList = inkList;
-
-
- 		// Page marks options
-    var marksOptions = new PrintPageMarksOptions();
-    marksOptions.trimMarks = false;
-    marksOptions.registrationMarks = false;
-    marksOptions.colorBars = false;
-    marksOptions.pageInformationMarks = false;
-
-    // PostScript
-		var psOptions = new PrintPostScriptOptions();
-		psOptions.postScriptLevel = PrinterPostScriptLevelEnum.PSLEVEL2;
-		psOptions.binaryPrinting = false;
-		psOptions.imageCompression = PostScriptImageCompressionType.IMAGECOMPRESSIONNONE
-
-    var printCoordinateOptions = new PrintCoordinateOptions();
-    printCoordinateOptions.fitToPage = true;
-
-    // Print options
-		var printOptions = new PrintOptions();
-    printOptions.printPreset = 'LEAP_SEPS_POSTSCRIPT';
-    printOptions.colorSeparationOptions = colorSepOptions;
-    // printOptions.file = new File(outputPath);
-    printOptions.flattenerOptions = flatOptions;
-    printOptions.fontOptions = fontOptions;
-    printOptions.jobOptions = jobOptions;
-    printOptions.pageMarksOptions = marksOptions;
-    // printOptions.paperOptions = paperOptions;
-    printOptions.coordinateOptions = printCoordinateOptions;
-    printOptions.postScriptOptions = psOptions;
-    // printOptions.printerName = 'Adobe PostScript File';
-    // printOptions.PPDName = ${ppdNameLiteral};
+    // ── Override only the dynamic parts of the preset ───────────────────
+    // Output file + artboard (colour-sep mode, marks, PS level, etc. come
+    // from the preset the user configured).
+    var jobOptions = new PrintJobOptions();
+    jobOptions.copies        = 1;
+    jobOptions.printArea     = PrintingBounds.ARTBOARDBOUNDS;
+    jobOptions.printAllArtboards = false;
+    jobOptions.artboardRange = (gridArtboardIndex + 1).toString();
+    jobOptions.file          = new File(outputPath);
+    printOptions.jobOptions  = jobOptions;
 
     var previousActiveArtboardIndex = doc.artboards.getActiveArtboardIndex();
     try {

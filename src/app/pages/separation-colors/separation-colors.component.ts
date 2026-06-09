@@ -596,9 +596,13 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
       );
       newColorRows.push(firstRow);
 
-      if (inkInfo.twoHits) {
-       const colorHex = swatchData.hex || this.getRandomColor();
-       const isWhiteUBColor = this.isWhiteUB(swatchData.name);
+      // Ink exceptions may flag twoHits, but performSeparation can already create "… 2" plates.
+      // Skip synthetic rows when this swatch is already a hit plate or the second hit exists.
+      if (
+       inkInfo.twoHits &&
+       !this.isInkHitPlateName(swatchData.name) &&
+       !this.secondHitLayerExists(swatchData.name, this.graphicSwatches)
+      ) {
        const secondRow: ColorRow = {
         ...firstRow,
         id: currentId++,
@@ -1860,15 +1864,39 @@ private getProfileBlockerMesh(profileInfo?: any): string {
   return this.selectedMeshRows.has(rowId);
  }
 
+ /** True when the name ends with a single-digit hit index (e.g. "PANTONE 123 C 2", "White UB 3"). */
+ private isInkHitPlateName(name: string): boolean {
+  const trimmed = (name || '').trim();
+  const match = trimmed.match(/^(.+)\s+(\d+)$/);
+  return !!(match && match[2] && match[2].length === 1);
+ }
+
+ /** True when a "baseName 2" plate already exists in the document swatch list. */
+ private secondHitLayerExists(baseName: string, swatches: any[]): boolean {
+  const secondHitName = `${(baseName || '').trim()} 2`;
+  return swatches.some(
+   (s) => (s.name || '').trim().toLowerCase() === secondHitName.toLowerCase()
+  );
+ }
+
  private resolveColorDisplayName(swatchName: string, format: string): string {
   const trimmed = swatchName.trim();
   if (!/^PANTONE\s/i.test(trimmed)) {
    return swatchName;
   }
-  const withoutPrefix = trimmed.replace(/^PANTONE\s+/i, '');
+
+  let pantoneBase = trimmed;
+  let hitSuffix = '';
+  const hitMatch = trimmed.match(/^(.+?)\s+(\d+)$/);
+  if (hitMatch && hitMatch[2] && hitMatch[2].length === 1) {
+   pantoneBase = hitMatch[1].trim();
+   hitSuffix = ` ${hitMatch[2]}`;
+  }
+
+  const withoutPrefix = pantoneBase.replace(/^PANTONE\s+/i, '');
   const tokenMatch = withoutPrefix.match(/^(.*?)\s+[A-Z]{1,3}P?$/);
   const token = tokenMatch ? tokenMatch[1].trim() : withoutPrefix.trim();
-  return format.replace(/XXX/g, token);
+  return format.replace(/XXX/g, token) + hitSuffix;
  }
 
  updateSepTableInDocument(): void {

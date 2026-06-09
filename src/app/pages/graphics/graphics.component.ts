@@ -63,6 +63,15 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
  };
  availableColors: string[] = [];
  positionOptions: string[] = [];
+
+ // --- Underbase 2 swatch ---
+ // Underbase 1 lives in the profile settings; the Graphics page only chooses Underbase 2.
+ // Options = "White UB" plus every spot swatch whose name contains "White".
+ // The chosen swatch is persisted to the document XMP and used for the UB2 plate color in Illustrator.
+ underbaseSwatchOptions: string[] = ['White UB'];
+ // Default: first swatch with "White" in its name, else "White UB" (overridden by a saved value).
+ underbase2Swatch = 'White UB';
+
  isSaving = false;
  hasVersionDocument = false;
  isCheckingDocument = false;
@@ -107,6 +116,7 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
     this.loadGraphicsList();
     this.loadTeamCode();
     this.loadPositionOptions();
+    this.loadUnderbaseSwatchOptions();
    }
   });
  }
@@ -119,10 +129,58 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
       this.loadGraphicsList();
       this.loadTeamCode();
       this.loadPositionOptions();
+      this.loadUnderbaseSwatchOptions();
      }
     });
    }, 200);
   }
+ }
+
+ /**
+  * Build the option list for both Underbase Swatch dropdowns:
+  * "White UB" first, followed by every spot swatch in the document whose
+  * name contains "White" (case-insensitive). Defaults are then applied:
+  *  - 1st Underbase Swatch  -> always "White UB"
+  *  - Other Underbase Swatch -> first White-named swatch, else "White UB"
+  */
+ loadUnderbaseSwatchOptions(): void {
+  Promise.all([
+   this.controller.getSpotColorSwatches().catch(() => [] as string[]),
+   this.controller.loadGraphicsData().catch(() => ({} as any))
+  ])
+   .then(([names, loaded]: [string[], any]) => {
+    const whiteSwatches = (names || [])
+     .map((n) => String(n || '').trim())
+     .filter((n) => n.length > 0 && /white/i.test(n));
+
+    // "White UB" first, then the rest of the White-named swatches (de-duplicated).
+    const options: string[] = ['White UB'];
+    whiteSwatches.forEach((n) => {
+     if (options.indexOf(n) === -1) options.push(n);
+    });
+    this.underbaseSwatchOptions = options;
+
+    // Prefer a previously saved selection; otherwise default to the first White-named swatch.
+    const saved =
+     loaded && typeof loaded.underbase2Swatch === 'string' ? loaded.underbase2Swatch.trim() : '';
+    if (saved && options.indexOf(saved) !== -1) {
+     this.underbase2Swatch = saved;
+    } else {
+     const firstWhite = options.find((n) => n !== 'White UB');
+     this.underbase2Swatch = firstWhite || 'White UB';
+    }
+
+    this.cdr.detectChanges();
+   })
+   .catch(() => {
+    this.underbaseSwatchOptions = ['White UB'];
+    this.underbase2Swatch = 'White UB';
+    this.cdr.detectChanges();
+   });
+ }
+
+ handleUnderbase2SwatchChange(value: string): void {
+  this.underbase2Swatch = value;
  }
 
  checkVersionDocument(): Promise<void> {
@@ -622,7 +680,7 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
 
   this.isSaving = true;
   this.controller
-   .saveGraphicsData(graphicsToSave)
+   .saveGraphicsData(graphicsToSave, this.underbase2Swatch)
    .then((result) => {
     if (result.success) {
      // Sync to shared service to notify other components/tabs

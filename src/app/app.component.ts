@@ -12,7 +12,7 @@ import { LeapSepsLogService } from './services/leap-seps-log.service';
 export class AppComponent implements OnInit, OnDestroy {
  private readonly panelVersion = '1.0.1';
  /** Bump this string when you ship a new build (same format as before: "Mon DD, YYYY"). */
- private readonly panelDeployDate = 'June 05, 2026';
+ private readonly panelDeployDate = 'June 09, 2026';
  activeTab: number | null = 0;
  selectedMenuOption: string | null = null;
  documentRefreshKey = 0;

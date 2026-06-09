@@ -103,8 +103,8 @@
      }
     }
     return detail.slice(0, MAX_DETAIL_CHARS) + '…';
-   }
-   return detail;
+  }
+  return detail;
   }
   try {
    var compact = compactValue(detail, 0);
@@ -166,7 +166,7 @@
     if (global.console && global.console.error) {
      global.console.error('[leap_seps] write failed:', e.message || e, message);
     }
-   } catch (ignore) { }
+   } catch (ignore) {}
    return false;
   }
  }
@@ -237,7 +237,7 @@
    if (ctx) {
     ctx.fs.appendFileSync(ctx.logPath, banner, 'utf8');
    }
-  } catch (e) { }
+  } catch (e) {}
 
   var origLog = global.console.log;
   var origWarn = global.console.warn;

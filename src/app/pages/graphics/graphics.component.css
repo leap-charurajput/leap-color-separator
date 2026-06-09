@@ -77,6 +77,28 @@
 	padding: 8px;
 }
 
+/* --- Underbase Swatches section --- */
+.underbase-swatches-section {
+	margin-bottom: 16px;
+}
+
+.underbase-swatch-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 8px;
+}
+
+.underbase-swatch-label {
+	flex: 0 0 150px;
+	white-space: nowrap;
+}
+
+.underbase-swatch-row app-dropdown {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
 .organize-graphics-table-wrapper .thRow .col:nth-child(2) {
 	padding-right: 12px;
 }

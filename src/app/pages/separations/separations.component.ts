@@ -109,14 +109,18 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
  styleCatalogOptions: AddSeparationDialogStyleOption[] = [];
  /** Groups read from XMP LEAPSeparationProfileData to persist manual additions across reopen. */
  xmpSeparationGroups: XmpSeparationGroup[] = [];
+ // Checked by default so "Recreate All Plates" performs the same full path cleanup
+ // as "Create Separations" out of the box. Users can untick to skip cleanup.
  recreatePlateCheckboxOptions: ConfirmDialogCheckboxOption[] = [
   {
    id: 'deleteUnpaintedPaths',
-   label: 'Delete unpainted paths after Merge'
+   label: 'Delete unpainted paths after Merge',
+   checked: true
   },
   {
    id: 'deleteLeftoverPaths',
-   label: 'Delete leftover paths after Add'
+   label: 'Delete leftover paths after Add',
+   checked: true
   }
  ];
  private documentActivateHandler: (() => void) | null = null;
@@ -1459,12 +1463,13 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
   if (!graphicName) return;
 
   const evRec = ev && typeof ev === 'object' ? (ev as Record<string, boolean>) : null;
+  // Default to full cleanup (matching Create Separations) when no dialog state is provided.
   const cleanup = evRec
    ? {
      deleteUnpaintedPaths: !!evRec['deleteUnpaintedPaths'],
      deleteLeftoverPaths: !!evRec['deleteLeftoverPaths']
     }
-   : { deleteUnpaintedPaths: false, deleteLeftoverPaths: false };
+   : { deleteUnpaintedPaths: true, deleteLeftoverPaths: true };
 
   this.controller.deleteAllPlatesInSeparationDoc?.()
    ?.then((delRes) => {

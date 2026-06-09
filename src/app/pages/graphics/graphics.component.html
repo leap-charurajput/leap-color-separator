@@ -1,4 +1,22 @@
 <div class="organize-graphics-container">
+ <div
+  *ngIf="hasVersionDocument && !isSeparatedDoc && !isCheckingDocument && !isLoadingGraphics"
+  class="underbase-swatches-section"
+ >
+  <div class="panelTitle mb-5">
+   <span>Underbase Swatches</span>
+  </div>
+  <div class="underbase-swatch-row">
+   <span class="underbase-swatch-label">Underbase 2 Swatch:</span>
+   <app-dropdown
+    [value]="underbase2Swatch"
+    [items]="underbaseSwatchOptions"
+    (onChange)="handleUnderbase2SwatchChange($event)"
+    placeholder="White UB"
+   ></app-dropdown>
+  </div>
+ </div>
+
  <div class="panelTitle mb-5 d-flex align-center justify-between">
   <span>Organize Graphics</span>
   <button

@@ -255,8 +255,8 @@ function hideSizedGraphicsSublayer(doc) {
   try {
    var sizedGraphics = sizedArt.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_GRAPHICS);
    sizedGraphics.visible = false;
-  } catch (sgErr) { }
- } catch (e) { }
+  } catch (sgErr) {}
+ } catch (e) {}
 }
 
 function showSizedLayersForProcessing(doc) {
@@ -269,8 +269,8 @@ function showSizedLayersForProcessing(doc) {
    var sizedGraphics = sizedArt.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_GRAPHICS);
    sizedGraphics.visible = true;
    sizedGraphics.locked = false;
-  } catch (sgErr) { }
- } catch (e) { }
+  } catch (sgErr) {}
+ } catch (e) {}
 }
 
 function findPageItemByName(container, itemName) {
@@ -953,49 +953,101 @@ function getMaxInkExceptionUnderbaseCount(doc, profileCode) {
  return maxCount;
 }
 
-/** Enable extra White UB layers when an ink exception requires more passes than the profile default. */
+/** Number of UB passes enabled by the profile itself (its own underbaseEnabled flags). */
+function getProfileGlobalUnderbaseCount(profileMetadata) {
+ var enabled = profileMetadata && profileMetadata.underbaseEnabled instanceof Array
+  ? profileMetadata.underbaseEnabled
+  : null;
+ if (!enabled) return 1;
+ var count = 0;
+ for (var i = 0; i < enabled.length && i < 4; i++) {
+  if (enabled[i] === true) count = i + 1;
+ }
+ return count < 1 ? 1 : count;
+}
+
+/**
+ * For inks present on the sep doc, return [{ layerName, count }] using each ink's
+ * ink-exception underbase_count. Only inks needing more than one pass (count >= 2) are returned,
+ * since the base pass (UB 1) is the global white underbase handled by generateUnderbase.
+ */
+function getInkExceptionUnderbaseLayerCounts(doc, profileCode) {
+ var result = [];
+ var codeKey = profileCode ? String(profileCode).replace(/^\s+|\s+$/g, "").toUpperCase() : "";
+ if (!codeKey) return result;
+ var allEntries = loadProfileInkExceptionsJson();
+ if (!allEntries || !allEntries.length) return result;
+ var layerNames = doc ? getSeparatedArtLayerNames(doc) : [];
+ for (var i = 0; i < allEntries.length; i++) {
+  var entry = allEntries[i];
+  if (!entry || !inkProfileMatchesEntry(entry, codeKey)) continue;
+  var row = inkJsonEntryToRow(entry, i);
+  if (!row || !row.inkName) continue;
+  var count = row.underbaseCount != null ? parseInt(row.underbaseCount, 10) : 1;
+  if (isNaN(count) || count < 1) count = 1;
+  if (count > 4) count = 4;
+  if (count < 2) continue; // only inks needing extra passes contribute localized underbase
+  for (var L = 0; L < layerNames.length; L++) {
+   if (inkExceptionNameMatchesLayerName(row.inkName, layerNames[L])) {
+    result.push({ layerName: layerNames[L], count: count });
+   }
+  }
+ }
+ return result;
+}
+
+/**
+ * Per-ink localized underbase.
+ *
+ * UB 1 and any pass the PROFILE itself enables stay full whole-graphic white passes
+ * (handled by generateUnderbase exactly as before — this function does NOT touch
+ * underbaseEnabled). For passes BEYOND the profile's own UB count, we instead build
+ * localized underbase layers from only the geometry of the inks whose ink-exception
+ * underbase_count requires that pass. Example: profile = 1 pass, PANTONE 123 C has
+ * underbase_count = 2 -> "White UB 2" is built from PANTONE 123 C's shapes only.
+ * Every ink that needs pass N is merged into the same "White UB N" layer.
+ *
+ * Result is attached as profileMetadata.inkLocalizedUnderbase = [{ level, layers:[plateNames] }],
+ * consumed by applyLocalizedInkUnderbaseLayers() during generateUnderbase.
+ */
 function mergeInkExceptionUnderbaseIntoProfileMetadata(profileMetadata, doc) {
  if (!profileMetadata) return profileMetadata;
+ profileMetadata.inkLocalizedUnderbase = [];
  var profileCode = profileMetadata.profileCode;
  if (!profileCode) return profileMetadata;
- var requiredCount = getMaxInkExceptionUnderbaseCount(doc, profileCode);
- if (requiredCount <= 0) return profileMetadata;
 
- var enabled = profileMetadata.underbaseEnabled instanceof Array
-  ? profileMetadata.underbaseEnabled.slice()
-  : [true, false, false, false];
- while (enabled.length < 4) enabled.push(false);
+ var inkCounts = getInkExceptionUnderbaseLayerCounts(doc, profileCode);
+ if (!inkCounts.length) return profileMetadata;
 
- var profileCount = 0;
- for (var c = 0; c < enabled.length && c < 4; c++) {
-  if (enabled[c] === true) profileCount = c + 1;
- }
- if (profileCount < 1) profileCount = 1;
-
- var changed = false;
- for (var u = 0; u < requiredCount && u < 4; u++) {
-  if (enabled[u] !== true) {
-   enabled[u] = true;
-   changed = true;
-  }
- }
-
- if (changed || requiredCount > profileCount) {
-  profileMetadata.underbaseEnabled = enabled;
-  appendLeapSepLog(
-   "ink exception underbase: required " + requiredCount +
-   " passes (profile had " + profileCount + "), enabled: " +
-   enabled.join(",")
-  );
-  if (doc) {
-   try {
-    var ubXmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
-    if (ubXmp.isXmpCreated) {
-     ubXmp.setStructField("SeparationProfileMetadata", profileMetadata, true, false);
-     ubXmp.commit();
+ var globalCount = getProfileGlobalUnderbaseCount(profileMetadata);
+ var localized = [];
+ for (var level = globalCount + 1; level <= 4; level++) {
+  var layersForLevel = [];
+  var seen = {};
+  for (var c = 0; c < inkCounts.length; c++) {
+   if (inkCounts[c].count >= level) {
+    var nm = inkCounts[c].layerName;
+    var key = String(nm).toUpperCase();
+    if (!seen[key]) {
+     seen[key] = true;
+     layersForLevel.push(nm);
     }
-   } catch (ubXmpErr) { }
+   }
   }
+  if (layersForLevel.length) {
+   localized.push({ level: level, layers: layersForLevel });
+  }
+ }
+ profileMetadata.inkLocalizedUnderbase = localized;
+
+ if (localized.length) {
+  var summary = [];
+  for (var s = 0; s < localized.length; s++) {
+   summary.push("UB " + localized[s].level + " <- " + localized[s].layers.join(" + "));
+  }
+  appendLeapSepLog(
+   "ink exception localized underbase (profile global = " + globalCount + "): " + summary.join("; ")
+  );
  }
  return profileMetadata;
 }
@@ -1345,7 +1397,7 @@ function copyAndPrepareSEPDocument(templateFile, destinationFolder, docName, jso
  updateVariablesInDocument(sepDoc, jsonData, styleCodes, profileMetadata);
  try {
   var sepXmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", sepDoc);
-  if (sepXmp.isXmpCreated) {
+   if (sepXmp.isXmpCreated) {
    sepXmp.setStructField("DocumentType", "Separation Document", false, false);
    if (profileMetadata) {
     sepXmp.setStructField("SeparationProfileMetadata", profileMetadata, true, false);
@@ -1454,6 +1506,22 @@ function handlePerformSeparation(params_string) {
    });
   }
   var activeDoc = app.activeDocument;
+
+  // Pull the Graphics-page "Underbase 2 Swatch" choice from this (version) document's XMP into
+  // profileMetadata so it carries into the separated document and drives the UB2+ plate color.
+  try {
+   if (profileMetadata && (profileMetadata.underbase2Swatch == null || String(profileMetadata.underbase2Swatch) === "")) {
+    var ub2Xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", activeDoc);
+    if (ub2Xmp.isXmpCreated && ub2Xmp.doesStructFieldExist("Underbase2Swatch")) {
+     var ub2Saved = ub2Xmp.getStructField("Underbase2Swatch", false);
+     if (ub2Saved != null && typeof ub2Saved === "string" && ub2Saved.replace(/^\s+|\s+$/g, "") !== "") {
+      profileMetadata.underbase2Swatch = ub2Saved;
+      appendLeapSepLog("Underbase 2 swatch from document: " + ub2Saved);
+     }
+    }
+   }
+  } catch (ub2ReadErr) { }
+
   var docFile = new File(activeDoc.fullName);
   var docName = docFile.name.replace(/\.[^\.]+$/, '');
   var aiFolder = docFile.parent;
@@ -2373,7 +2441,7 @@ function handleReorderSeparatedArtLayers(params_string) {
      sepXmp.commit();
     }
    }
-  } catch (eXmp) { }
+  } catch (eXmp) {}
 
   app.redraw();
   return JSON.stringify({
@@ -2502,7 +2570,7 @@ function handleRemoveSeparationInkArtifacts(params_string) {
         sepXmp.setStructField("SeparatedLayerNames", layerNames, true, false);
         sepXmp.commit();
        }
-      } catch (eXmp) { }
+      } catch (eXmp) {}
      } catch (eRem) {
       out.layerMessage = eRem && eRem.message ? eRem.message : String(eRem);
       out.success = false;
@@ -2541,7 +2609,7 @@ function handleRemoveSeparationInkArtifacts(params_string) {
   if (mutated) {
    try {
     doc.save();
-   } catch (eSave) { }
+   } catch (eSave) {}
   }
 
   return JSON.stringify(out);
@@ -3504,6 +3572,12 @@ function handleSaveGraphicsData(params_string) {
   // This avoids expensive serialization on every write
   xmp.setStructField("GraphicsOrganizationData", graphicsData, true, false);
 
+  // The Graphics-page "Underbase 2 Swatch" choice (optional), stored as a separate XMP field.
+  var underbase2Swatch = params && params.underbase2Swatch != null ? String(params.underbase2Swatch) : "";
+  if (underbase2Swatch !== "") {
+   xmp.setStructField("Underbase2Swatch", underbase2Swatch, false, false);
+  }
+
   // Commit all changes at once (much faster than committing on every setStructField)
   xmp.commit();
 
@@ -3558,9 +3632,18 @@ function handleLoadGraphicsData(params_string) {
    }
   }
 
+  var underbase2Swatch = "";
+  if (xmp.doesStructFieldExist("Underbase2Swatch")) {
+   var ub2 = xmp.getStructField("Underbase2Swatch", false);
+   if (ub2 != null && typeof ub2 === "string") {
+    underbase2Swatch = ub2;
+   }
+  }
+
   return JSON.stringify({
    success: true,
-   graphicsData: graphicsData
+   graphicsData: graphicsData,
+   underbase2Swatch: underbase2Swatch
   });
 
  } catch (e) {
