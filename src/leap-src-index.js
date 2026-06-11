@@ -1419,23 +1419,35 @@ async function getProfileInformation(profileCode) {
  }
 }
 
+function normalizeInkMatchString(value) {
+ if (value == null) return '';
+ return String(value).trim().toUpperCase();
+}
+
+function escapeRegExpForInkMatch(str) {
+ return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Numeric Pantone codes must match the full number — "123" must not match "1235". */
 function inkExceptionNameMatchesInk(inkName, exceptionInkColor) {
- const needle =
-  exceptionInkColor != null ? String(exceptionInkColor).trim().toUpperCase() : '';
- const inkUpper = inkName != null ? String(inkName).trim().toUpperCase() : '';
- if (!needle || !inkUpper) return false;
- if (inkUpper === needle || inkUpper.indexOf(needle) !== -1 || needle.indexOf(inkUpper) !== -1) {
-  return true;
+ const needle = normalizeInkMatchString(exceptionInkColor);
+ const target = normalizeInkMatchString(inkName);
+ if (!needle || !target) return false;
+ if (target === needle) return true;
+
+ const numericNeedle = needle.replace(/\s+/g, '');
+ if (/^\d+[A-Z]?$/.test(numericNeedle)) {
+  const pantoneRe = new RegExp(
+   `PANTONE\\s+${escapeRegExpForInkMatch(numericNeedle)}(?:\\s|$)`,
+   'i'
+  );
+  if (pantoneRe.test(target)) return true;
+  if (target === numericNeedle) return true;
+  return false;
  }
- const needleParts = needle.match(/\d+[A-Z]*/g);
- const inkParts = inkUpper.match(/\d+[A-Z]*/g);
- if (needleParts && inkParts) {
-  for (const inkPart of needleParts) {
-   for (const excelPart of inkParts) {
-    if (inkPart === excelPart) return true;
-   }
-  }
- }
+
+ if (target.indexOf(needle) !== -1) return true;
+ if (needle.indexOf(target) !== -1) return true;
  return false;
 }
 
@@ -1545,25 +1557,7 @@ async function getInkInformation(inkName, profileName, inkExceptionProfileCode) 
    const rowData = data[row];
    if (rowData && rowData[inkColorColIndex]) {
     const excelInkColor = String(rowData[inkColorColIndex]).trim().toUpperCase();
-    let inkColorMatches = false;
-
-    if (inkNameUpper.includes(excelInkColor) || excelInkColor.includes(inkNameUpper)) {
-     inkColorMatches = true;
-    } else {
-     const inkNameParts = inkNameUpper.match(/\d+[A-Z]*/g);
-     const excelParts = excelInkColor.match(/\d+[A-Z]*/g);
-     if (inkNameParts && excelParts) {
-      for (const inkPart of inkNameParts) {
-       for (const excelPart of excelParts) {
-        if (inkPart === excelPart) {
-         inkColorMatches = true;
-         break;
-        }
-       }
-       if (inkColorMatches) break;
-      }
-     }
-    }
+    const inkColorMatches = inkExceptionNameMatchesInk(inkNameUpper, excelInkColor);
 
     if (inkColorMatches) {
      if (profileNameUpper && profileColIndex !== -1) {

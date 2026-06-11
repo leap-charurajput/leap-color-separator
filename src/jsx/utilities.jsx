@@ -115,6 +115,205 @@ function duplicateItemToLayer(item, targetLayer, copiedItems) {
  return newItem;
 }
 
+/** Show SIZED_ART / SIZED_GRAPHICS and unlock so graphic art can be selected for splitColors / underbase. */
+function showSizedLayersForProcessing(doc) {
+ if (!doc) return;
+ try {
+  var sizedArt = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_ART);
+  var layerStack = [sizedArt];
+  var layerCount = 0;
+  var maxLayers = 64;
+  while (layerStack.length > 0 && layerCount < maxLayers) {
+   var lyr = layerStack.pop();
+   layerCount++;
+   try {
+    lyr.visible = true;
+    lyr.locked = false;
+   } catch (e0) { }
+   try {
+    if (lyr.layers && lyr.layers.length > 0) {
+     for (var i = 0; i < lyr.layers.length; i++) {
+      layerStack.push(lyr.layers[i]);
+     }
+    }
+   } catch (e1) { }
+  }
+ } catch (e) { }
+}
+
+/** Unlock item + ancestor groups/layers only. */
+function unlockPageItemForProcessing(item) {
+ if (!item) return;
+ var maxDepth = 64;
+ var depth = 0;
+ var current = item;
+ while (current && depth < maxDepth) {
+  try {
+   if (current.locked) current.locked = false;
+   if (current.hidden) current.hidden = false;
+  } catch (e0) { }
+  try {
+   if (current.parent && current.parent.typename === "GroupItem") {
+    current = current.parent;
+    depth++;
+   } else {
+    break;
+   }
+  } catch (e1) {
+   break;
+  }
+ }
+ try {
+  if (item.layer) {
+   var layer = item.layer;
+   depth = 0;
+   while (layer && depth < maxDepth) {
+    layer.locked = false;
+    layer.visible = true;
+    if (layer.parent && layer.parent.typename === "Layer") {
+     layer = layer.parent;
+     depth++;
+    } else {
+     break;
+    }
+   }
+  }
+ } catch (e2) { }
+}
+
+/** Iterative (stack) unlock of item + all descendants — required before group.selected = true. */
+function unlockPageItemTreeForProcessing(rootItem) {
+ if (!rootItem) return;
+ var stack = [rootItem];
+ var count = 0;
+ var maxItems = 100000;
+ while (stack.length > 0 && count < maxItems) {
+  var node = stack.pop();
+  count++;
+  try {
+   if (node.locked) node.locked = false;
+   if (node.hidden) node.hidden = false;
+  } catch (e0) { }
+  try {
+   if (node.typename === "GroupItem" && node.pageItems && node.pageItems.length > 0) {
+    for (var i = node.pageItems.length - 1; i >= 0; i--) {
+     stack.push(node.pageItems[i]);
+    }
+   }
+  } catch (e1) { }
+  try {
+   if (node.typename === "CompoundPathItem" && node.pathItems && node.pathItems.length > 0) {
+    for (var p = node.pathItems.length - 1; p >= 0; p--) {
+     stack.push(node.pathItems[p]);
+    }
+   }
+  } catch (e2) { }
+ }
+}
+
+function unlockLayerContentsForSelection(layer) {
+ if (!layer) return;
+ var maxDepth = 64;
+ var depth = 0;
+ var current = layer;
+ while (current && depth < maxDepth) {
+  try {
+   current.locked = false;
+   current.visible = true;
+  } catch (e0) { }
+  try {
+   if (current.parent && current.parent.typename === "Layer") {
+    current = current.parent;
+    depth++;
+   } else {
+    break;
+   }
+  } catch (e1) {
+   break;
+  }
+ }
+ try {
+  if (layer.pageItems && layer.pageItems.length > 0) {
+   for (var i = 0; i < layer.pageItems.length; i++) {
+    unlockPageItemTreeForProcessing(layer.pageItems[i]);
+   }
+  }
+ } catch (e2) { }
+}
+
+function unlockAllLayersInDocument(doc) {
+ if (!doc || !doc.layers) return;
+ var layerStack = [];
+ try {
+  for (var i = 0; i < doc.layers.length; i++) {
+   layerStack.push(doc.layers[i]);
+  }
+ } catch (e0) { }
+ var layerCount = 0;
+ var maxLayers = 500;
+ while (layerStack.length > 0 && layerCount < maxLayers) {
+  var lyr = layerStack.pop();
+  layerCount++;
+  try {
+   lyr.visible = true;
+   lyr.locked = false;
+  } catch (e1) { }
+  try {
+   if (lyr.layers && lyr.layers.length > 0) {
+    for (var j = 0; j < lyr.layers.length; j++) {
+     layerStack.push(lyr.layers[j]);
+    }
+   }
+  } catch (e2) { }
+ }
+}
+
+/** Show/unlock SIZED_ART subtree and every page item inside SIZED_GRAPHICS. */
+function unlockSizedGraphicsContents(doc) {
+ showSizedLayersForProcessing(doc);
+ if (!doc) return;
+ try {
+  var sizedArt = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_ART);
+  var sizedGraphics = sizedArt.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_GRAPHICS);
+  if (sizedGraphics.pageItems && sizedGraphics.pageItems.length > 0) {
+   for (var i = 0; i < sizedGraphics.pageItems.length; i++) {
+    unlockPageItemTreeForProcessing(sizedGraphics.pageItems[i]);
+   }
+  }
+ } catch (e) { }
+}
+
+function prepareSizedArtGraphicForProcessing(doc, graphicItem) {
+ unlockSizedGraphicsContents(doc);
+ if (graphicItem) {
+  unlockPageItemForProcessing(graphicItem);
+  unlockPageItemTreeForProcessing(graphicItem);
+ }
+}
+
+/** Choke / Blocker are not PG ink rows — exclude from [C#] ink count. */
+function isNonInkSeparationLayerName(layerName) {
+ if (!layerName) return true;
+ var n = String(layerName).replace(/^\s+|\s+$/g, "");
+ var up = n.toUpperCase();
+ if (up === String(CONSTANTS.LAYER_NAMES.CHOKE).toUpperCase()) return true;
+ if (up === String(CONSTANTS.LAYER_NAMES.BLOCKER).toUpperCase()) return true;
+ if (/^BLOCKER(\s+\d+)?$/i.test(n)) return true;
+ return false;
+}
+
+/** Count PG ink rows (matches SEP TABLE row count, not raw SEPARATED_ART sublayer count). */
+function countPgInkColorsFromLayerNames(layerNames) {
+ if (!layerNames || !layerNames.length) return 0;
+ var count = 0;
+ for (var i = 0; i < layerNames.length; i++) {
+  if (!isNonInkSeparationLayerName(layerNames[i])) {
+   count++;
+  }
+ }
+ return count;
+}
+
 function expandObject() {
  try {
   app.executeMenuCommand('outline');
@@ -897,7 +1096,7 @@ function formatSeparationDate(isoStr) {
 }
 
 // Read the graphic position lookup JSON from the configured server base path.
-// Expected location: <ServerBasePath>/SETTINGS/LEAP_SEPS/Data/graphic_positions.json
+// Expected location: <ServerBasePath>/SETTINGS/graphic_positions.json
 // Expected shape: [{ "ABBV": "FT", "DESC": "FRONT" }, ...]
 function loadGraphicPositionLookup() {
  try {
@@ -905,7 +1104,7 @@ function loadGraphicPositionLookup() {
   var serverBasePath = getServerBasePath();
   if (!serverBasePath) return [];
   var normalizedBasePath = String(serverBasePath).replace(/\/$/, "");
-  var lookupPath = normalizedBasePath + "/SETTINGS/LEAP_SEPS/Data/graphic_positions.json";
+  var lookupPath = normalizedBasePath + "/SETTINGS/graphic_positions.json";
   var lookupFile = new File(lookupPath);
   if (!lookupFile.exists) return [];
   if (!lookupFile.open("r")) return [];
@@ -922,6 +1121,41 @@ function loadGraphicPositionLookup() {
  } catch (e) {
   return [];
  }
+}
+
+function normalizeInkMatchString(value) {
+ if (value == null) return "";
+ return String(value).replace(/^\s+|\s+$/g, "").toUpperCase();
+}
+
+function escapeRegExpForInkMatch(str) {
+ return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Match ink exception Ink_Color (e.g. "123") to a plate/ink name (e.g. "PANTONE 123 C").
+ * Numeric Pantone codes must match the full number token — "123" must not match "1235".
+ */
+function inkExceptionNameMatchesName(exceptionInk, targetName) {
+ var needle = normalizeInkMatchString(exceptionInk);
+ var target = normalizeInkMatchString(targetName);
+ if (!needle || !target) return false;
+ if (target === needle) return true;
+
+ var numericNeedle = needle.replace(/\s+/g, "");
+ if (/^\d+[A-Z]?$/.test(numericNeedle)) {
+  var pantoneRe = new RegExp(
+   "PANTONE\\s+" + escapeRegExpForInkMatch(numericNeedle) + "(?:\\s|$)",
+   "i"
+  );
+  if (pantoneRe.test(target)) return true;
+  if (target === numericNeedle) return true;
+  return false;
+ }
+
+ if (target.indexOf(needle) !== -1) return true;
+ if (needle.indexOf(target) !== -1) return true;
+ return false;
 }
 
 // Read/write profile ink exceptions JSON from the configured server base path.
@@ -1009,6 +1243,214 @@ function getGraphicPositionAbbreviation(positionDesc) {
  return original;
 }
 
+function formatSeparationVersionLabel(versionNumber) {
+ var n = parseInt(versionNumber, 10);
+ if (isNaN(n) || n < 1) {
+  n = 1;
+ }
+ return "V" + n;
+}
+
+function separationProfileNameFromEntry(entry) {
+ if (entry && entry.profileMetadata && entry.profileMetadata.profileName) {
+  return String(entry.profileMetadata.profileName);
+ }
+ return "";
+}
+
+function findSeparationEntryIndex(separations, graphicName, profileName) {
+ if (!separations || !separations.length || !graphicName) {
+  return -1;
+ }
+ var graphicKey = String(graphicName);
+ var profileKey = profileName != null ? String(profileName) : "";
+ for (var i = 0; i < separations.length; i++) {
+  var entry = separations[i];
+  if (!entry || String(entry.graphicName) !== graphicKey) {
+   continue;
+  }
+  var entryProfile = separationProfileNameFromEntry(entry);
+  if (profileKey && entryProfile) {
+   if (entryProfile === profileKey) {
+    return i;
+   }
+  } else if (!profileKey && !entryProfile) {
+   return i;
+  }
+ }
+ return -1;
+}
+
+function getStoredSeparationVersionFromEntry(entry) {
+ if (!entry) {
+  return 0;
+ }
+ var fromMeta = entry.profileMetadata && entry.profileMetadata.separationVersion != null
+  ? parseInt(entry.profileMetadata.separationVersion, 10)
+  : NaN;
+ if (!isNaN(fromMeta) && fromMeta > 0) {
+  return fromMeta;
+ }
+ var fromEntry = entry.separationVersion != null ? parseInt(entry.separationVersion, 10) : NaN;
+ if (!isNaN(fromEntry) && fromEntry > 0) {
+  return fromEntry;
+ }
+ return 0;
+}
+
+function loadSeparationsFromVersionDoc(versionDoc) {
+ var separations = [];
+ if (!versionDoc) {
+  return separations;
+ }
+ try {
+  var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", versionDoc);
+  if (xmp.isXmpCreated && xmp.doesStructFieldExist("LEAPSeparationProfileData")) {
+   var existing = xmp.getStructField("LEAPSeparationProfileData", true);
+   if (existing instanceof Array) {
+    separations = existing;
+   }
+  }
+ } catch (e) { }
+ return separations;
+}
+
+function persistSeparationVersionOnVersionDoc(versionDoc, graphicName, profileName, versionNumber) {
+ if (!versionDoc || !graphicName || versionNumber == null) {
+  return false;
+ }
+ var version = parseInt(versionNumber, 10);
+ if (isNaN(version) || version < 1) {
+  return false;
+ }
+ try {
+  var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", versionDoc);
+  if (!xmp.isXmpCreated) {
+   return false;
+  }
+  var separations = loadSeparationsFromVersionDoc(versionDoc);
+  var idx = findSeparationEntryIndex(separations, graphicName, profileName);
+  if (idx < 0) {
+   separations.push({
+    graphicName: String(graphicName),
+    profileMetadata: {
+     profileName: profileName != null ? String(profileName) : "",
+     separationVersion: version
+    },
+    separatedDocumentPath: "",
+    separationVersion: version
+   });
+  } else {
+   var entry = separations[idx];
+   if (!entry.profileMetadata || typeof entry.profileMetadata !== "object") {
+    entry.profileMetadata = {};
+   }
+   entry.profileMetadata.separationVersion = version;
+   entry.separationVersion = version;
+   separations[idx] = entry;
+  }
+  xmp.setStructField("LEAPSeparationProfileData", separations, true, false);
+  xmp.commit();
+  if (versionDoc.fullName && versionDoc.fullName.fsName) {
+   try {
+    versionDoc.save();
+   } catch (saveErr) { }
+  }
+  return true;
+ } catch (e) {
+  return false;
+ }
+}
+
+function getNextSeparationVersion(versionDoc, graphicName, profileName) {
+ var separations = loadSeparationsFromVersionDoc(versionDoc);
+ var idx = findSeparationEntryIndex(separations, graphicName, profileName);
+ if (idx < 0) {
+  return 1;
+ }
+ return getStoredSeparationVersionFromEntry(separations[idx]) + 1;
+}
+
+function bumpSeparationVersionOnVersionDoc(versionDoc, graphicName, profileName) {
+ var nextVersion = getNextSeparationVersion(versionDoc, graphicName, profileName);
+ persistSeparationVersionOnVersionDoc(versionDoc, graphicName, profileName, nextVersion);
+ return nextVersion;
+}
+
+/** Find an open team version document (01 TEAMOUTS, not a separation file). */
+function findOpenVersionDocument() {
+ var versionDoc = null;
+ try {
+  if (app.documents.length > 0) {
+   var activeDoc = app.activeDocument;
+   if (activeDoc && activeDoc.fullName && activeDoc.fullName.fsName) {
+    var activeDocPath = activeDoc.fullName.fsName;
+    var isSeparatedDoc = activeDocPath.indexOf("09 SEPARATIONS") !== -1;
+    var isVersionDoc = activeDocPath.indexOf("01 TEAMOUTS") !== -1 && !isSeparatedDoc;
+    if (isVersionDoc) {
+     versionDoc = activeDoc;
+    }
+   }
+  }
+  if (!versionDoc) {
+   for (var d = 0; d < app.documents.length; d++) {
+    var doc = app.documents[d];
+    if (!doc || !doc.fullName || !doc.fullName.fsName) {
+     continue;
+    }
+    var docPath = doc.fullName.fsName;
+    var isSeparatedDoc2 = docPath.indexOf("09 SEPARATIONS") !== -1;
+    var isVersionDoc2 = docPath.indexOf("01 TEAMOUTS") !== -1 && !isSeparatedDoc2;
+    if (isVersionDoc2) {
+     versionDoc = doc;
+     break;
+    }
+   }
+  }
+ } catch (e) { }
+ return versionDoc;
+}
+
+/** Update [C#] (ink count) and/or [V#] (separation version label) in all document text frames. */
+function updateSeparationPageVariables(doc, colorCount, separationVersion) {
+ if (!doc || !doc.textFrames) {
+  return;
+ }
+ var hasColor = colorCount !== null && colorCount !== undefined && colorCount !== "";
+ var hasVersion = separationVersion !== null && separationVersion !== undefined && separationVersion !== "";
+ if (!hasColor && !hasVersion) {
+  return;
+ }
+ try {
+  for (var i = 0; i < doc.textFrames.length; i++) {
+   var textFrame = doc.textFrames[i];
+   var content = textFrame.contents;
+   var updatedContent = content;
+   var regex = /\[([^\]]+)\]/g;
+   var match;
+   while ((match = regex.exec(content)) !== null) {
+    var variableName = String(match[1] || "");
+    var fullMatch = match[0];
+    var key = variableName.toLowerCase().replace(/\s/g, "_");
+    var value = null;
+    if (hasColor && (key === "c#" || variableName === "C#")) {
+     value = String(colorCount);
+    } else if (hasVersion && (key === "v#" || variableName === "V#")) {
+     value = formatSeparationVersionLabel(separationVersion);
+    }
+    if (value !== null && value !== undefined) {
+     updatedContent = updatedContent.split(fullMatch).join(value);
+    }
+   }
+   if (updatedContent !== content) {
+    textFrame.contents = updatedContent;
+   }
+  }
+ } catch (e) {
+  $.writeln("Error updating separation page variables: " + e.message);
+ }
+}
+
 // Update variables in document ([ARTIST], [Artist Initials], [POS], [DATE], [STYLE_CODE], jsonData keys; optional profileMetadata.batchVariableSource from BATCH .xlsx after JSON)
 function updateVariablesInDocument(doc, jsonData, styleCodes, profileMetadata) {
  try {
@@ -1044,6 +1486,14 @@ function updateVariablesInDocument(doc, jsonData, styleCodes, profileMetadata) {
      value = rawPosition ? getGraphicPositionAbbreviation(rawPosition) : '';
     } else if (key === 'date') {
      value = formatSeparationDate(meta.createdDate || '');
+    } else if (key === 'c#') {
+     if (meta.separationColorCount != null && meta.separationColorCount !== '') {
+      value = String(meta.separationColorCount);
+     }
+    } else if (key === 'v#') {
+     if (meta.separationVersion != null && meta.separationVersion !== '') {
+      value = formatSeparationVersionLabel(meta.separationVersion);
+     }
     } else {
      value = findValueInJSON(jsonData, variableName);
     }

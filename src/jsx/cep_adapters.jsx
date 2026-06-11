@@ -259,20 +259,6 @@ function hideSizedGraphicsSublayer(doc) {
  } catch (e) {}
 }
 
-function showSizedLayersForProcessing(doc) {
- if (!doc) return;
- try {
-  var sizedArt = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_ART);
-  sizedArt.visible = true;
-  sizedArt.locked = false;
-  try {
-   var sizedGraphics = sizedArt.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_GRAPHICS);
-   sizedGraphics.visible = true;
-   sizedGraphics.locked = false;
-  } catch (sgErr) {}
- } catch (e) {}
-}
-
 function findPageItemByName(container, itemName) {
  if (!container || !itemName) {
   return null;
@@ -422,7 +408,19 @@ function placeAndEmbedGraphicAI(sepDoc, graphicAIPath, graphicName) {
   var sepArtBounds = sepArtGuide.geometricBounds;
 
   var graphicDoc = app.open(aiFile);
-  graphicDoc.selectObjectsOnActiveArtboard();
+  unlockAllLayersInDocument(graphicDoc);
+  try {
+   graphicDoc.selectObjectsOnActiveArtboard();
+  } catch (selectErr) {
+   appendLeapSepLog(
+    "selectObjectsOnActiveArtboard failed, retrying after unlock: " +
+    (selectErr.message || selectErr)
+   );
+   unlockAllLayersInDocument(graphicDoc);
+   try {
+    graphicDoc.selectObjectsOnActiveArtboard();
+   } catch (selectErr2) { }
+  }
 
   if (graphicDoc.selection.length === 0) {
    $.writeln("No artwork found in graphics file");
@@ -450,6 +448,7 @@ function placeAndEmbedGraphicAI(sepDoc, graphicAIPath, graphicName) {
    var moveX = targetCenterX - currentCenterX;
    var moveY = targetTop - currentBounds[1];
    pastedGroup.translate(moveX, moveY);
+   prepareSizedArtGraphicForProcessing(sepDoc, pastedGroup);
    // Graphic placed per SEP_ART bounds: set overprint on all paths
    setFillOverprintOnContainer(pastedGroup, false);
   }
@@ -461,11 +460,42 @@ function placeAndEmbedGraphicAI(sepDoc, graphicAIPath, graphicName) {
   return false;
  }
 }
-function placeGraphicInDocument(doc, graphicPNGPath) {
+function deriveGraphicAiPathFromPngPath(pngPath) {
+ if (!pngPath) return "";
+ return String(pngPath).replace(/\/PNG\//i, "/AI/").replace(/\.png$/i, ".ai");
+}
+
+/** PNG/fileName first; if missing, use AI/fileName (same base name). */
+function resolveGraphicPlaceholderFile(pngPath, aiPath) {
+ var candidates = [];
+ var seen = {};
+ function addCandidate(pathValue) {
+  if (!pathValue) return;
+  var key = String(pathValue).toUpperCase();
+  if (seen[key]) return;
+  seen[key] = true;
+  candidates.push(pathValue);
+ }
+ addCandidate(pngPath);
+ addCandidate(deriveGraphicAiPathFromPngPath(pngPath));
+ addCandidate(aiPath);
+ for (var i = 0; i < candidates.length; i++) {
+  var candidateFile = new File(candidates[i]);
+  if (candidateFile.exists) return candidateFile;
+ }
+ return null;
+}
+
+function placeGraphicInDocument(doc, graphicPngPath, graphicAiPath) {
  try {
-  var pngFile = new File(graphicPNGPath);
-  if (!pngFile.exists) {
-   $.writeln("PNG file not found: " + graphicPNGPath);
+  var placeFile = resolveGraphicPlaceholderFile(graphicPngPath, graphicAiPath);
+  if (!placeFile) {
+   $.writeln(
+    "Graphic file not found for [GRAPHIC] placement. PNG: " +
+    graphicPngPath +
+    " AI: " +
+    graphicAiPath
+   );
    return false;
   }
 
@@ -499,7 +529,7 @@ function placeGraphicInDocument(doc, graphicPNGPath) {
    var pathItem = graphicItems[i];
    var bounds = pathItem.geometricBounds;
    var placedItem = sizedArtLayer.placedItems.add();
-   placedItem.file = pngFile;
+   placedItem.file = placeFile;
    var boundsWidth = bounds[2] - bounds[0];
    var boundsHeight = bounds[1] - bounds[3];
    var originalWidth = placedItem.width;
@@ -873,22 +903,7 @@ function getSeparatedArtLayerNames(doc) {
 
 /** Match ink exception Ink_Color (e.g. "123") to a SEPARATED_ART plate name (e.g. "PANTONE 123 C"). */
 function inkExceptionNameMatchesLayerName(exceptionInk, layerName) {
- var needle = exceptionInk != null ? String(exceptionInk).replace(/^\s+|\s+$/g, "").toUpperCase() : "";
- var layerUpper = layerName != null ? String(layerName).replace(/^\s+|\s+$/g, "").toUpperCase() : "";
- if (!needle || !layerUpper) return false;
- if (layerUpper === needle || layerUpper.indexOf(needle) !== -1 || needle.indexOf(layerUpper) !== -1) {
-  return true;
- }
- var needleParts = needle.match(/\d+[A-Z]*/g);
- var layerParts = layerUpper.match(/\d+[A-Z]*/g);
- if (needleParts && layerParts) {
-  for (var p = 0; p < needleParts.length; p++) {
-   for (var q = 0; q < layerParts.length; q++) {
-    if (needleParts[p] === layerParts[q]) return true;
-   }
-  }
- }
- return false;
+ return inkExceptionNameMatchesName(exceptionInk, layerName);
 }
 
 /** Duplicate a color plate layer for second hit (not UB stack placement). */
@@ -1559,6 +1574,17 @@ function handlePerformSeparation(params_string) {
   }
   var originalDoc = activeDoc;
   var originalDocFile = docFile;
+  if (!profileMetadata) {
+   profileMetadata = {};
+  }
+  var profileNameForVersion = profileMetadata.profileName != null
+   ? String(profileMetadata.profileName)
+   : "";
+  var nextSeparationVersion = getNextSeparationVersion(activeDoc, graphicName, profileNameForVersion);
+  profileMetadata.separationVersion = nextSeparationVersion;
+  appendLeapSepLog(
+   "Separation version for this run: " + formatSeparationVersionLabel(nextSeparationVersion)
+  );
   // Try BodyColor from active document XMP first (match React getBodyColor)
   var bodyColorFromXMP = null;
   try {
@@ -1639,7 +1665,8 @@ function handlePerformSeparation(params_string) {
    });
   }
 
-  var pngPlaced = pngFilePath ? placeGraphicInDocument(sepDoc, pngFilePath) : false;
+  unlockSizedGraphicsContents(sepDoc);
+  var pngPlaced = placeGraphicInDocument(sepDoc, pngFilePath, aiFilePath);
   var aiPlaced = placeAndEmbedGraphicAI(sepDoc, aiFilePath, graphicName);
   if (!aiPlaced) {
    try {
@@ -1728,6 +1755,27 @@ function handlePerformSeparation(params_string) {
 
   appendLeapSepLog("Separation OK, plates: " + layerNames.join(", "));
 
+  var inkColorCount = countPgInkColorsFromLayerNames(layerNames);
+  if (profileMetadata) {
+   profileMetadata.separationColorCount = inkColorCount;
+  }
+  try {
+   var sepXmpMeta = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", sepDoc);
+   if (sepXmpMeta.isXmpCreated && profileMetadata) {
+    sepXmpMeta.setStructField("SeparationProfileMetadata", profileMetadata, true, false);
+    sepXmpMeta.commit();
+   }
+  } catch (metaErr) {
+   appendLeapSepLog("SeparationProfileMetadata C# update error: " + (metaErr.message || metaErr));
+  }
+
+  try {
+   updateSeparationPageVariables(sepDoc, inkColorCount, profileMetadata.separationVersion);
+   sepDoc.save();
+  } catch (cvErr) {
+   appendLeapSepLog("C#/V# page variable update error: " + (cvErr.message || cvErr));
+  }
+
   var savePathsDebug = [];
   try {
    $.sleep(100);
@@ -1785,7 +1833,10 @@ function handlePerformSeparation(params_string) {
       var separationEntry = {
        graphicName: graphicName,
        profileMetadata: profileMetadata || null,
-       separatedDocumentPath: sepDocPath
+       separatedDocumentPath: sepDocPath,
+       separationVersion: profileMetadata && profileMetadata.separationVersion != null
+        ? profileMetadata.separationVersion
+        : nextSeparationVersion
       };
       savePathsDebug.push("Saving separation entry - graphic: " + graphicName + ", path: " + sepDocPath);
       if (existingIndex >= 0) {
@@ -1864,7 +1915,7 @@ function handleRecreatePlatesInActiveDocument(params_string) {
    });
   }
   var doc = app.activeDocument;
-  showSizedLayersForProcessing(doc);
+  unlockSizedGraphicsContents(doc);
   loadLEAPColorSepsActions();
   var profileMetadata = params.profileMetadata || null;
   if (!profileMetadata) {
@@ -1906,17 +1957,57 @@ function handleRecreatePlatesInActiveDocument(params_string) {
   hideSizedGraphicsSublayer(doc);
   unloadLEAPColorSepsActions();
 
+  var layerNames = [];
   try {
-   var layerNames = getSeparatedArtLayerNames(doc);
+   layerNames = getSeparatedArtLayerNames(doc);
    if (layerNames.length > 0) {
     var sepXmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
     if (sepXmp.isXmpCreated) {
      sepXmp.setStructField("SeparatedLayerNames", layerNames, true, false);
      sepXmp.commit();
-     doc.save();
     }
    }
   } catch (e) {
+  }
+
+  try {
+   if (!profileMetadata) {
+    profileMetadata = {};
+   }
+   var inkColorCountRecreate = countPgInkColorsFromLayerNames(layerNames);
+   profileMetadata.separationColorCount = inkColorCountRecreate;
+   var profileNameRecreate = profileMetadata.profileName != null
+    ? String(profileMetadata.profileName)
+    : "";
+   var versionDocRecreate = findOpenVersionDocument();
+   if (versionDocRecreate) {
+    var bumpedVersion = bumpSeparationVersionOnVersionDoc(
+     versionDocRecreate,
+     graphicName,
+     profileNameRecreate
+    );
+    profileMetadata.separationVersion = bumpedVersion;
+    appendLeapSepLog(
+     "Recreate bumped separation version: " + formatSeparationVersionLabel(bumpedVersion)
+    );
+   }
+   try {
+    var xmpRecreate = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
+    if (xmpRecreate.isXmpCreated) {
+     xmpRecreate.setStructField("SeparationProfileMetadata", profileMetadata, true, false);
+     xmpRecreate.commit();
+    }
+   } catch (xmpRecErr) { }
+   updateSeparationPageVariables(
+    doc,
+    inkColorCountRecreate,
+    profileMetadata.separationVersion
+   );
+   try {
+    doc.save();
+   } catch (saveRecErr) { }
+  } catch (versionBumpErr) {
+   appendLeapSepLog("Recreate version bump error: " + (versionBumpErr.message || versionBumpErr));
   }
 
   return JSON.stringify({
@@ -2826,6 +2917,12 @@ function handleUpdateSepTable(params_string) {
   var gridLabelResult = updateGridColorLabels(doc, separationData);
   if (gridLabelResult.errors.length > 0) {
    errors = errors.concat(gridLabelResult.errors);
+  }
+
+  try {
+   updateSeparationPageVariables(doc, separationData.length, null);
+  } catch (cvPageErr) {
+   errors.push("C# page variable update error: " + cvPageErr.message);
   }
 
   // ===== SAVE SEPARATION COLORS DATA TO XMP =====

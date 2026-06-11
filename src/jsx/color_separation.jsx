@@ -24,11 +24,17 @@ function splitColors(_graphicName, cleanupOpts) {
 				"Graphic \"" + _graphicName + "\" not found in SIZED_GRAPHICS (place graphic AI first)"
 			);
 		}
+		prepareSizedArtGraphicForProcessing(app.activeDocument, _graphicItem);
 		_graphicItem.selected = true;
 		app.redraw();
 		app.executeMenuCommand('copy');
 		app.executeMenuCommand('pasteInPlace');
 		app.redraw();
+		if (app.selection && app.selection.length > 0) {
+			for (var selIdx = 0; selIdx < app.selection.length; selIdx++) {
+				unlockPageItemTreeForProcessing(app.selection[selIdx]);
+			}
+		}
 		expandObject();
 		app.executeMenuCommand('group');
 		pathFinderDivide();
@@ -56,6 +62,7 @@ function splitColors(_graphicName, cleanupOpts) {
 
 
 				app.selection = null;
+				unlockLayerContentsForSelection(colorSubLayer);
 				app.activeDocument.activeLayer = colorSubLayer;
 				app.activeDocument.activeLayer.hasSelectedArtwork = true;
 				app.redraw();
@@ -403,6 +410,7 @@ function finalizeUnderbaseLayer(underbaseLayer, runLeftoverUb, swatchName) {
 			? String(swatchName)
 			: CONSTANTS.SWATCH_NAMES.WHITE_UB;
 		app.selection = null;
+		unlockLayerContentsForSelection(underbaseLayer);
 		app.activeDocument.activeLayer = underbaseLayer;
 		app.activeDocument.activeLayer.hasSelectedArtwork = true;
 		app.redraw();
@@ -493,13 +501,27 @@ function generateUnderbase(_graphicName, cleanupOpts, profileMetadata) {
 		var _separatedArtLayer = getOrCreateLayer(app.activeDocument, CONSTANTS.LAYER_NAMES.SEPARATED_ART);
 		var _sizedArtLayer = app.activeDocument.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_ART);
 		var _sizedGraphicLayer = _sizedArtLayer.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_GRAPHICS);
-		var _graphicItem = _sizedGraphicLayer.pageItems.getByName(_graphicName);
+		var _graphicItem = null;
+		try {
+			_graphicItem = _sizedGraphicLayer.pageItems.getByName(_graphicName);
+		} catch (nameErr) {
+			if (_sizedGraphicLayer.pageItems && _sizedGraphicLayer.pageItems.length > 0) {
+				_graphicItem = _sizedGraphicLayer.pageItems[0];
+			}
+		}
+		if (!_graphicItem) {
+			throw new Error(
+				"Graphic \"" + _graphicName + "\" not found in SIZED_GRAPHICS (place graphic AI first)"
+			);
+		}
+		prepareSizedArtGraphicForProcessing(app.activeDocument, _graphicItem);
 
 		var tempWhiteUBLayer = getOrCreateLayer(app.activeDocument, "__TEMP_WHITE_UB", _separatedArtLayer);
 		clearLayerPageItems(tempWhiteUBLayer);
 		duplicateItemToLayer(_graphicItem, tempWhiteUBLayer);
 
 		app.selection = null;
+		unlockLayerContentsForSelection(tempWhiteUBLayer);
 		app.activeDocument.activeLayer = tempWhiteUBLayer;
 		app.activeDocument.activeLayer.hasSelectedArtwork = true;
 		app.redraw();
@@ -604,6 +626,7 @@ function generateChoke(sourceLayer, separatedArtLayer) {
 	}
 	clearLayerPageItems(chokeLayer);
 
+	unlockLayerContentsForSelection(sourceLayer);
 	app.activeDocument.activeLayer = sourceLayer;
 	app.activeDocument.activeLayer.hasSelectedArtwork = true;
 	pathFinderAdd();
@@ -618,6 +641,7 @@ function generateChoke(sourceLayer, separatedArtLayer) {
 
 	app.redraw();
 	app.selection = null;
+	unlockLayerContentsForSelection(chokeLayer);
 	app.activeDocument.activeLayer = chokeLayer;
 	app.activeDocument.activeLayer.hasSelectedArtwork = true;
 	deleteLeftoverPathsInLayer(chokeLayer);
