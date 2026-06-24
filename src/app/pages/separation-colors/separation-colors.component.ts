@@ -59,6 +59,8 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  nextId = 3;
  hasUIChanges = false;
  documentProfileMetadata: any = null;
+ /** Saved LEAPSeparationColorsData rows — merged into layer-based rows for mesh/flash metadata. */
+ private xmpColorDataForMerge: any[] | null = null;
  bodyColorFromDocument: string | null = null;
  bodyColorNameFromDocument: string = '';
 
@@ -352,67 +354,60 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
        this.graphicNameFromPath = data.graphicName || '';
       }
 
-      // Load color rows from XMP if available (priority 1)
-      if (
+      const separatedLayerNames = data.separatedLayerNames;
+      const hasSeparatedLayerNames =
+       separatedLayerNames &&
+       Array.isArray(separatedLayerNames) &&
+       separatedLayerNames.length > 0;
+      const xmpColorData =
        data.leapSeparationColorsData &&
        Array.isArray(data.leapSeparationColorsData) &&
        data.leapSeparationColorsData.length > 0
-      ) {
+        ? data.leapSeparationColorsData
+        : null;
+      this.xmpColorDataForMerge = xmpColorData;
+
+      // SeparatedLayerNames is authoritative for which plates exist (includes ink "… 2" second hits).
+      // LEAPSeparationColorsData may be stale template/SEP TABLE data and must not hide new layers.
+      if (hasSeparatedLayerNames) {
        console.log(
-        '[SEPARATION] Found LEAPSeparationColorsData in XMP:',
-        data.leapSeparationColorsData.length,
+        '[SEPARATION] Loading from SeparatedLayerNames (' +
+         separatedLayerNames.length +
+         ' layers)' +
+         (xmpColorData ? ', merging XMP row metadata' : '')
+       );
+       this.isLoadingSwatches = true;
+       this.loadColorRowsFromSeparatedLayerNames();
+      } else if (xmpColorData) {
+       console.log(
+        '[SEPARATION] Found LEAPSeparationColorsData in XMP (no SeparatedLayerNames):',
+        xmpColorData.length,
         'rows'
        );
        this.isLoadingSwatches = true;
-       // Clear existing rows before loading new data
        this.colorRows = [];
-       const colorRowsFromXMP = this.convertXMPDataToColorRows(data.leapSeparationColorsData);
+       const colorRowsFromXMP = this.convertXMPDataToColorRows(xmpColorData);
        if (colorRowsFromXMP && colorRowsFromXMP.length > 0) {
         this.colorRows = colorRowsFromXMP;
         this.nextId = colorRowsFromXMP.length + 1;
         this.hasUIChanges = false;
         this.isLoadingSwatches = false;
-        this.cdr.detectChanges(); // Force change detection after loading color rows
+        this.cdr.detectChanges();
         console.log(
          '[SEPARATION] Loaded color rows from XMP data on document check:',
          colorRowsFromXMP.length,
          'rows'
         );
-        console.log('[SEPARATION] Color rows array:', this.colorRows);
-        console.log('[SEPARATION] isLoadingSwatches:', this.isLoadingSwatches);
-        console.log('[SEPARATION] isSeparatedDoc:', this.isSeparatedDoc);
-        console.log('[SEPARATION] isLoadingGraphics:', this.isLoadingGraphics);
-        console.log('[SEPARATION] graphicOptions.length:', this.graphicOptions.length);
-        console.log(
-         '[SEPARATION] Should show table?',
-         !this.isLoadingSwatches &&
-         (this.isSeparatedDoc || (!this.isLoadingGraphics && this.graphicOptions.length > 0))
-        );
        } else {
-        console.log(
-         '[SEPARATION] Failed to convert XMP data, will use SeparatedLayerNames + Excel'
-        );
+        console.log('[SEPARATION] Failed to convert XMP color data');
         this.colorRows = [];
         this.isLoadingSwatches = false;
        }
       } else {
-       console.log(
-        '[SEPARATION] No LEAPSeparationColorsData found in XMP, will use SeparatedLayerNames + Excel'
-       );
-       const separatedLayerNames = data.separatedLayerNames;
-       if (
-        separatedLayerNames &&
-        Array.isArray(separatedLayerNames) &&
-        separatedLayerNames.length > 0
-       ) {
-        this.isLoadingSwatches = true;
-        this.loadColorRowsFromSeparatedLayerNames();
-       } else {
-        console.log('[SEPARATION] No SeparatedLayerNames found either, cannot load color data');
-        this.colorRows = [];
-        this.isLoadingSwatches = false;
-        this.cdr.detectChanges();
-       }
+       console.log('[SEPARATION] No SeparatedLayerNames or LEAPSeparationColorsData found');
+       this.colorRows = [];
+       this.isLoadingSwatches = false;
+       this.cdr.detectChanges();
       }
      } else {
       this.isSeparatedDoc = false;
@@ -433,6 +428,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   this.isSeparatedDoc = false;
   this.graphicNameFromPath = '';
   this.documentProfileMetadata = null;
+  this.xmpColorDataForMerge = null;
   this.bodyColorFromDocument = null;
   this.bodyColorNameFromDocument = '';
   this.colorRows = [];
@@ -511,17 +507,19 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
    this.selectedGraphic
   );
   this.isLoadingSwatches = true;
+  let allSwatchesFromDoc: any[] = [];
 
   this.controller
    .getGraphicSwatches(this.selectedGraphic)
    .then((result) => {
     if (result.success && result.swatches && Array.isArray(result.swatches)) {
+     allSwatchesFromDoc = result.swatches;
      console.log(
       '[SEPARATION] Fetched swatches from SeparatedLayerNames:',
-      result.swatches.map((s: any) => s.name)
+      allSwatchesFromDoc.map((s: any) => s.name)
      );
 
-     const validSwatches = this.filterValidSwatches(result.swatches);
+     const validSwatches = this.filterPlatesForUi(allSwatchesFromDoc);
      console.log(
       '[SEPARATION] Valid swatches (exist in document):',
       validSwatches.map((s: any) => s.name)
@@ -584,7 +582,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 
      // Step 4: Convert swatches to color rows with mesh values and profile settings
      let currentId = 1;
-     const newColorRows: ColorRow[] = [];
+     let newColorRows: ColorRow[] = [];
 
      this.graphicSwatches.forEach((swatchData: any, index: number) => {
       const inkInfo = inkResult.inkInfoList[index] || { mesh: '110', twoHits: false, found: false };
@@ -612,7 +610,16 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
       }
      });
 
-     const sortedColorRows = this.sortColorRowsWithWhiteUBAtBottom(newColorRows);
+     const withMissingHits = this.appendMissingSecondHitRowsFromLayers(
+      newColorRows,
+      allSwatchesFromDoc,
+      currentId
+     );
+     newColorRows = withMissingHits.rows;
+     currentId = withMissingHits.nextId;
+
+     const mergedColorRows = this.mergeXmpMetadataIntoColorRows(newColorRows);
+     const sortedColorRows = this.sortColorRowsWithWhiteUBAtBottom(mergedColorRows);
      console.log(
       '[SEPARATION] Color rows loaded from SeparatedLayerNames + Excel:',
       sortedColorRows.length,
@@ -647,14 +654,88 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 
  private filterValidSwatches(swatches: any[]): any[] {
   return swatches.filter((swatch) => {
+   const name = String(swatch?.name || '').trim();
    const hasValidColor = swatch.cmyk !== null || swatch.rgb !== null;
-   if (!hasValidColor) {
-    console.log(
-     `[SEPARATION] Filtering out swatch "${swatch.name}" - not found in document (no CMYK/RGB data)`
-    );
+   if (hasValidColor) {
+    return true;
    }
-   return hasValidColor;
+
+   // Ink second-hit layers (e.g. "PANTONE 125 C 2") must stay visible even when swatch color
+   // cannot be resolved yet — inherit display color from the base ink plate when possible.
+   if (name && this.isInkHitPlateName(name)) {
+    const baseName = name.replace(/\s+\d+$/, '').trim();
+    const baseSwatch = swatches.find(
+     (s) => (s?.name || '').trim().toLowerCase() === baseName.toLowerCase()
+    );
+    if (baseSwatch) {
+     if (baseSwatch.hex) swatch.hex = baseSwatch.hex;
+     if (baseSwatch.cmyk) swatch.cmyk = baseSwatch.cmyk;
+     if (baseSwatch.rgb) swatch.rgb = baseSwatch.rgb;
+    }
+    return true;
+   }
+
+   console.log(
+    `[SEPARATION] Filtering out swatch "${name}" - not found in document (no CMYK/RGB data)`
+   );
+   return false;
   });
+ }
+
+ /** Underbase 2 uses the Graphics-tab swatch layer — no separate "White UB 2" plate. */
+ private shouldHideWhiteUb2Plate(): boolean {
+  return this.getProfileUnderbasePassCount() >= 2;
+ }
+
+ private getUnderbase2SwatchNameFromMetadata(): string {
+  const meta = this.documentProfileMetadata || {};
+  if (meta.underbase2Swatch != null && String(meta.underbase2Swatch).trim() !== '') {
+   return String(meta.underbase2Swatch).trim();
+  }
+  return '';
+ }
+
+ /** Underbase 2 uses the Graphics-tab swatch layer — no separate "White UB 2" plate. */
+ private usesGraphicsUnderbase2Layer(): boolean {
+  return this.shouldHideWhiteUb2Plate();
+ }
+
+ private getProfileUnderbasePassCount(): number {
+  const meta = this.documentProfileMetadata || {};
+  const isEnabled = (value: any): boolean => {
+   if (value === true) return true;
+   if (typeof value === 'string') {
+    const v = value.trim().toUpperCase();
+    return v === 'Y' || v === 'YES' || v === 'TRUE' || v === '1';
+   }
+   return value === 1;
+  };
+  const enabled = Array.isArray(meta.underbaseEnabled) ? meta.underbaseEnabled : [];
+  if (enabled.length > 0) {
+   let count = enabled[0] !== false ? 1 : 0;
+   for (let i = 1; i < Math.min(4, enabled.length); i++) {
+    if (enabled[i] === true) count = i + 1;
+   }
+   return Math.max(1, Math.min(4, count));
+  }
+  const ub4 = isEnabled(meta.underbase4Enabled) || isEnabled(meta.ub4Enabled) || isEnabled(meta.underbase4) || isEnabled(meta['Underbase 4']);
+  const ub3 = isEnabled(meta.underbase3Enabled) || isEnabled(meta.ub3Enabled) || isEnabled(meta.underbase3) || isEnabled(meta['Underbase 3']);
+  const ub2 = isEnabled(meta.underbase2Enabled) || isEnabled(meta.ub2Enabled) || isEnabled(meta.underbase2) || isEnabled(meta['Underbase 2']);
+  if (ub4) return 4;
+  if (ub3) return 3;
+  if (ub2) return 2;
+  return 1;
+ }
+
+ private filterPlatesForUi(swatches: any[]): any[] {
+  let filtered = this.filterValidSwatches(swatches);
+  if (this.shouldHideWhiteUb2Plate()) {
+   filtered = filtered.filter((swatch) => {
+    const name = String(swatch?.name || '').trim().toLowerCase();
+    return name !== 'white ub 2';
+   });
+  }
+  return filtered;
  }
 
  private createColorRowFromSwatch(
@@ -688,9 +769,17 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   const micron = hasProfile ? profileInfo.micron : 'NA';
   const profileColorMesh = this.getProfileColorMesh(profileInfo);
   const profileBlockerMesh = this.getProfileBlockerMesh(profileInfo);
+  const underbaseMeshes = this.getProfileUnderbaseMeshes();
+  const underbase2Swatch = this.getUnderbase2SwatchNameFromMetadata();
   let meshValue = inkInfo.mesh || '110';
   if (isWhiteUBColor) {
    meshValue = inkInfo.mesh || '110';
+  } else if (
+   underbase2Swatch &&
+   String(swatchData.name || '').trim().toLowerCase() === underbase2Swatch.toLowerCase() &&
+   underbaseMeshes[1]
+  ) {
+   meshValue = underbaseMeshes[1];
   } else if (isBlockerColor && profileBlockerMesh !== '') {
    meshValue = profileBlockerMesh;
   } else if (profileColorMesh !== '') {
@@ -865,33 +954,12 @@ private getProfileBlockerMesh(profileInfo?: any): string {
 }
 
  private getRequiredWhiteUbCountFromProfile(): number {
-  const meta = this.documentProfileMetadata || {};
-  const isEnabled = (value: any): boolean => {
-   if (value === true) return true;
-   if (typeof value === 'string') {
-    const v = value.trim().toUpperCase();
-    return v === 'Y' || v === 'YES' || v === 'TRUE' || v === '1';
-   }
-   return value === 1;
-  };
-  const enabled = Array.isArray(meta.underbaseEnabled) ? meta.underbaseEnabled : [];
-
-  if (enabled.length > 0) {
-   let count = enabled[0] !== false ? 1 : 0;
-   for (let i = 1; i < Math.min(4, enabled.length); i++) {
-    if (enabled[i] === true) count = i + 1;
-   }
-   return Math.max(1, Math.min(4, count));
+  const passCount = this.getProfileUnderbasePassCount();
+  // Underbase 2 is represented by the Graphics swatch plate (e.g. PANTONE White C), not "White UB 2".
+  if (this.usesGraphicsUnderbase2Layer() && passCount >= 2) {
+   return passCount - 1;
   }
-
-  const ub4 = isEnabled(meta.underbase4Enabled) || isEnabled(meta.ub4Enabled) || isEnabled(meta.underbase4) || isEnabled(meta['Underbase 4']);
-  const ub3 = isEnabled(meta.underbase3Enabled) || isEnabled(meta.ub3Enabled) || isEnabled(meta.underbase3) || isEnabled(meta['Underbase 3']);
-  const ub2 = isEnabled(meta.underbase2Enabled) || isEnabled(meta.ub2Enabled) || isEnabled(meta.underbase2) || isEnabled(meta['Underbase 2']);
-
-  if (ub4) return 4;
-  if (ub3) return 3;
-  if (ub2) return 2;
-  return 1;
+  return passCount;
  }
 
  private getProfileUnderbaseMeshes(): string[] {
@@ -928,6 +996,9 @@ private getProfileBlockerMesh(profileInfo?: any): string {
    const sourceRow = sortedWhiteRows[i] || whiteTemplate;
    const meshFromProfile = underbaseMeshes[i] || '';
    const rowColorName = i === 0 ? baseWhiteName : `${baseWhiteName} ${i + 1}`;
+   if (rowColorName.trim().toLowerCase() === 'white ub 2' && this.shouldHideWhiteUb2Plate()) {
+    continue;
+   }
    const hexFromDocument = this.getSwatchHexByName(rowColorName);
    expandedWhiteRows.push({
     ...sourceRow,
@@ -1877,6 +1948,92 @@ private getProfileBlockerMesh(profileInfo?: any): string {
   return swatches.some(
    (s) => (s.name || '').trim().toLowerCase() === secondHitName.toLowerCase()
   );
+ }
+
+ /** Merge mesh/flash/cool/wb from saved LEAPSeparationColorsData into layer-based rows. */
+ private mergeXmpMetadataIntoColorRows(rows: ColorRow[]): ColorRow[] {
+  const xmpData = this.xmpColorDataForMerge;
+  if (!xmpData || xmpData.length === 0) {
+   return rows;
+  }
+
+  const lookup = new Map<string, any>();
+  for (const entry of xmpData) {
+   if (!entry) continue;
+   const names = [entry.colorName, entry.swatchName].filter(
+    (n) => n != null && String(n).trim() !== ''
+   );
+   for (const n of names) {
+    lookup.set(String(n).trim().toLowerCase(), entry);
+   }
+  }
+
+  return rows.map((row) => {
+   const hostKey = this.hostLayerName(row).trim().toLowerCase();
+   const colorKey = (row.colorName || '').trim().toLowerCase();
+   const xmp = lookup.get(hostKey) || lookup.get(colorKey);
+   if (!xmp) {
+    return row;
+   }
+   const sw =
+    xmp.swatchName && String(xmp.swatchName).trim() !== '' &&
+    String(xmp.swatchName).trim().toLowerCase() !== colorKey
+     ? String(xmp.swatchName).trim()
+     : row.swatchName;
+   return {
+    ...row,
+    mesh: xmp.mesh != null ? String(xmp.mesh) : row.mesh,
+    micron: xmp.micron != null ? String(xmp.micron) : row.micron,
+    flashEnabled: xmp.flash !== undefined ? !!xmp.flash : row.flashEnabled,
+    coolEnabled: xmp.cool !== undefined ? !!xmp.cool : row.coolEnabled,
+    wbEnabled: xmp.wb !== undefined ? !!xmp.wb : row.wbEnabled,
+    layerColor: xmp.hex || row.layerColor,
+    swatchName: sw,
+    type: xmp.type === 'compound' ? 'compound' : row.type
+   };
+  });
+ }
+
+ /** Ensure ink "… 2" layers from the document appear even if earlier steps skipped them. */
+ private appendMissingSecondHitRowsFromLayers(
+  rows: ColorRow[],
+  allSwatches: any[],
+  startId: number
+ ): { rows: ColorRow[]; nextId: number } {
+  let nextId = startId;
+  const existing = new Set(rows.map((r) => (r.colorName || '').trim().toLowerCase()));
+  const merged = [...rows];
+
+  for (const swatch of allSwatches) {
+   const layerName = (swatch?.name || '').trim();
+   if (!layerName || !this.isInkHitPlateName(layerName)) {
+    continue;
+   }
+   const key = layerName.toLowerCase();
+   if (existing.has(key)) {
+    continue;
+   }
+
+   const baseName = layerName.replace(/\s+\d+$/, '').trim();
+   const baseRow = rows.find(
+    (r) => (r.colorName || '').trim().toLowerCase() === baseName.toLowerCase()
+   );
+   merged.push({
+    id: nextId++,
+    colorName: layerName,
+    mesh: baseRow?.mesh || '110',
+    micron: baseRow?.micron || 'NA',
+    type: 'separation',
+    layerColor: swatch.hex || baseRow?.layerColor || this.getRandomColor(),
+    flashEnabled: baseRow?.flashEnabled ?? true,
+    coolEnabled: baseRow?.coolEnabled ?? false,
+    wbEnabled: baseRow?.wbEnabled ?? true,
+    removed: false
+   });
+   existing.add(key);
+  }
+
+  return { rows: merged, nextId };
  }
 
  private resolveColorDisplayName(swatchName: string, format: string): string {

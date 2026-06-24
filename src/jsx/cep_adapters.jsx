@@ -906,33 +906,178 @@ function inkExceptionNameMatchesLayerName(exceptionInk, layerName) {
  return inkExceptionNameMatchesName(exceptionInk, layerName);
 }
 
+/** True for ink plate second-hit layers like "PANTONE 123 C 2" (not White UB 2). */
+function isInkSecondHitPlateLayerName(name) {
+ var n = String(name || "");
+ if (!/\s2$/i.test(n)) return false;
+ if (isWhiteUbLayerName(n)) return false;
+ if (n === CONSTANTS.LAYER_NAMES.CHOKE) return false;
+ if (n === CONSTANTS.LAYER_NAMES.BLOCKER) return false;
+ return true;
+}
+
+/** Resolve the document swatch name used by a plate layer's artwork. */
+function resolveSourceSwatchNameForPlateLayer(sourceLayer) {
+ if (!sourceLayer) return "";
+ var fillColor = getFirstFillColorFromContainer(sourceLayer);
+ if (fillColor) {
+  var nameFromFill = getColorName(fillColor);
+  if (nameFromFill && nameFromFill.indexOf(CONSTANTS.COLOR_PREFIXES.UNKNOWN) !== 0) {
+   return nameFromFill;
+  }
+ }
+ return String(sourceLayer.name);
+}
+
+/** Select all art on a layer and apply a swatch as fill (same pattern as finalizeUnderbaseLayer). */
+function applySwatchToLayerSelection(doc, layer, swatchName) {
+ if (!doc || !layer || !swatchName) return false;
+ app.selection = null;
+ unlockLayerContentsForSelection(layer);
+ doc.activeLayer = layer;
+ doc.activeLayer.hasSelectedArtwork = true;
+ app.redraw();
+ var applied = applySwatchToFill(doc, swatchName);
+ app.selection = null;
+ return applied;
+}
+
+/** Log the current pageItems count and swatch presence for each second-hit layer (debug). */
+function auditSecondHitLayers(doc, appliedLayerNames, stageLabel) {
+ try {
+  if (!appliedLayerNames || !appliedLayerNames.length) return;
+  var separatedArtLayer = null;
+  try { separatedArtLayer = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SEPARATED_ART); } catch (e0) { return; }
+  for (var i = 0; i < appliedLayerNames.length; i++) {
+   var name = appliedLayerNames[i];
+   var layer = getSeparatedArtSubLayerByNameCaseInsensitive(separatedArtLayer, name);
+   var itemCount = -1;
+   if (layer) {
+    try { itemCount = layer.pageItems ? layer.pageItems.length : 0; } catch (e1) { itemCount = -1; }
+   }
+   var swatchExists = false;
+   try { swatchExists = !!doc.swatches.getByName(name); } catch (e2) { swatchExists = false; }
+   appendLeapSepLog(
+    "2nd hit audit [" + stageLabel + "]: '" + name + "' layerExists=" + (!!layer) +
+    ", pageItems=" + itemCount + ", swatchExists=" + swatchExists
+   );
+  }
+ } catch (e) {
+  appendLeapSepLog("2nd hit audit error [" + stageLabel + "]: " + (e.message || e));
+ }
+}
+
+/** Recursively recolor the fill of all path items in a container to the given color. Returns count recolored. */
+function setFillColorOnContainer(container, color) {
+ if (!container || !color) return 0;
+ var count = 0;
+ try {
+  if (container.typename === "PathItem") {
+   if (container.filled) {
+    container.fillColor = color;
+    count++;
+   }
+   return count;
+  }
+  if (container.typename === "CompoundPathItem") {
+   if (container.pathItems && container.pathItems.length > 0) {
+    for (var p = 0; p < container.pathItems.length; p++) {
+     if (container.pathItems[p].filled) {
+      container.pathItems[p].fillColor = color;
+      count++;
+     }
+    }
+   }
+   return count;
+  }
+  if (container.pageItems && container.pageItems.length > 0) {
+   for (var i = 0; i < container.pageItems.length; i++) {
+    count += setFillColorOnContainer(container.pageItems[i], color);
+   }
+  }
+ } catch (e) {
+  $.writeln("[SEPARATION] setFillColorOnContainer error: " + e.message);
+  appendLeapSepLog("2nd hit recolor error: " + (e.message || e));
+ }
+ return count;
+}
+
 /** Duplicate a color plate layer for second hit (not UB stack placement). */
 function duplicatePlateLayerForSecondHit(sourceLayerName) {
  try {
   if (!app.documents.length) return false;
-  var separatedArtLayer = app.activeDocument.layers.getByName(CONSTANTS.LAYER_NAMES.SEPARATED_ART);
+  var doc = app.activeDocument;
+  var separatedArtLayer = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SEPARATED_ART);
   var sourceLayer = getSeparatedArtSubLayerByNameCaseInsensitive(separatedArtLayer, sourceLayerName);
-  if (!sourceLayer) return false;
-  var newLayerName = String(sourceLayer.name) + " 2";
-  if (getSeparatedArtSubLayerByNameCaseInsensitive(separatedArtLayer, newLayerName)) {
-   return true;
+  if (!sourceLayer) {
+   appendLeapSepLog("2nd hit: source layer not found for '" + sourceLayerName + "'");
+   return false;
   }
-  var newLayer = separatedArtLayer.layers.add();
-  newLayer.name = newLayerName;
-  try {
-   newLayer.move(sourceLayer, ElementPlacement.PLACEAFTER);
-  } catch (moveErr) { }
+  if (isInkSecondHitPlateLayerName(sourceLayer.name)) {
+   appendLeapSepLog("2nd hit: refusing to duplicate from second-hit layer '" + sourceLayer.name + "'");
+   return false;
+  }
+  var newLayerName = String(sourceLayer.name) + " 2";
+  var newLayer = getSeparatedArtSubLayerByNameCaseInsensitive(separatedArtLayer, newLayerName);
+  if (newLayer) {
+   var existingCount = 0;
+   try { existingCount = newLayer.pageItems ? newLayer.pageItems.length : 0; } catch (ecErr) { }
+   if (existingCount > 0) {
+    appendLeapSepLog("2nd hit: layer '" + newLayerName + "' already has " + existingCount + " item(s), skipping");
+    return true;
+   }
+   appendLeapSepLog("2nd hit: repopulating empty existing layer '" + newLayerName + "'");
+  } else {
+   newLayer = separatedArtLayer.layers.add();
+   newLayer.name = newLayerName;
+   try {
+    newLayer.move(sourceLayer, ElementPlacement.PLACEAFTER);
+   } catch (moveErr) { }
+  }
   sourceLayer.visible = true;
   sourceLayer.locked = false;
   newLayer.visible = true;
   newLayer.locked = false;
-  for (var p = sourceLayer.pageItems.length - 1; p >= 0; p--) {
-   try {
-    sourceLayer.pageItems[p].duplicate(newLayer, ElementPlacement.PLACEATBEGINNING);
-   } catch (dupErr) { }
+  var srcCount = 0;
+  try { srcCount = sourceLayer.pageItems ? sourceLayer.pageItems.length : 0; } catch (scErr) { }
+  appendLeapSepLog("2nd hit: '" + String(sourceLayer.name) + "' -> '" + newLayerName + "', source pageItems=" + srcCount);
+  var dupCount = duplicateLayerItems(sourceLayer, newLayer);
+  var newCount = 0;
+  try { newCount = newLayer.pageItems ? newLayer.pageItems.length : 0; } catch (ncErr) { }
+  appendLeapSepLog("2nd hit: duplicateLayerItems=" + dupCount + ", new layer pageItems=" + newCount);
+  if (newCount < 1) {
+   appendLeapSepLog("2nd hit: no art duplicated into '" + newLayerName + "'");
+   return false;
+  }
+  // Create a dedicated spot swatch named like the new layer (e.g. "PANTONE 123 C 2"),
+  // cloned from the source ink's swatch, and assign it to the duplicated geometry.
+  try {
+   var sourceSwatchName = resolveSourceSwatchNameForPlateLayer(sourceLayer);
+   var srcSwatchExists = false;
+   try { srcSwatchExists = !!getSwatchByName(doc, sourceSwatchName); } catch (srcSwErr) { srcSwatchExists = false; }
+   var created = ensureSwatchExistsFromSource(sourceSwatchName, newLayerName);
+   var newSwatch = getSwatchByName(doc, newLayerName);
+   appendLeapSepLog(
+    "2nd hit swatch: source '" + sourceSwatchName + "' exists=" + srcSwatchExists +
+    ", ensureResult=" + created + ", newSwatchFound=" + (!!(newSwatch && newSwatch.color))
+   );
+   if (newSwatch && newSwatch.color) {
+    var appliedFill = applySwatchToLayerSelection(doc, newLayer, newLayerName);
+    var recolored = setFillColorOnContainer(newLayer, newSwatch.color);
+    appendLeapSepLog(
+     "2nd hit swatch: applySwatchToLayerSelection=" + appliedFill +
+     ", setFillColorOnContainer=" + recolored + " for '" + newLayerName + "'"
+    );
+   } else {
+    appendLeapSepLog("2nd hit swatch: could not resolve swatch '" + newLayerName + "' after create");
+   }
+  } catch (recolorErr) {
+   $.writeln("[SEPARATION] second-hit swatch assign error: " + recolorErr.message);
+   appendLeapSepLog("2nd hit swatch assign error: " + (recolorErr.message || recolorErr));
   }
   return true;
  } catch (e) {
+  appendLeapSepLog("2nd hit: duplicatePlateLayerForSecondHit error: " + (e.message || e));
   return false;
  }
 }
@@ -1090,8 +1235,10 @@ function applyInkExceptionSecondHitLayers(doc, profileCode) {
   if (isNaN(hits) || hits < 2) continue;
   var sourceLayer = null;
   for (var L = 0; L < layerNames.length; L++) {
-   if (inkExceptionNameMatchesLayerName(row.inkName, layerNames[L])) {
-    sourceLayer = layerNames[L];
+   var candidateLayerName = layerNames[L];
+   if (isInkSecondHitPlateLayerName(candidateLayerName)) continue;
+   if (inkExceptionNameMatchesLayerName(row.inkName, candidateLayerName)) {
+    sourceLayer = candidateLayerName;
     break;
    }
   }
@@ -1355,6 +1502,28 @@ function isBlockerEnabled(profileMetadata) {
  }
 }
 
+function enrichProfileMetadataWithUnderbase2(profileMetadata, doc) {
+ if (!profileMetadata) {
+  profileMetadata = {};
+ }
+ try {
+  if (profileMetadata.underbase2Swatch == null || String(profileMetadata.underbase2Swatch).replace(/^\s+|\s+$/g, "") === "") {
+   var targetDoc = doc || (app.documents.length ? app.activeDocument : null);
+   if (targetDoc) {
+    var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", targetDoc);
+    if (xmp.isXmpCreated && xmp.doesStructFieldExist("Underbase2Swatch")) {
+     var ub2Saved = xmp.getStructField("Underbase2Swatch", false);
+     if (ub2Saved != null && String(ub2Saved).replace(/^\s+|\s+$/g, "") !== "") {
+      profileMetadata.underbase2Swatch = String(ub2Saved).replace(/^\s+|\s+$/g, "");
+      appendLeapSepLog("Underbase 2 swatch from document: " + profileMetadata.underbase2Swatch);
+     }
+    }
+   }
+  }
+ } catch (e) { }
+ return profileMetadata;
+}
+
 function applyProfileUnderbaseLayers(profileMetadata) {
  try {
   var enabled = profileMetadata && profileMetadata.underbaseEnabled instanceof Array
@@ -1363,21 +1532,14 @@ function applyProfileUnderbaseLayers(profileMetadata) {
   if (!enabled || enabled.length < 2) {
    return;
   }
-  if (enabled[1] === true) {
-   ensureSwatchExistsFromSource(CONSTANTS.LAYER_NAMES.WHITE_UB, CONSTANTS.LAYER_NAMES.WHITE_UB + " 2");
-   duplicateLayerContentsToNewLayer(CONSTANTS.LAYER_NAMES.WHITE_UB, CONSTANTS.LAYER_NAMES.WHITE_UB + " 2");
-  }
+  // Underbase 2 is built by generateUnderbase on the Graphics swatch layer — do not duplicate White UB 2.
   if (enabled[2] === true) {
-   ensureSwatchExistsFromSource(CONSTANTS.LAYER_NAMES.WHITE_UB, CONSTANTS.LAYER_NAMES.WHITE_UB + " 2");
    ensureSwatchExistsFromSource(CONSTANTS.LAYER_NAMES.WHITE_UB, CONSTANTS.LAYER_NAMES.WHITE_UB + " 3");
-   duplicateLayerContentsToNewLayer(CONSTANTS.LAYER_NAMES.WHITE_UB, CONSTANTS.LAYER_NAMES.WHITE_UB + " 2");
    duplicateLayerContentsToNewLayer(CONSTANTS.LAYER_NAMES.WHITE_UB, CONSTANTS.LAYER_NAMES.WHITE_UB + " 3");
   }
   if (enabled[3] === true) {
-   ensureSwatchExistsFromSource(CONSTANTS.LAYER_NAMES.WHITE_UB, CONSTANTS.LAYER_NAMES.WHITE_UB + " 2");
    ensureSwatchExistsFromSource(CONSTANTS.LAYER_NAMES.WHITE_UB, CONSTANTS.LAYER_NAMES.WHITE_UB + " 3");
    ensureSwatchExistsFromSource(CONSTANTS.LAYER_NAMES.WHITE_UB, CONSTANTS.LAYER_NAMES.WHITE_UB + " 4");
-   duplicateLayerContentsToNewLayer(CONSTANTS.LAYER_NAMES.WHITE_UB, CONSTANTS.LAYER_NAMES.WHITE_UB + " 2");
    duplicateLayerContentsToNewLayer(CONSTANTS.LAYER_NAMES.WHITE_UB, CONSTANTS.LAYER_NAMES.WHITE_UB + " 3");
    duplicateLayerContentsToNewLayer(CONSTANTS.LAYER_NAMES.WHITE_UB, CONSTANTS.LAYER_NAMES.WHITE_UB + " 4");
   }
@@ -1525,15 +1687,8 @@ function handlePerformSeparation(params_string) {
   // Pull the Graphics-page "Underbase 2 Swatch" choice from this (version) document's XMP into
   // profileMetadata so it carries into the separated document and drives the UB2+ plate color.
   try {
-   if (profileMetadata && (profileMetadata.underbase2Swatch == null || String(profileMetadata.underbase2Swatch) === "")) {
-    var ub2Xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", activeDoc);
-    if (ub2Xmp.isXmpCreated && ub2Xmp.doesStructFieldExist("Underbase2Swatch")) {
-     var ub2Saved = ub2Xmp.getStructField("Underbase2Swatch", false);
-     if (ub2Saved != null && typeof ub2Saved === "string" && ub2Saved.replace(/^\s+|\s+$/g, "") !== "") {
-      profileMetadata.underbase2Swatch = ub2Saved;
-      appendLeapSepLog("Underbase 2 swatch from document: " + ub2Saved);
-     }
-    }
+   if (profileMetadata) {
+    profileMetadata = enrichProfileMetadataWithUnderbase2(profileMetadata, activeDoc);
    }
   } catch (ub2ReadErr) { }
 
@@ -1705,21 +1860,22 @@ function handlePerformSeparation(params_string) {
    profileMetadata && profileMetadata.profileCode
     ? String(profileMetadata.profileCode).replace(/^\s+|\s+$/g, "").toUpperCase()
     : "";
+  var secondHitApplied = [];
+  deleteNonFillStrokeItems();
+  mergeInkExceptionUnderbaseIntoProfileMetadata(profileMetadata, sepDoc);
+  generateUnderbase(graphicName, null, profileMetadata);
   if (profileCodeForHits) {
    try {
     app.activeDocument = sepDoc;
    } catch (activeSepErr) { }
    var secondHitResult = applyInkExceptionSecondHitLayers(sepDoc, profileCodeForHits);
+   secondHitApplied = secondHitResult.applied || [];
    appendLeapSepLog(
     "ink exception 2nd hits: " +
-    (secondHitResult.applied && secondHitResult.applied.length
-     ? secondHitResult.applied.join(", ")
-     : "none")
+    (secondHitApplied.length ? secondHitApplied.join(", ") : "none")
    );
   }
-  deleteNonFillStrokeItems();
-  mergeInkExceptionUnderbaseIntoProfileMetadata(profileMetadata, sepDoc);
-  generateUnderbase(graphicName, null, profileMetadata);
+  auditSecondHitLayers(sepDoc, secondHitApplied, "after applyInkExceptionSecondHitLayers");
   setOverprintOnSeparatedArt(sepDoc, true);
   hideSizedGraphicsSublayer(sepDoc);
   unloadLEAPColorSepsActions();
@@ -1727,10 +1883,13 @@ function handlePerformSeparation(params_string) {
   var layerNames = [];
   try {
    layerNames = getSeparatedArtLayerNames(sepDoc);
+   layerNames = filterPlateLayerNamesForUi(layerNames, profileMetadata);
    if (layerNames.length > 0) {
     var sepXmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", sepDoc);
     if (sepXmp.isXmpCreated) {
      sepXmp.setStructField("SeparatedLayerNames", layerNames, true, false);
+     // Force UI to rebuild rows from live layer list (includes ink "… 2" second hits).
+     sepXmp.setStructField("LEAPSeparationColorsData", [], true, false);
      sepXmp.commit();
      sepDoc.save();
     }
@@ -1926,6 +2085,7 @@ function handleRecreatePlatesInActiveDocument(params_string) {
     }
    } catch (eMeta) { }
   }
+  profileMetadata = enrichProfileMetadataWithUnderbase2(profileMetadata, doc);
   var hasCleanupParams = params.hasOwnProperty("deleteUnpaintedPaths") || params.hasOwnProperty("deleteLeftoverPaths");
   var cleanupOpts = null;
   if (hasCleanupParams) {
@@ -1939,20 +2099,21 @@ function handleRecreatePlatesInActiveDocument(params_string) {
   if (profileMetadata && profileMetadata.profileCode) {
    profileCodeRecreate = String(profileMetadata.profileCode).replace(/^\s+|\s+$/g, "").toUpperCase();
   }
-  if (profileCodeRecreate) {
-   var secondHitRecreate = applyInkExceptionSecondHitLayers(doc, profileCodeRecreate);
-   appendLeapSepLog(
-    "recreate ink exception 2nd hits: " +
-    (secondHitRecreate.applied && secondHitRecreate.applied.length
-     ? secondHitRecreate.applied.join(", ")
-     : "none")
-   );
-  }
+  var secondHitRecreateApplied = [];
   if (cleanupOpts == null || cleanupOpts.deleteUnpaintedPaths) {
    deleteNonFillStrokeItems();
   }
   mergeInkExceptionUnderbaseIntoProfileMetadata(profileMetadata, doc);
   generateUnderbase(graphicName, cleanupOpts, profileMetadata);
+  if (profileCodeRecreate) {
+   var secondHitRecreate = applyInkExceptionSecondHitLayers(doc, profileCodeRecreate);
+   secondHitRecreateApplied = secondHitRecreate.applied || [];
+   appendLeapSepLog(
+    "recreate ink exception 2nd hits: " +
+    (secondHitRecreateApplied.length ? secondHitRecreateApplied.join(", ") : "none")
+   );
+  }
+  auditSecondHitLayers(doc, secondHitRecreateApplied, "recreate: after applyInkExceptionSecondHitLayers");
   setOverprintOnSeparatedArt(doc, true);
   hideSizedGraphicsSublayer(doc);
   unloadLEAPColorSepsActions();
@@ -1960,10 +2121,12 @@ function handleRecreatePlatesInActiveDocument(params_string) {
   var layerNames = [];
   try {
    layerNames = getSeparatedArtLayerNames(doc);
+   layerNames = filterPlateLayerNamesForUi(layerNames, profileMetadata);
    if (layerNames.length > 0) {
     var sepXmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
     if (sepXmp.isXmpCreated) {
      sepXmp.setStructField("SeparatedLayerNames", layerNames, true, false);
+     sepXmp.setStructField("LEAPSeparationColorsData", [], true, false);
      sepXmp.commit();
     }
    }
@@ -2015,6 +2178,105 @@ function handleRecreatePlatesInActiveDocument(params_string) {
    message: "Plates recreated successfully for graphic: " + graphicName
   });
  } catch (e) {
+  return JSON.stringify({
+   success: false,
+   error: e.message || e.toString()
+  });
+ }
+}
+
+/**
+ * Regenerate choke and underbase layers from existing SEPARATED_ART ink plates.
+ * Ink color plates are kept; only choke / White UB stack layers are removed and rebuilt.
+ */
+function handleRegenerateUnderbaseFromExistingInks(params_string) {
+ try {
+  var params = params_string ? JSON.parse(params_string) : {};
+  if (!app.documents.length) {
+   return JSON.stringify({
+    success: false,
+    error: "No active document found"
+   });
+  }
+  var doc = app.activeDocument;
+  var docPath = doc.fullName && doc.fullName.fsName ? doc.fullName.fsName : "";
+  if (docPath.indexOf("09 SEPARATIONS") === -1) {
+   return JSON.stringify({
+    success: false,
+    error: "Active document is not a separation document. Open a document from 09 SEPARATIONS."
+   });
+  }
+  try {
+   doc.layers.getByName(CONSTANTS.LAYER_NAMES.SEPARATED_ART);
+  } catch (sepErr) {
+   return JSON.stringify({
+    success: false,
+    error: "SEPARATED_ART layer not found"
+   });
+  }
+
+  loadLEAPColorSepsActions();
+  var profileMetadata = params.profileMetadata || null;
+  if (!profileMetadata) {
+   try {
+    var xmpUb = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
+    if (xmpUb.isXmpCreated && xmpUb.doesStructFieldExist("SeparationProfileMetadata")) {
+     profileMetadata = xmpUb.getStructField("SeparationProfileMetadata", true);
+    }
+   } catch (eMeta) { }
+  }
+  profileMetadata = enrichProfileMetadataWithUnderbase2(profileMetadata, doc);
+
+  var hasCleanupParams = params.hasOwnProperty("deleteUnpaintedPaths") || params.hasOwnProperty("deleteLeftoverPaths");
+  var cleanupOpts = null;
+  if (hasCleanupParams) {
+   cleanupOpts = {
+    deleteUnpaintedPaths: params.deleteUnpaintedPaths === true,
+    deleteLeftoverPaths: params.deleteLeftoverPaths === true
+   };
+  }
+
+  mergeInkExceptionUnderbaseIntoProfileMetadata(profileMetadata, doc);
+  appendLeapSepLog("regenerate underbase from existing inks: start");
+  var ubResult = generateUnderbase(null, cleanupOpts, profileMetadata, { fromExistingInks: true });
+  if (ubResult) {
+   try { unloadLEAPColorSepsActions(); } catch (unloadUbErr) { }
+   var parsedUbErr = null;
+   try { parsedUbErr = JSON.parse(ubResult); } catch (parseUbErr) { }
+   return JSON.stringify({
+    success: false,
+    error: (parsedUbErr && parsedUbErr.error) ? parsedUbErr.error : ubResult
+   });
+  }
+
+  setOverprintOnSeparatedArt(doc, true);
+  unloadLEAPColorSepsActions();
+
+  try {
+   var layerNames = getSeparatedArtLayerNames(doc);
+   layerNames = filterPlateLayerNamesForUi(layerNames, profileMetadata);
+   if (layerNames.length > 0) {
+    var sepXmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
+    if (sepXmp.isXmpCreated) {
+     sepXmp.setStructField("SeparatedLayerNames", layerNames, true, false);
+     sepXmp.commit();
+    }
+   }
+  } catch (xmpSynErr) {
+   appendLeapSepLog("regenerate underbase SeparatedLayerNames sync error: " + (xmpSynErr.message || xmpSynErr));
+  }
+
+  try {
+   doc.save();
+  } catch (saveUbErr) { }
+
+  appendLeapSepLog("regenerate underbase from existing inks: complete");
+  return JSON.stringify({
+   success: true,
+   message: "Underbase and choke regenerated from existing ink plates"
+  });
+ } catch (e) {
+  try { unloadLEAPColorSepsActions(); } catch (unloadErr) { }
   return JSON.stringify({
    success: false,
    error: e.message || e.toString()
@@ -2995,11 +3257,18 @@ function handleGetGraphicSwatches(params_string) {
   var layerNames = null;
 
   // For separated documents, get layer names from XMP SeparatedLayerNames field
+  var profileMetaForPlates = null;
   if (isSeparatedDocument) {
    try {
     var sepXmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", activeDoc);
     if (sepXmp.isXmpCreated && sepXmp.doesStructFieldExist("SeparatedLayerNames")) {
      layerNames = sepXmp.getStructField("SeparatedLayerNames", true);
+    }
+    if (sepXmp.isXmpCreated && sepXmp.doesStructFieldExist("SeparationProfileMetadata")) {
+     profileMetaForPlates = enrichProfileMetadataWithUnderbase2(
+      sepXmp.getStructField("SeparationProfileMetadata", true),
+      activeDoc
+     );
     }
    } catch (e) {
     layerNames = null;
@@ -3020,7 +3289,7 @@ function handleGetGraphicSwatches(params_string) {
 
    // Use layer names from XMP SeparatedLayerNames
    // These are the actual layer names from SEPARATED_ART layer (swatch names like "PANTONE 189 C", "White UB", etc.)
-   var swatchNames = layerNames;
+   var swatchNames = filterPlateLayerNamesForUi(layerNames, profileMetaForPlates);
 
    var swatches = [];
 
@@ -3290,7 +3559,7 @@ function handleCheckSeparatedDocument(params_string) {
      // Get profile metadata from XMP
      var _profileMetaData = xmp.getStructField("SeparationProfileMetadata", true);
      if (_profileMetaData) {
-      _dataFromXMP.profileMetaData = _profileMetaData;
+      _dataFromXMP.profileMetaData = enrichProfileMetadataWithUnderbase2(_profileMetaData, activeDoc);
      }
 
      // Get SeparatedLayerNames from XMP; fall back to live SEPARATED_ART sublayers
@@ -3496,6 +3765,10 @@ function inkJsonEntryToRow(entry, index) {
  var mesh = meshValueFromJsonEntry(entry.Color_Mesh);
  var twoHitsRaw = entry.Two_Hits != null ? String(entry.Two_Hits).trim().toUpperCase() : "N";
  var hitsCount = (twoHitsRaw === "Y" || twoHitsRaw === "YES") ? 2 : 1;
+ if (entry.hitsCount != null) {
+  var parsedHits = parseInt(entry.hitsCount, 10);
+  if (!isNaN(parsedHits) && parsedHits >= 1) hitsCount = parsedHits;
+ }
  var underbaseCount = entry.underbase_count != null ? parseInt(entry.underbase_count, 10) : 1;
  if (isNaN(underbaseCount) || underbaseCount < 1) underbaseCount = 1;
  if (underbaseCount > 4) underbaseCount = 4;

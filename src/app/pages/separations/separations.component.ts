@@ -76,6 +76,8 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
  showDeleteAllConfirm = false;
  /** Show confirmation before recreating plates (optional cleanup checkboxes) */
  showRecreateAllConfirm = false;
+ /** Show confirmation before regenerating underbase from existing inks */
+ showRegenerateUnderbaseConfirm = false;
  /** All style codes from team Batch Excel (for New separation dialog). */
  allTeamStyleCodes: string[] = [];
  /** Confirm delete separation .ai file + clear XMP path */
@@ -112,6 +114,18 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
  // Checked by default so "Recreate All Plates" performs the same full path cleanup
  // as "Create Separations" out of the box. Users can untick to skip cleanup.
  recreatePlateCheckboxOptions: ConfirmDialogCheckboxOption[] = [
+  {
+   id: 'deleteUnpaintedPaths',
+   label: 'Delete unpainted paths after Merge',
+   checked: true
+  },
+  {
+   id: 'deleteLeftoverPaths',
+   label: 'Delete leftover paths after Add',
+   checked: true
+  }
+ ];
+ regenerateUnderbaseCheckboxOptions: ConfirmDialogCheckboxOption[] = [
   {
    id: 'deleteUnpaintedPaths',
    label: 'Delete unpainted paths after Merge',
@@ -1487,6 +1501,48 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
     }
    })
    ?.catch(() => { });
+ }
+
+ handleGenerateUnderbaseFromExistingInks(): void {
+  if (this.isRunningInBrowser) return;
+  this.showRegenerateUnderbaseConfirm = true;
+  this.cdr.detectChanges();
+ }
+
+ cancelGenerateUnderbaseFromExistingInks(): void {
+  this.showRegenerateUnderbaseConfirm = false;
+  this.cdr.detectChanges();
+ }
+
+ confirmGenerateUnderbaseFromExistingInks(ev?: void | Record<string, boolean>): void {
+  this.showRegenerateUnderbaseConfirm = false;
+  this.cdr.detectChanges();
+
+  const evRec = ev && typeof ev === 'object' ? (ev as Record<string, boolean>) : null;
+  const cleanup = evRec
+   ? {
+     deleteUnpaintedPaths: !!evRec['deleteUnpaintedPaths'],
+     deleteLeftoverPaths: !!evRec['deleteLeftoverPaths']
+    }
+   : { deleteUnpaintedPaths: true, deleteLeftoverPaths: true };
+
+  this.controller
+   .regenerateUnderbaseFromExistingInks?.(cleanup)
+   ?.then((res) => {
+    if (res?.success) {
+     if ((window as any).__LEAP_SEPARATION_COLORS_REFRESH__) {
+      (window as any).__LEAP_SEPARATION_COLORS_REFRESH__();
+     }
+     if ((window as any).__LEAP_TAB_NAVIGATION__?.navigateToTab) {
+      (window as any).__LEAP_TAB_NAVIGATION__.navigateToTab(2);
+     }
+    } else if (res?.error) {
+     alert(res.error);
+    }
+   })
+   ?.catch((err) => {
+    alert(err?.message || String(err));
+   });
  }
 
  getCurrentSepGraphicName(): string {

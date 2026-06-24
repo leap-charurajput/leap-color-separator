@@ -3128,6 +3128,37 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
   });
  }
 
+ /**
+  * Regenerate choke and underbase from existing ink plates in SEPARATED_ART (ink plates unchanged).
+  */
+ regenerateUnderbaseFromExistingInks(
+  cleanup?: { deleteUnpaintedPaths: boolean; deleteLeftoverPaths: boolean }
+ ): Promise<any> {
+  return this.ensureSession().then(() => {
+   const params: Record<string, unknown> = {};
+   if (cleanup) {
+    params['deleteUnpaintedPaths'] = cleanup.deleteUnpaintedPaths === true;
+    params['deleteLeftoverPaths'] = cleanup.deleteLeftoverPaths === true;
+   }
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleRegenerateUnderbaseFromExistingInks', params)
+    .then((res: string) => {
+     const result = JSON.parse(res);
+     if (!result?.success) {
+      this.leapSepsLog.logError('regenerateUnderbaseFromExistingInks', result?.error || 'Failed', result);
+      return result;
+     }
+     this.leapSepsLog.logProcess('regenerateUnderbaseFromExistingInks complete', result);
+     return result;
+    })
+    .catch((err: any) => {
+     this.leapSepsLog.logError('regenerateUnderbaseFromExistingInks', err);
+     throw err;
+    });
+  });
+ }
+
  selectAndSaveLeapSettings(): Promise<any> {
   this.log('selectAndSaveLeapSettings called');
 

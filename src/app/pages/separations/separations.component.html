@@ -43,6 +43,10 @@
      title="Delete all sublayers in layer SEPARATED_ART then create separations">
      Recreate All Plates
     </button>
+    <button type="button" class="current-sep-action-link" (click)="handleGenerateUnderbaseFromExistingInks()"
+     title="Keep ink plates; remove choke and underbases only, then rebuild from current ink art">
+     Generate Underbase from Existing Inks
+    </button>
    </div>
   </div>
  </div>
@@ -56,6 +60,13 @@
   message=""
   [checkboxOptions]="recreatePlateCheckboxOptions" confirmText="Recreate" cancelText="Cancel"
   confirmVariant="primary" (confirm)="confirmRecreateAllPlates($event)" (cancel)="cancelRecreateAllPlates()">
+ </app-confirm-dialog>
+
+ <app-confirm-dialog [isOpen]="showRegenerateUnderbaseConfirm" title="Generate Underbase from Existing Inks"
+  message="Ink color plates will be kept. Choke, White UB, and Blocker layers will be removed and rebuilt from the current ink artwork."
+  [checkboxOptions]="regenerateUnderbaseCheckboxOptions" confirmText="Generate" cancelText="Cancel"
+  confirmVariant="primary" (confirm)="confirmGenerateUnderbaseFromExistingInks($event)"
+  (cancel)="cancelGenerateUnderbaseFromExistingInks()">
  </app-confirm-dialog>
 
  <app-confirm-dialog [isOpen]="showDeleteSeparationFileConfirm" title="Confirm"
