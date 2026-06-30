@@ -1,0 +1,13 @@
+<button
+ *ngIf="issues?.length"
+ type="button"
+ class="postscript-setup-alert-trigger"
+ [class.is-active]="detailOpen"
+ title="PostScript export setup incomplete"
+ aria-label="PostScript export setup incomplete"
+ (click)="toggleDetail($event)"
+>
+ <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 7.27 6.15" width="18" height="16" aria-hidden="true">
+  <path fill="#ffcb00" d="M5.72,4.51c0,.37-.29.64-.64.64h-5.23c-.35,0-.65-.28-.65-.64,0-.11.03-.22.09-.32l2.63-4.54c.11-.2.31-.32.55-.32s.44.12.55.32l2.62,4.54c.05.1.08.21.08.32ZM1.94,3.99c0,.29.23.52.53.52s.53-.23.53-.52-.23-.54-.53-.54-.53.23-.53.54ZM1.99,2.95h.95v-2.13h-.95v2.13Z" />
+ </svg>
+</button>

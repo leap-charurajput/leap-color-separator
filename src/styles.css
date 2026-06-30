@@ -1006,6 +1006,8 @@ input[type=text].smallerInput {
 	margin: 0;
 	padding: 0;
 	display: flex;
+	flex-shrink: 0;
+	overflow: visible;
 }
 
 .settingsTabs>li {
@@ -1129,9 +1131,19 @@ input[type=text].smallerInput {
 .settingsTabs>li.settingsMenuTrigger {
 	margin-left: auto;
 	min-width: auto;
-	padding-left: 8px;
+	flex-shrink: 0;
+	overflow: visible;
+	padding-left: 4px;
 	padding-right: 10px;
 	border-radius: 0;
+	z-index: 2;
+	gap: 2px;
+	display: flex;
+	align-items: center;
+}
+
+.settingsTabs>li.settingsMenuTrigger.settings-menu-active {
+	background-color: #323232;
 }
 
 .settingsTabs>li.settingsMenuTrigger .submenuOpener {

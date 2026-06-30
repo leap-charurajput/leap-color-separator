@@ -329,6 +329,8 @@
 
   <app-export-separations-modal
    [isOpen]="isExportModalOpen"
+   [postscriptReady]="exportPostscriptReady"
+   [postscriptIssues]="exportPostscriptIssues"
    (close)="handleExportModalClose()"
    (export)="handleExportSeparations($event)"
   >

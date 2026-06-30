@@ -1244,7 +1244,84 @@ async function getGraphicPlacementOptions(documentPath, teamCode) {
  }
 }
 
-async function getProfileInformation(profileCode) {
+function normalizeProfileNameForLookup(value) {
+ return String(value || '')
+  .replace(/[\u2010-\u2015]/g, '-')
+  .replace(/\s+/g, ' ')
+  .trim()
+  .toUpperCase();
+}
+
+function normalizeDistressFlag(value) {
+ if (value === true || value === 1) return 'Y';
+ if (typeof value === 'string') {
+  const normalized = value.trim().toUpperCase();
+  if (normalized === 'Y' || normalized === 'YES' || normalized === 'TRUE' || normalized === '1') {
+   return 'Y';
+  }
+ }
+ return 'N';
+}
+
+function profileMatchesLookupKey(profile, lookupKey) {
+ if (!profile || !lookupKey) return false;
+ const normalizedLookup = normalizeProfileNameForLookup(lookupKey);
+ const codeValue =
+  profile['Profile Code'] != null ? String(profile['Profile Code']).trim().toUpperCase() : '';
+ const nameValue = normalizeProfileNameForLookup(profile['Profile Name']);
+ return codeValue === normalizedLookup || nameValue === normalizedLookup;
+}
+
+function profileDistressMatches(profile, distressFlag) {
+ return normalizeDistressFlag(profile && profile['Distress']) === normalizeDistressFlag(distressFlag);
+}
+
+/**
+ * Resolve a Profiles.json row by code/name, optionally filtered by Distress (Y/N).
+ * When distress is requested but no row matches, falls back to Distress N.
+ */
+function findProfileInProfilesData(profilesData, lookupKey, options) {
+ const hasDistressFilter =
+  options &&
+  options.distress !== undefined &&
+  options.distress !== null;
+ const requestedDistress = hasDistressFilter ? normalizeDistressFlag(options.distress) : null;
+
+ if (hasDistressFilter) {
+  const exact = profilesData.find(
+   (profile) =>
+    profileMatchesLookupKey(profile, lookupKey) &&
+    profileDistressMatches(profile, requestedDistress)
+  );
+  if (exact) {
+   return { profile: exact, requestedDistress, matchedDistress: requestedDistress, fallbackUsed: false };
+  }
+  if (requestedDistress === 'Y') {
+   const fallback = profilesData.find(
+    (profile) => profileMatchesLookupKey(profile, lookupKey) && profileDistressMatches(profile, 'N')
+   );
+   if (fallback) {
+    console.warn(
+     '[LEAP][UB_DEBUG] No distressed profile for',
+     lookupKey,
+     '- falling back to Distress N'
+    );
+    return { profile: fallback, requestedDistress, matchedDistress: 'N', fallbackUsed: true };
+   }
+  }
+  return { profile: null, requestedDistress, matchedDistress: null, fallbackUsed: false };
+ }
+
+ const first = profilesData.find((profile) => profileMatchesLookupKey(profile, lookupKey));
+ return {
+  profile: first || null,
+  requestedDistress: null,
+  matchedDistress: first ? normalizeDistressFlag(first['Distress']) : null,
+  fallbackUsed: false
+ };
+}
+
+async function getProfileInformation(profileCode, options) {
  try {
   if (!profileCode) {
    throw new Error('Profile code is required');
@@ -1267,17 +1344,11 @@ async function getProfileInformation(profileCode) {
    throw new Error('Profiles.json does not contain an array');
   }
 
-  const normalizedLookup = String(profileCode).trim().toUpperCase();
-  const matchedProfile = profilesData.find((profile) => {
-   const codeValue =
-    profile && profile['Profile Code'] != null ? String(profile['Profile Code']).trim().toUpperCase() : '';
-   const nameValue =
-    profile && profile['Profile Name'] != null ? String(profile['Profile Name']).trim().toUpperCase() : '';
-   return codeValue === normalizedLookup || nameValue === normalizedLookup;
-  });
+  const findResult = findProfileInProfilesData(profilesData, profileCode, options || {});
+  const matchedProfile = findResult.profile;
 
   if (!matchedProfile) {
-   console.warn('[LEAP][UB_DEBUG] Profile not found in Profiles.json for code:', profileCode);
+   console.warn('[LEAP][UB_DEBUG] Profile not found in Profiles.json for code:', profileCode, options || {});
    return {
     found: false,
     profileCode: profileCode,
@@ -1339,6 +1410,10 @@ async function getProfileInformation(profileCode) {
   console.log('[LEAP][UB_DEBUG] Matched profile row:', {
    profileCode,
    profileName: matchedProfile['Profile Name'] || '',
+   distress: matchedProfile['Distress'] || 'N',
+   distressRequested: findResult.requestedDistress,
+   distressMatched: findResult.matchedDistress,
+   distressFallbackUsed: findResult.fallbackUsed,
    underbase2Raw: matchedProfile['Underbase 2'] != null ? matchedProfile['Underbase 2'] : matchedProfile['UB 2'],
    underbase3Raw: matchedProfile['Underbase 3'] != null ? matchedProfile['Underbase 3'] : matchedProfile['UB 3'],
    underbase4Raw: matchedProfile['Underbase 4'] != null ? matchedProfile['Underbase 4'] : matchedProfile['UB 4'],
@@ -1353,9 +1428,14 @@ async function getProfileInformation(profileCode) {
    ub4Mesh: matchedProfile['UB 4 Mesh'] || ''
   });
 
+  const resolvedProfileCode =
+   matchedProfile['Profile Code'] != null
+    ? String(matchedProfile['Profile Code']).trim()
+    : String(profileCode).trim();
+
   return {
    found: true,
-   profileCode: profileCode,
+   profileCode: resolvedProfileCode,
    profileName: matchedProfile['Profile Name'] || '',
    flash: flash,
    cool: cool,
@@ -1980,9 +2060,9 @@ class Leap {
   }
  }
 
- async getProfileInformation(profileCode) {
+ async getProfileInformation(profileCode, options) {
   try {
-   const profileInfo = await getProfileInformation(profileCode);
+   const profileInfo = await getProfileInformation(profileCode, options || {});
    return {
     success: true,
     profileInfo: profileInfo

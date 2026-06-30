@@ -1,4 +1,5 @@
-import { Component, Input, Output, EventEmitter, OnInit, OnChanges, SimpleChanges } from '@angular/core';
+import { Component, EventEmitter, Input, Output, OnInit, OnChanges, SimpleChanges } from '@angular/core';
+import { PostscriptReadinessIssue } from '../postscript-setup-alert/postscript-setup-alert.component';
 
 @Component({
 	selector: 'app-export-separations-modal',
@@ -7,6 +8,8 @@ import { Component, Input, Output, EventEmitter, OnInit, OnChanges, SimpleChange
 })
 export class ExportSeparationsModalComponent implements OnInit, OnChanges {
 	@Input() isOpen = false;
+	@Input() postscriptReady = true;
+	@Input() postscriptIssues: PostscriptReadinessIssue[] = [];
 	@Output() close = new EventEmitter<void>();
 	@Output() export = new EventEmitter<any>();
 
@@ -26,13 +29,13 @@ export class ExportSeparationsModalComponent implements OnInit, OnChanges {
 
 	private resetCheckboxes(): void {
 		this.exportPrintGuide = true;
-		this.exportPostscript = true;
+		this.exportPostscript = this.postscriptReady;
 	}
 
 	onExport(): void {
 		const exportOptions = {
 			exportPrintGuide: this.exportPrintGuide,
-			exportPostscript: this.exportPostscript
+			exportPostscript: this.postscriptReady ? this.exportPostscript : false
 		};
 		this.export.emit(exportOptions);
 		this.close.emit();

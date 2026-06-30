@@ -1,0 +1,52 @@
+.postscript-setup-detail {
+ box-sizing: border-box;
+ width: 100%;
+ margin-bottom: 10px;
+ padding: 10px 12px;
+ border-radius: 4px;
+ background: var(--darker-body, #222);
+ border: 1px solid rgba(255, 203, 0, 0.55);
+ color: var(--text-color, #e8e8e8);
+ text-align: left;
+}
+
+.postscript-setup-detail-header {
+ display: flex;
+ align-items: center;
+ justify-content: space-between;
+ gap: 8px;
+ margin-bottom: 8px;
+ font-size: 12px;
+}
+
+.postscript-setup-detail-close {
+ border: none;
+ background: transparent;
+ color: var(--text-color, #e8e8e8);
+ font-size: 18px;
+ line-height: 1;
+ cursor: pointer;
+ padding: 0 4px;
+}
+
+.postscript-setup-detail-list {
+ margin: 0;
+ padding-left: 18px;
+ font-size: 11px;
+ line-height: 1.45;
+}
+
+.postscript-setup-detail-list li {
+ overflow-wrap: anywhere;
+}
+
+.postscript-setup-detail-list li + li {
+ margin-top: 6px;
+}
+
+.postscript-setup-detail-hint {
+ margin: 8px 0 0;
+ font-size: 11px;
+ line-height: 1.4;
+ color: #b8b8b8;
+}

@@ -78,6 +78,8 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
  showRecreateAllConfirm = false;
  /** Show confirmation before regenerating underbase from existing inks */
  showRegenerateUnderbaseConfirm = false;
+ /** Show confirmation before deleting UB/Choke/Blocker plate artwork */
+ showDeleteUbChokeBlockerConfirm = false;
  /** All style codes from team Batch Excel (for New separation dialog). */
  allTeamStyleCodes: string[] = [];
  /** Confirm delete separation .ai file + clear XMP path */
@@ -744,6 +746,12 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
   return [];
  }
 
+ /** Distress flag from Organize Graphics (drives Profiles.json Distress Y/N lookup). */
+ private getGraphicDistress(graphicName: string): boolean {
+  const graphic = this.graphicsData.find((g: any) => g && g.name === graphicName);
+  return !!(graphic && graphic.distress);
+ }
+
  handleGenerateSeparations(separationId: number, graphicName: string): void {
   if (!graphicName) {
    return;
@@ -764,6 +772,8 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
   const styleCodes = separation.styles || [];
   const profileName = separation.profile || '';
   const graphicColors = this.getGraphicColors(graphicName);
+  const graphicDistress = this.getGraphicDistress(graphicName);
+  const profileLookupOptions = { distress: graphicDistress };
 
   const getProfileCodeAndCreateSeparation = async () => {
    let profileCode = null;
@@ -771,7 +781,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 
    if (profileName && !this.isRunningInBrowser) {
     try {
-     const result = await this.controller.getProfileCodeFromName(profileName);
+     const result = await this.controller.getProfileCodeFromName(profileName, profileLookupOptions);
 
      if (result && result.success && result.profileCode) {
       profileCode = result.profileCode;
@@ -782,8 +792,11 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
     try {
      const profileLookupKey = profileCode || profileName;
      if (profileLookupKey) {
-      const profileInfoResult = await this.controller.getProfileInformation(profileLookupKey);
-      console.log('[SEPARATIONS][UB_DEBUG] getProfileInformation result for', profileLookupKey, ':', profileInfoResult);
+      const profileInfoResult = await this.controller.getProfileInformation(
+       profileLookupKey,
+       profileLookupOptions
+      );
+      console.log('[SEPARATIONS][UB_DEBUG] getProfileInformation result for', profileLookupKey, 'distress:', graphicDistress, ':', profileInfoResult);
       if (profileInfoResult && profileInfoResult.success && profileInfoResult.profileInfo) {
        profileInfo = profileInfoResult.profileInfo;
       }
@@ -842,9 +855,20 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
     createdDate: new Date().toISOString(),
     artistName: artistName,
     artistInitials: artistInitials,
-    position: position
+    position: position,
+    distress: graphicDistress,
+    profileDistress: graphicDistress ? 'Y' : 'N'
    };
    if (profileInfo && profileInfo.found) {
+    if (profileInfo.profileName) {
+     profileMetadata.resolvedProfileName = String(profileInfo.profileName);
+    }
+    if (profileInfo.profileCode) {
+     profileMetadata.profileCode = String(profileInfo.profileCode);
+    }
+    if (profileInfo.distress != null && String(profileInfo.distress).trim() !== '') {
+     profileMetadata.profileDistress = String(profileInfo.distress).trim().toUpperCase() === 'Y' ? 'Y' : 'N';
+    }
     const toEnabled = (value: any) => {
      if (value === true || value === 1) return true;
      if (typeof value === 'string') {
@@ -909,6 +933,9 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
     console.log('[SEPARATIONS][UB_DEBUG] profileMetadata underbase flags/meshes:', {
      profileName,
      profileCode,
+     graphicDistress,
+     profileDistress: profileMetadata.profileDistress,
+     resolvedProfileName: profileMetadata.resolvedProfileName,
      underbaseEnabled: profileMetadata.underbaseEnabled,
     underbaseMeshes: profileMetadata.underbaseMeshes,
     underbaseKnockoutBlack: profileMetadata.underbaseKnockoutBlack,
@@ -1536,6 +1563,33 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
      if ((window as any).__LEAP_TAB_NAVIGATION__?.navigateToTab) {
       (window as any).__LEAP_TAB_NAVIGATION__.navigateToTab(2);
      }
+    } else if (res?.error) {
+     alert(res.error);
+    }
+   })
+   ?.catch((err) => {
+    alert(err?.message || String(err));
+   });
+ }
+
+ handleDeleteUbChokeBlockerPlates(): void {
+  if (this.isRunningInBrowser) return;
+  this.showDeleteUbChokeBlockerConfirm = true;
+  this.cdr.detectChanges();
+ }
+
+ cancelDeleteUbChokeBlockerPlates(): void {
+  this.showDeleteUbChokeBlockerConfirm = false;
+  this.cdr.detectChanges();
+ }
+
+ confirmDeleteUbChokeBlockerPlates(): void {
+  this.showDeleteUbChokeBlockerConfirm = false;
+  this.cdr.detectChanges();
+  this.controller.deleteUbChokeBlockerArtInSeparationDoc?.()
+   ?.then((res) => {
+    if (res?.success && (window as any).__LEAP_SEPARATION_COLORS_REFRESH__) {
+     (window as any).__LEAP_SEPARATION_COLORS_REFRESH__();
     } else if (res?.error) {
      alert(res.error);
     }

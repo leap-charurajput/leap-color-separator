@@ -1,0 +1,103 @@
+.create-graphic-modal-overlay {
+ position: fixed;
+ top: 0;
+ left: 0;
+ right: 0;
+ bottom: 0;
+ background-color: rgba(0, 0, 0, 0.7);
+ display: flex;
+ align-items: center;
+ justify-content: center;
+ z-index: 1000;
+}
+
+.create-graphic-modal {
+ background-color: #3a3a3a;
+ border-radius: 8px;
+ width: 320px;
+ max-width: calc(100vw - 20px);
+ box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+ color: #ffffff;
+ padding: 16px;
+}
+
+.create-graphic-modal-title {
+ font-size: 13px;
+ font-weight: 500;
+ text-align: center;
+ margin-bottom: 14px;
+ font-family: 'Adobe Clean', sans-serif;
+}
+
+.create-graphic-warning {
+ background-color: #5c4a00;
+ border: 1px solid #d4a017;
+ color: #ffe066;
+ font-size: 11px;
+ line-height: 1.4;
+ padding: 8px 10px;
+ border-radius: 4px;
+ margin-bottom: 12px;
+ font-family: 'Adobe Clean', sans-serif;
+}
+
+.create-graphic-field {
+ display: flex;
+ align-items: center;
+ gap: 10px;
+ margin-bottom: 10px;
+}
+
+.create-graphic-label {
+ flex: 0 0 62px;
+ font-size: 11px;
+ font-family: 'Adobe Clean', sans-serif;
+}
+
+.create-graphic-control {
+ flex: 1 1 auto;
+ min-width: 0;
+}
+
+.create-graphic-input,
+.create-graphic-size-input {
+ width: 100%;
+ box-sizing: border-box;
+ background-color: #2a2a2a;
+ border: 1px solid #555555;
+ border-radius: 3px;
+ color: #ffffff;
+ font-size: 11px;
+ padding: 4px 6px;
+ font-family: 'Adobe Clean', sans-serif;
+}
+
+.create-graphic-size-row {
+ display: flex;
+ align-items: center;
+ gap: 6px;
+ flex: 1 1 auto;
+}
+
+.create-graphic-size-label {
+ font-size: 11px;
+ color: rgba(255, 255, 255, 0.8);
+}
+
+.create-graphic-size-input {
+ width: 52px;
+ flex: 0 0 52px;
+}
+
+.create-graphic-unit {
+ font-size: 11px;
+ color: rgba(255, 255, 255, 0.7);
+ margin-right: 4px;
+}
+
+.create-graphic-footer {
+ display: flex;
+ justify-content: flex-end;
+ gap: 8px;
+ margin-top: 16px;
+}

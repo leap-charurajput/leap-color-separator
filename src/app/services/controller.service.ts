@@ -1,5 +1,8 @@
 import { Injectable } from '@angular/core';
 import { checkForJSXUpdates, csInterface, evalScript } from '../../libs/helper';
+import { createGraphicFromSelection } from '../../lib/scripts/createGraphicFromSelection.script';
+import { hasActiveDocument as hasHostActiveDocument } from '../../lib/scripts/hasActiveDocument.script';
+import { getSelectionCount as getHostSelectionCount } from '../../lib/scripts/getSelectionCount.script';
 import { LeapSepsLogService } from './leap-seps-log.service';
 
 @Injectable({
@@ -79,6 +82,49 @@ export class ControllerService {
      throw err;
     });
   });
+ }
+
+ getSelectionCount(): Promise<number> {
+  if ((window as any).__adobe_cep__) {
+   return getHostSelectionCount().catch(() => 0);
+  }
+  return this.ensureSession()
+   .then(() => getHostSelectionCount())
+   .catch(() => 0);
+ }
+
+ hasActiveIllustratorDocument(): Promise<boolean> {
+  if ((window as any).__adobe_cep__) {
+   return hasHostActiveDocument().catch(() => false);
+  }
+  return this.ensureSession()
+   .then(() => hasHostActiveDocument())
+   .catch(() => false);
+ }
+
+ createGraphicFromSelection(payload: {
+  position: string;
+  name: string;
+  width: number;
+  height: number;
+ }): Promise<any> {
+  this.log('createGraphicFromSelection called');
+
+  const runCreate = () => {
+   const graphicKey = this.resolveGraphicPositionAbbreviation(payload.position);
+   return this.ensureSession().then(() =>
+    createGraphicFromSelection({
+     ...payload,
+     graphicKey: graphicKey || payload.position
+    })
+   );
+  };
+
+  if (this.graphicPositionLookup.length > 0) {
+   return runCreate();
+  }
+
+  return this.getGraphicPositionOptionsFromJson().then(() => runCreate());
  }
 
  toggleLayerVisibility(layerName: string): Promise<any> {
@@ -1278,11 +1324,105 @@ export class ControllerService {
   });
  }
 
- saveGraphicsData(graphicsData: any[], underbase2Swatch?: string): Promise<any> {
+ private graphicPositionLookup: Array<{ desc: string; abbv: string }> = [];
+
+ getGraphicPositionOptionsFromJson(): Promise<{
+  success: boolean;
+  placements: string[];
+  error?: string;
+ }> {
+  return this.getLeapServerDataPath().then((basePath) => {
+   const cep = (window as any).cep;
+   if (!cep || !cep.fs || !basePath) {
+    this.graphicPositionLookup = [];
+    return { success: false, placements: [], error: 'Server base path not configured' };
+   }
+
+   const path = (window as any).cep_node.require('path');
+   const normalizedBasePath = String(basePath).replace(/\/$/, '');
+   const lookupPath = path.join(normalizedBasePath, 'SETTINGS', 'graphic_positions.json');
+   const result = cep.fs.readFile(lookupPath);
+   if (result.err !== 0) {
+    this.graphicPositionLookup = [];
+    return { success: false, placements: [], error: 'graphic_positions.json not found' };
+   }
+
+   try {
+    const parsed = JSON.parse(result.data);
+    if (!Array.isArray(parsed)) {
+     this.graphicPositionLookup = [];
+     return { success: false, placements: [], error: 'Invalid graphic_positions.json format' };
+    }
+
+    const entries: Array<{ desc: string; abbv: string }> = [];
+    parsed.forEach((entry: any) => {
+     if (!entry) return;
+     const desc = String(
+      entry.DESC != null ? entry.DESC : entry.desc != null ? entry.desc : ''
+     ).trim();
+     const abbv = String(
+      entry.ABBV != null ? entry.ABBV : entry.abbv != null ? entry.abbv : ''
+     ).trim();
+     if (desc) {
+      entries.push({ desc, abbv: abbv || desc });
+     }
+    });
+
+    this.graphicPositionLookup = entries;
+    const placements = this.uniqueNonEmptyStrings(entries.map((entry) => entry.desc)).sort((a, b) =>
+     a.localeCompare(b, undefined, { sensitivity: 'base' })
+    );
+
+    return { success: true, placements };
+   } catch (error: any) {
+    this.graphicPositionLookup = [];
+    return {
+     success: false,
+     placements: [],
+     error: error?.message || 'Failed to parse graphic_positions.json'
+    };
+   }
+  });
+ }
+
+ resolveGraphicPositionAbbreviation(positionDesc: string): string {
+  const original = String(positionDesc || '').trim();
+  if (!original) return '';
+
+  const target = original.toLowerCase();
+  for (const entry of this.graphicPositionLookup) {
+   if (entry.desc.toLowerCase() === target) {
+    return entry.abbv || entry.desc;
+   }
+  }
+
+  return original;
+ }
+
+ saveGraphicsData(
+  graphicsData: any[],
+  underbaseSwatches?: string | { underbase2Swatch?: string; underbase3Swatch?: string; underbase4Swatch?: string }
+ ): Promise<any> {
   this.log('saveGraphicsData called with ' + graphicsData.length + ' graphics');
 
+  let ub2 = '';
+  let ub3 = '';
+  let ub4 = '';
+  if (typeof underbaseSwatches === 'string') {
+   ub2 = underbaseSwatches;
+  } else if (underbaseSwatches) {
+   ub2 = underbaseSwatches.underbase2Swatch || '';
+   ub3 = underbaseSwatches.underbase3Swatch || '';
+   ub4 = underbaseSwatches.underbase4Swatch || '';
+  }
+
   return this.ensureSession().then(() => {
-   const params = { graphicsData: graphicsData, underbase2Swatch: underbase2Swatch || '' };
+   const params = {
+    graphicsData: graphicsData,
+    underbase2Swatch: ub2,
+    underbase3Swatch: ub3,
+    underbase4Swatch: ub4
+   };
    return (window as any).leap
     .scriptLoader()
     .evalScript('handleSaveGraphicsData', params)
@@ -1416,11 +1556,17 @@ export class ControllerService {
   });
  }
 
- getProfileCodeFromName(profileName: string): Promise<any> {
+ getProfileCodeFromName(
+  profileName: string,
+  options?: { distress?: boolean | string }
+ ): Promise<any> {
   this.log('getProfileCodeFromName called for: ' + profileName);
 
   return this.ensureSession().then(() => {
-   const params = { profileName: profileName };
+   const params: { profileName: string; distress?: boolean | string } = { profileName };
+   if (options && options.distress !== undefined && options.distress !== null) {
+    params.distress = options.distress;
+   }
    return (window as any).leap
     .scriptLoader()
     .evalScript('handleGetProfileCodeFromName', params)
@@ -1464,6 +1610,20 @@ export class ControllerService {
      const result = JSON.parse(res);
      return result;
     })
+    .catch((err: any) => {
+     throw err;
+    });
+  });
+ }
+
+ deleteUbChokeBlockerArtInSeparationDoc(): Promise<any> {
+  this.log('deleteUbChokeBlockerArtInSeparationDoc called');
+
+  return this.ensureSession().then(() => {
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleDeleteUbChokeBlockerArtInSeparationDocument', {})
+    .then((res: string) => JSON.parse(res))
     .catch((err: any) => {
      throw err;
     });
@@ -2040,6 +2200,106 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
      return { success: false, error: message };
     });
   });
+ }
+
+ /** Check print preset, PPD, and optional document prerequisites for PostScript export. */
+ checkPostscriptReadiness(options?: { requireDocument?: boolean }): Promise<any> {
+  const requireDocument = options?.requireDocument === true;
+  return this.ensureSession().then(() => {
+   const script = this.buildCheckPostscriptReadinessScript(requireDocument);
+   return evalScript(script)
+     .then((res: unknown) => {
+      const str = typeof res === 'string' ? res : '';
+      return str ? JSON.parse(str) : { success: false, ready: false, issues: [] };
+     })
+     .catch((err: any) => ({
+      success: false,
+      ready: false,
+      issues: [],
+      error: err?.message || String(err)
+     }));
+  });
+ }
+
+ private buildCheckPostscriptReadinessScript(requireDocument: boolean): string {
+  const requireDocumentLiteral = requireDocument ? 'true' : 'false';
+  return `
+(function() {
+  var PRESET_NAME = 'LEAP_SEPS_POSTSCRIPT';
+  var requireDocument = ${requireDocumentLiteral};
+  var issues = [];
+
+  function pushIssue(id, message) {
+    issues.push({ id: id, message: message });
+  }
+
+  function trimStr(s) {
+    return String(s || "").replace(/^\\s+|\\s+$/g, "");
+  }
+
+  var matchedPresetName = null;
+  var presetListNames = [];
+
+  try {
+    var allPresets = app.printPresetsList;
+    if (allPresets && allPresets.length) {
+      var target = PRESET_NAME.toLowerCase();
+      for (var p = 0; p < allPresets.length; p++) {
+        var entry = trimStr(allPresets[p]);
+        if (entry) presetListNames.push(entry);
+        if (entry.toLowerCase() === target) {
+          matchedPresetName = entry;
+          break;
+        }
+      }
+    }
+  } catch (presetListErr) { }
+
+  if (!matchedPresetName) {
+    var listHint = presetListNames.length
+      ? " Illustrator printPresetsList: " + presetListNames.join(", ") + "."
+      : "";
+    pushIssue(
+      "PRESET_NOT_FOUND",
+      "Print preset \\"" + PRESET_NAME + "\\" was not found in Illustrator's print preset list." + listHint
+    );
+  }
+
+  if (requireDocument) {
+    if (!app.documents.length) {
+      pushIssue("NO_DOCUMENT", "No Illustrator document is open.");
+    } else {
+      var doc = app.activeDocument;
+      if (!doc.artboards || doc.artboards.length === 0) {
+        pushIssue("NO_ARTBOARDS", "The active document has no artboards.");
+      } else {
+        var gridFound = false;
+        for (var abIndex = 0; abIndex < doc.artboards.length; abIndex++) {
+          var ab = doc.artboards[abIndex];
+          var abName = (ab && ab.name != null) ? ab.name.toString() : "";
+          if (abName && abName.toUpperCase() === "GRID") {
+            gridFound = true;
+            break;
+          }
+        }
+        if (!gridFound) {
+          pushIssue(
+            "GRID_ARTBOARD_MISSING",
+            "Artboard named GRID was not found in the active document. " +
+            "PostScript export prints the GRID artboard only."
+          );
+        }
+      }
+    }
+  }
+
+  return JSON.stringify({
+    success: true,
+    ready: issues.length === 0,
+    issues: issues
+  });
+})();
+`;
  }
 
  /** Export GRID artboard to PostScript (postscriptFilePath). Does not run Distiller. */
@@ -2796,62 +3056,29 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
       outputFile = new File(outputPath);
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    // AI 2026 (v30+) / macOS 26: the ExtendScript PPD-enumeration API
-    // throws error 'FPVI' and returns no printers.  Setting printerName /
-    // PPDName on a fresh PrintOptions leaves an internal null printer
-    // pointer → SIGSEGV inside doc.print() that ExtendScript try/catch
-    // cannot intercept.
-    //
-    // Safe path: load PrintOptions from a named preset that was created
-    // through the Print dialog UI.  The UI creates a real printer object;
-    // getPrintPresetSettings() returns that already-initialised reference.
-    // We then override only the dynamic parts (output file, artboard range,
-    // ink enable/disable) and call doc.print() with a valid printer object.
-    //
-    // ONE-TIME SETUP for the user:
-    //   File > Print → choose PostScript printer / IBlock v2 PPD →
-    //   click "Save Preset…" → name it exactly: LEAP_SEPS_POSTSCRIPT
-    // ─────────────────────────────────────────────────────────────────────
-    var PRESET_NAME = 'LEAP_SEPS_POSTSCRIPT';
+    var flatOptions = new PrintFlattenerOptions();
+    flatOptions.clipComplexRegions = false;
+    flatOptions.convertStrokesToOutlines = false;
+    flatOptions.convertTextToOutlines = false;
+    flatOptions.flatteningBalance = 100;
+    flatOptions.gradientResolution = 300;
+    flatOptions.rasterizationResolution = 300;
 
-    // Check preset list (this API call does NOT touch the PPD subsystem,
-    // so it succeeds even when PPD enumeration fails).
-    var presetExists = false;
-    try {
-      var allPresets = app.printPresetsList;
-      for (var p = 0; p < allPresets.length; p++) {
-        if (allPresets[p] === PRESET_NAME) { presetExists = true; break; }
-      }
-    } catch (presetListErr) { /* will fall through to NOT-FOUND below */ }
+    var fontOptions = new PrintFontOptions();
+    fontOptions.downloadFonts = PrintFontDownloadMode.DOWNLOADSUBSET;
 
-    if (!presetExists) {
-      return JSON.stringify({
-        success: false,
-        error: "PRESET_NOT_FOUND",
-        message:
-          'Print preset \\"LEAP_SEPS_POSTSCRIPT\\" not found. ' +
-          'One-time setup: in Illustrator go to Edit > Print Presets, ' +
-          'create a new preset with your PostScript printer and the IBlock v2 PPD, ' +
-          'and name it exactly LEAP_SEPS_POSTSCRIPT.'
-      });
-    }
+    var jobOptions = new PrintJobOptions();
+    jobOptions.copies = 1;
+    jobOptions.printArea = PrintingBounds.ARTBOARDBOUNDS;
+    jobOptions.printAllArtboards = false;
+    jobOptions.artboardRange = (gridArtboardIndex + 1).toString();
+    jobOptions.file = new File(outputPath);
 
-    // Load the preset — returns a PrintOptions whose printer reference is
-    // already initialised (created by the UI, not the broken script API).
-    var printOptions;
-    try {
-      printOptions = app.getPrintPresetSettings(PRESET_NAME);
-    } catch (presetLoadErr) {
-      return JSON.stringify({
-        success: false,
-        error: "PRESET_LOAD_FAILED",
-        message: 'Could not load print preset \\"' + PRESET_NAME + '\\": ' +
-                 (presetLoadErr.message || presetLoadErr.toString())
-      });
-    }
+    var colorSepOptions = new PrintColorSeparationOptions();
+    colorSepOptions.colorSeparationMode = PrintColorSeparationMode.HOSTBASEDSEPARATION;
+    colorSepOptions.convertSpotColors = false;
+    colorSepOptions.overprintBlack = false;
 
-    // ── Normalise ink names ──────────────────────────────────────────────
     function normalizeInkName(name) {
       return String(name == null ? "" : name)
         .replace(/\\s+/g, " ")
@@ -2863,7 +3090,6 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
       inksLookup[normalizeInkName(inks[i])] = true;
     }
 
-    // ── Set ink enable/disable on the live document ink objects ─────────
     var inkDebug = [];
     var inkList = doc.inkList;
     for (var i = 0; i < inkList.length; i++) {
@@ -2871,21 +3097,43 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
       var normalizedName = normalizeInkName(ink.name);
       var enabled = !!inksLookup[normalizedName];
       inkDebug.push({ name: String(ink.name), normalized: normalizedName, enabled: enabled });
-      try {
-        ink.inkInfo.printingStatus = enabled ? InkPrintStatus.ENABLEINK : InkPrintStatus.DISABLEINK;
-      } catch (inkErr) { /* process inks may not support DISABLE — ignore */ }
+      if (enabled) {
+        ink.inkInfo.printingStatus = InkPrintStatus.ENABLEINK;
+      } else {
+        ink.inkInfo.printingStatus = InkPrintStatus.DISABLEINK;
+      }
     }
+    colorSepOptions.inkList = inkList;
 
-    // ── Override only the dynamic parts of the preset ───────────────────
-    // Output file + artboard (colour-sep mode, marks, PS level, etc. come
-    // from the preset the user configured).
-    var jobOptions = new PrintJobOptions();
-    jobOptions.copies        = 1;
-    jobOptions.printArea     = PrintingBounds.ARTBOARDBOUNDS;
-    jobOptions.printAllArtboards = false;
-    jobOptions.artboardRange = (gridArtboardIndex + 1).toString();
-    jobOptions.file          = new File(outputPath);
-    printOptions.jobOptions  = jobOptions;
+    var marksOptions = new PrintPageMarksOptions();
+    marksOptions.trimMarks = false;
+    marksOptions.registrationMarks = false;
+    marksOptions.colorBars = false;
+    marksOptions.pageInformationMarks = false;
+
+    var psOptions = new PrintPostScriptOptions();
+    psOptions.postScriptLevel = PrinterPostScriptLevelEnum.PSLEVEL2;
+    psOptions.binaryPrinting = false;
+    psOptions.imageCompression = PostScriptImageCompressionType.IMAGECOMPRESSIONNONE;
+
+    var printCoordinateOptions = new PrintCoordinateOptions();
+    printCoordinateOptions.fitToPage = true;
+
+    var printOptions = new PrintOptions();
+    printOptions.printPreset = 'LEAP_SEPS_POSTSCRIPT';
+    printOptions.colorSeparationOptions = colorSepOptions;
+    printOptions.flattenerOptions = flatOptions;
+    printOptions.fontOptions = fontOptions;
+    printOptions.jobOptions = jobOptions;
+    printOptions.pageMarksOptions = marksOptions;
+    printOptions.coordinateOptions = printCoordinateOptions;
+    printOptions.postScriptOptions = psOptions;
+    // NOTE: Do NOT set printOptions.printerName / printOptions.PPDName by script.
+    // On Illustrator 2026 this makes print() dereference a null pointer and hard-crash
+    // (the PPD model name cannot be resolved unless the PPD has already been initialized
+    // by a manual File > Print). The print preset above carries the printer/PPD instead.
+    // printOptions.printerName = 'Adobe PostScript File';
+    // printOptions.PPDName = ${ppdNameLiteral};
 
     var previousActiveArtboardIndex = doc.artboards.getActiveArtboardIndex();
     try {
@@ -2933,12 +3181,15 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
   });
  }
 
- getProfileInformation(profileCode: string): Promise<any> {
+ getProfileInformation(
+  profileCode: string,
+  options?: { distress?: boolean | string }
+ ): Promise<any> {
   this.log('getProfileInformation called for: ' + profileCode);
 
   return this.ensureSession().then(() => {
    return (window as any).leap
-    .getProfileInformation(profileCode)
+    .getProfileInformation(profileCode, options || {})
     .then((result: any) => {
      return result;
     })

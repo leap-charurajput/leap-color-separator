@@ -1,0 +1,27 @@
+:host {
+ display: inline-flex;
+ flex-shrink: 0;
+ overflow: visible;
+}
+
+.postscript-setup-alert-trigger {
+ display: inline-flex;
+ align-items: center;
+ justify-content: center;
+ flex-shrink: 0;
+ padding: 2px 1px;
+ border: none;
+ background: transparent;
+ cursor: pointer;
+ line-height: 0;
+ overflow: visible;
+}
+
+.postscript-setup-alert-trigger svg {
+ display: block;
+ overflow: visible;
+}
+
+.postscript-setup-alert-trigger.is-active svg path {
+ filter: brightness(1.1);
+}

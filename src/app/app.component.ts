@@ -12,7 +12,7 @@ import { LeapSepsLogService } from './services/leap-seps-log.service';
 export class AppComponent implements OnInit, OnDestroy {
  private readonly panelVersion = '1.0.1';
  /** Bump this string when you ship a new build (same format as before: "Mon DD, YYYY"). */
- private readonly panelDeployDate = 'June 24, 2026';
+ private readonly panelDeployDate = 'July 01, 2026';
  activeTab: number | null = 0;
  selectedMenuOption: string | null = null;
  documentRefreshKey = 0;
@@ -20,6 +20,7 @@ export class AppComponent implements OnInit, OnDestroy {
  private flyoutMenuListener: any;
  showConfirmDialog = false;
  confirmError: string | null = null;
+ postscriptIssues: Array<{ id: string; message: string }> = [];
 
  get panelBuildStamp(): string {
   return `${this.panelDeployDate} | v${this.panelVersion}`;
@@ -47,6 +48,7 @@ export class AppComponent implements OnInit, OnDestroy {
    .then(() => {
     this.registerDocumentActivateListener();
     this.registerFlyoutMenu();
+    this.refreshPostscriptReadiness();
 
     (window as any).__LEAP_TAB_NAVIGATION__ = {
      navigateToTab: (index: number) => {
@@ -143,6 +145,19 @@ export class AppComponent implements OnInit, OnDestroy {
   this.activeTab = null;
  }
 
+ private refreshPostscriptReadiness(): void {
+  if (!(window as any).__adobe_cep__) {
+   this.postscriptIssues = [];
+   return;
+  }
+  this.controller.checkPostscriptReadiness({ requireDocument: false }).then((result: any) => {
+   if (result?.success) {
+    this.postscriptIssues = Array.isArray(result.issues) ? result.issues : [];
+    this.cdr.detectChanges();
+   }
+  }).catch(() => {});
+ }
+
  private selectTabByName(tabName: string): void {
   this.selectedMenuOption = null;
   switch (tabName) {
@@ -217,6 +232,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
    const handleDocumentActivate = () => {
     this.documentRefreshKey++;
+    this.refreshPostscriptReadiness();
     this.cdr.detectChanges();
     this.autoSelectTabForActiveDocument();
    };

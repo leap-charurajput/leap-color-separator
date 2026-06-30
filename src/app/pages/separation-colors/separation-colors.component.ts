@@ -67,6 +67,8 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  isSeparationModalOpen = false;
  isCompoundModalOpen = false;
  isExportModalOpen = false;
+ exportPostscriptReady = true;
+ exportPostscriptIssues: Array<{ id: string; message: string }> = [];
  isAddSelectionInkConfirmOpen = false;
  selectedInkForAdd: string | null = null;
  isRemoveColorDialogOpen = false;
@@ -567,7 +569,14 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
      const profileCode =
       this.documentProfileMetadata.profileCode || this.documentProfileMetadata.profileName;
      if (profileCode) {
-      fallbackProfilePromise = this.controller.getProfileInformation(profileCode);
+      const meta: any = this.documentProfileMetadata;
+      const distressOpt =
+       meta.distress !== undefined && meta.distress !== null
+        ? meta.distress
+        : meta.profileDistress;
+      const profileOptions =
+       distressOpt !== undefined && distressOpt !== null ? { distress: distressOpt } : undefined;
+      fallbackProfilePromise = this.controller.getProfileInformation(profileCode, profileOptions);
      }
     }
 
@@ -682,11 +691,6 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   });
  }
 
- /** Underbase 2 uses the Graphics-tab swatch layer — no separate "White UB 2" plate. */
- private shouldHideWhiteUb2Plate(): boolean {
-  return this.getProfileUnderbasePassCount() >= 2;
- }
-
  private getUnderbase2SwatchNameFromMetadata(): string {
   const meta = this.documentProfileMetadata || {};
   if (meta.underbase2Swatch != null && String(meta.underbase2Swatch).trim() !== '') {
@@ -695,9 +699,10 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   return '';
  }
 
- /** Underbase 2 uses the Graphics-tab swatch layer — no separate "White UB 2" plate. */
- private usesGraphicsUnderbase2Layer(): boolean {
-  return this.shouldHideWhiteUb2Plate();
+ private getWhiteUbPassNumber(colorName: string): number {
+  const match = String(colorName || '').trim().match(/^white\s*ub(?:\s+(\d+))?$/i);
+  if (!match) return 0;
+  return match[1] ? parseInt(match[1], 10) : 1;
  }
 
  private getProfileUnderbasePassCount(): number {
@@ -728,14 +733,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  }
 
  private filterPlatesForUi(swatches: any[]): any[] {
-  let filtered = this.filterValidSwatches(swatches);
-  if (this.shouldHideWhiteUb2Plate()) {
-   filtered = filtered.filter((swatch) => {
-    const name = String(swatch?.name || '').trim().toLowerCase();
-    return name !== 'white ub 2';
-   });
-  }
-  return filtered;
+  return this.filterValidSwatches(swatches);
  }
 
  private createColorRowFromSwatch(
@@ -770,16 +768,11 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   const profileColorMesh = this.getProfileColorMesh(profileInfo);
   const profileBlockerMesh = this.getProfileBlockerMesh(profileInfo);
   const underbaseMeshes = this.getProfileUnderbaseMeshes();
-  const underbase2Swatch = this.getUnderbase2SwatchNameFromMetadata();
   let meshValue = inkInfo.mesh || '110';
   if (isWhiteUBColor) {
-   meshValue = inkInfo.mesh || '110';
-  } else if (
-   underbase2Swatch &&
-   String(swatchData.name || '').trim().toLowerCase() === underbase2Swatch.toLowerCase() &&
-   underbaseMeshes[1]
-  ) {
-   meshValue = underbaseMeshes[1];
+   const ubPass = this.getWhiteUbPassNumber(swatchData.name);
+   const meshFromProfile = ubPass > 0 ? underbaseMeshes[ubPass - 1] : '';
+   meshValue = meshFromProfile || inkInfo.mesh || '110';
   } else if (isBlockerColor && profileBlockerMesh !== '') {
    meshValue = profileBlockerMesh;
   } else if (profileColorMesh !== '') {
@@ -843,7 +836,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  private sortColorRowsWithWhiteUBAtBottom(rows: ColorRow[]): ColorRow[] {
   if (!rows || rows.length === 0) return rows;
 
-  // Print order: Blocker first, then all White UB rows, then other inks. Stable within each group.
+  // Print order: Blocker first, then White UB rows (1, 2, 3…), then other inks. Stable within each group.
   const rank = (row: ColorRow): number => {
    if (this.isBlocker(row.colorName)) return 0;
    if (this.isWhiteUB(row.colorName)) return 1;
@@ -856,9 +849,22 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
     const ra = rank(a.row);
     const rb = rank(b.row);
     if (ra !== rb) return ra - rb;
+    if (ra === 1) {
+     const pa = this.getWhiteUbPassIndex(a.row.colorName);
+     const pb = this.getWhiteUbPassIndex(b.row.colorName);
+     if (pa !== pb) return pa - pb;
+    }
     return a.index - b.index;
    })
    .map((x) => x.row);
+ }
+
+ private getWhiteUbPassIndex(colorName: string): number {
+  if (!colorName) return 999;
+  const lower = String(colorName).trim().toLowerCase();
+  if (lower === 'white ub') return 1;
+  const match = lower.match(/^white ub\s+(\d+)$/);
+  return match ? parseInt(match[1], 10) : 999;
  }
 
  isWhiteUB(colorName: string): boolean {
@@ -954,12 +960,7 @@ private getProfileBlockerMesh(profileInfo?: any): string {
 }
 
  private getRequiredWhiteUbCountFromProfile(): number {
-  const passCount = this.getProfileUnderbasePassCount();
-  // Underbase 2 is represented by the Graphics swatch plate (e.g. PANTONE White C), not "White UB 2".
-  if (this.usesGraphicsUnderbase2Layer() && passCount >= 2) {
-   return passCount - 1;
-  }
-  return passCount;
+  return this.getProfileUnderbasePassCount();
  }
 
  private getProfileUnderbaseMeshes(): string[] {
@@ -985,8 +986,8 @@ private getProfileBlockerMesh(profileInfo?: any): string {
   const underbaseMeshes = this.getProfileUnderbaseMeshes();
   const expandedCount = Math.max(requiredWhiteCount, whiteRows.length);
 
-  const sortedWhiteRows = [...whiteRows].sort((a, b) =>
-   (a.colorName || '').localeCompare(b.colorName || '', undefined, { numeric: true, sensitivity: 'base' })
+  const sortedWhiteRows = [...whiteRows].sort(
+   (a, b) => this.getWhiteUbPassIndex(a.colorName) - this.getWhiteUbPassIndex(b.colorName)
   );
   const whiteTemplate = sortedWhiteRows[0];
   const baseWhiteName = (whiteTemplate.colorName || 'White UB').replace(/\s+\d+$/g, '').trim();
@@ -996,9 +997,6 @@ private getProfileBlockerMesh(profileInfo?: any): string {
    const sourceRow = sortedWhiteRows[i] || whiteTemplate;
    const meshFromProfile = underbaseMeshes[i] || '';
    const rowColorName = i === 0 ? baseWhiteName : `${baseWhiteName} ${i + 1}`;
-   if (rowColorName.trim().toLowerCase() === 'white ub 2' && this.shouldHideWhiteUb2Plate()) {
-    continue;
-   }
    const hexFromDocument = this.getSwatchHexByName(rowColorName);
    expandedWhiteRows.push({
     ...sourceRow,
@@ -1044,9 +1042,20 @@ private getProfileBlockerMesh(profileInfo?: any): string {
  }
 
  handleExportProcess(): void {
-  this.ngZone.run(() => {
-   this.isExportModalOpen = true;
-   this.cdr.detectChanges();
+  this.controller.checkPostscriptReadiness({ requireDocument: true }).then((result: any) => {
+   if (result?.success) {
+    this.exportPostscriptReady = !!result.ready;
+    this.exportPostscriptIssues = Array.isArray(result.issues) ? result.issues : [];
+   }
+   this.ngZone.run(() => {
+    this.isExportModalOpen = true;
+    this.cdr.detectChanges();
+   });
+  }).catch(() => {
+   this.ngZone.run(() => {
+    this.isExportModalOpen = true;
+    this.cdr.detectChanges();
+   });
   });
  }
 

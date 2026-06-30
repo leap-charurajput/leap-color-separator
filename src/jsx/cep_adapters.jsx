@@ -1503,25 +1503,7 @@ function isBlockerEnabled(profileMetadata) {
 }
 
 function enrichProfileMetadataWithUnderbase2(profileMetadata, doc) {
- if (!profileMetadata) {
-  profileMetadata = {};
- }
- try {
-  if (profileMetadata.underbase2Swatch == null || String(profileMetadata.underbase2Swatch).replace(/^\s+|\s+$/g, "") === "") {
-   var targetDoc = doc || (app.documents.length ? app.activeDocument : null);
-   if (targetDoc) {
-    var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", targetDoc);
-    if (xmp.isXmpCreated && xmp.doesStructFieldExist("Underbase2Swatch")) {
-     var ub2Saved = xmp.getStructField("Underbase2Swatch", false);
-     if (ub2Saved != null && String(ub2Saved).replace(/^\s+|\s+$/g, "") !== "") {
-      profileMetadata.underbase2Swatch = String(ub2Saved).replace(/^\s+|\s+$/g, "");
-      appendLeapSepLog("Underbase 2 swatch from document: " + profileMetadata.underbase2Swatch);
-     }
-    }
-   }
-  }
- } catch (e) { }
- return profileMetadata;
+ return enrichProfileMetadataWithGraphicsUnderbaseSwatches(profileMetadata, doc);
 }
 
 function applyProfileUnderbaseLayers(profileMetadata) {
@@ -1532,7 +1514,7 @@ function applyProfileUnderbaseLayers(profileMetadata) {
   if (!enabled || enabled.length < 2) {
    return;
   }
-  // Underbase 2 is built by generateUnderbase on the Graphics swatch layer — do not duplicate White UB 2.
+  // Underbase 2+ is built by generateUnderbase as "White UB N" layers filled with the Graphics swatch.
   if (enabled[2] === true) {
    ensureSwatchExistsFromSource(CONSTANTS.LAYER_NAMES.WHITE_UB, CONSTANTS.LAYER_NAMES.WHITE_UB + " 3");
    duplicateLayerContentsToNewLayer(CONSTANTS.LAYER_NAMES.WHITE_UB, CONSTANTS.LAYER_NAMES.WHITE_UB + " 3");
@@ -2733,12 +2715,29 @@ function handleReorderSeparatedArtLayers(params_string) {
    all.push(separatedArtLayer.layers[i]);
   }
 
+  function sortStructuredTailLayersForPanel(tailLayers) {
+   function tailRank(layer) {
+    if (!layer || !layer.name) return 50;
+    var n = String(layer.name);
+    if (n === String(CONSTANTS.LAYER_NAMES.CHOKE)) return 0;
+    if (isWhiteUbLayerName(n)) return getWhiteUbLayerNumber(n);
+    if (n === String(CONSTANTS.LAYER_NAMES.BLOCKER) || /^blocker(\s+\d+)?$/i.test(n)) return 100;
+    return 50;
+   }
+   tailLayers.sort(function(a, b) {
+    return tailRank(a) - tailRank(b);
+   });
+   return tailLayers;
+  }
+
   var tails = [];
   var nonTail = [];
   for (i = 0; i < all.length; i++) {
    if (isStructuredTailSublayerName(all[i].name)) tails.push(all[i]);
    else nonTail.push(all[i]);
   }
+
+  tails = sortStructuredTailLayersForPanel(tails);
 
   var matchedOrdered = [];
   var usedLayer = {};
@@ -3300,105 +3299,6 @@ function handleGetGraphicSwatches(params_string) {
     swatches.push(resolveLayerSwatchData(activeDoc, swatchName));
    }
 
-   // Check if "White UB" exists in document swatches and add it if not already in the list
-   // Also ensure White UB has valid CMYK/RGB data even if swatch doesn't exist
-   var whiteUBName = "White UB";
-   var hasWhiteUB = false;
-   var whiteUBIndex = -1;
-   for (var j = 0; j < swatches.length; j++) {
-    if (swatches[j].name === whiteUBName ||
-     swatches[j].name.toLowerCase() === whiteUBName.toLowerCase()) {
-     hasWhiteUB = true;
-     whiteUBIndex = j;
-     break;
-    }
-   }
-
-   // If White UB exists but doesn't have CMYK/RGB data, add default values
-   if (hasWhiteUB && whiteUBIndex >= 0) {
-    var existingWhiteUB = swatches[whiteUBIndex];
-    if ((existingWhiteUB.cmyk === null || existingWhiteUB.rgb === null) &&
-     !(existingWhiteUB.cmyk && existingWhiteUB.rgb)) {
-     // White UB exists but missing color data, add defaults
-     existingWhiteUB.hex = existingWhiteUB.hex || "#FFFFFF";
-     existingWhiteUB.cmyk = existingWhiteUB.cmyk || { c: 0, m: 0, y: 0, k: 0 };
-     existingWhiteUB.rgb = existingWhiteUB.rgb || { r: 255, g: 255, b: 255 };
-    }
-   }
-
-   if (!hasWhiteUB) {
-    try {
-     var whiteUBSwatch = activeDoc.swatches.getByName(whiteUBName);
-     if (whiteUBSwatch && whiteUBSwatch.color) {
-      var whiteUBColor = whiteUBSwatch.color;
-      var whiteUBData = {
-       name: whiteUBName,
-       hex: "#808080", // Default gray
-       cmyk: null,
-       rgb: null
-      };
-
-      // Get hex color
-      whiteUBData.hex = getColorHex(whiteUBColor);
-
-      // Get CMYK values if available
-      if (whiteUBColor.typename === "SpotColor") {
-       var spotColor = whiteUBColor.spot.color;
-       if (spotColor.typename === "CMYKColor") {
-        whiteUBData.cmyk = {
-         c: Math.round(spotColor.cyan),
-         m: Math.round(spotColor.magenta),
-         y: Math.round(spotColor.yellow),
-         k: Math.round(spotColor.black)
-        };
-       }
-      } else if (whiteUBColor.typename === "CMYKColor") {
-       whiteUBData.cmyk = {
-        c: Math.round(whiteUBColor.cyan),
-        m: Math.round(whiteUBColor.magenta),
-        y: Math.round(whiteUBColor.yellow),
-        k: Math.round(whiteUBColor.black)
-       };
-      }
-
-      // Get RGB values
-      if (whiteUBColor.typename === "RGBColor") {
-       whiteUBData.rgb = {
-        r: Math.round(whiteUBColor.red),
-        g: Math.round(whiteUBColor.green),
-        b: Math.round(whiteUBColor.blue)
-       };
-      } else if (whiteUBData.cmyk) {
-       // Convert CMYK to RGB
-       var rgb = cmykToRgb(whiteUBData.cmyk.c, whiteUBData.cmyk.m, whiteUBData.cmyk.y, whiteUBData.cmyk.k);
-       whiteUBData.rgb = rgb;
-      }
-
-      swatches.push(whiteUBData);
-     } else {
-      // White UB swatch not found in document, but add it anyway with default values
-      // This ensures White UB appears in the list even if swatch doesn't exist
-      var whiteUBData = {
-       name: whiteUBName,
-       hex: "#FFFFFF", // White color
-       cmyk: { c: 0, m: 0, y: 0, k: 0 }, // Default white CMYK
-       rgb: { r: 255, g: 255, b: 255 } // Default white RGB
-      };
-      swatches.push(whiteUBData);
-     }
-    } catch (e) {
-     // White UB swatch not found in document, but add it anyway with default values
-     // This ensures White UB appears in the list even if swatch doesn't exist
-     var whiteUBData = {
-      name: whiteUBName,
-      hex: "#FFFFFF", // White color
-      cmyk: { c: 0, m: 0, y: 0, k: 0 }, // Default white CMYK
-      rgb: { r: 255, g: 255, b: 255 } // Default white RGB
-     };
-     swatches.push(whiteUBData);
-    }
-   }
-
    return JSON.stringify({
     success: true,
     swatches: swatches
@@ -3942,10 +3842,18 @@ function handleSaveGraphicsData(params_string) {
   // This avoids expensive serialization on every write
   xmp.setStructField("GraphicsOrganizationData", graphicsData, true, false);
 
-  // The Graphics-page "Underbase 2 Swatch" choice (optional), stored as a separate XMP field.
+  // The Graphics-page underbase swatch choices (optional), stored as separate XMP fields.
   var underbase2Swatch = params && params.underbase2Swatch != null ? String(params.underbase2Swatch) : "";
+  var underbase3Swatch = params && params.underbase3Swatch != null ? String(params.underbase3Swatch) : "";
+  var underbase4Swatch = params && params.underbase4Swatch != null ? String(params.underbase4Swatch) : "";
   if (underbase2Swatch !== "") {
    xmp.setStructField("Underbase2Swatch", underbase2Swatch, false, false);
+  }
+  if (underbase3Swatch !== "") {
+   xmp.setStructField("Underbase3Swatch", underbase3Swatch, false, false);
+  }
+  if (underbase4Swatch !== "") {
+   xmp.setStructField("Underbase4Swatch", underbase4Swatch, false, false);
   }
 
   // Commit all changes at once (much faster than committing on every setStructField)
@@ -4003,17 +3911,33 @@ function handleLoadGraphicsData(params_string) {
   }
 
   var underbase2Swatch = "";
+  var underbase3Swatch = "";
+  var underbase4Swatch = "";
   if (xmp.doesStructFieldExist("Underbase2Swatch")) {
    var ub2 = xmp.getStructField("Underbase2Swatch", false);
    if (ub2 != null && typeof ub2 === "string") {
     underbase2Swatch = ub2;
    }
   }
+  if (xmp.doesStructFieldExist("Underbase3Swatch")) {
+   var ub3 = xmp.getStructField("Underbase3Swatch", false);
+   if (ub3 != null && typeof ub3 === "string") {
+    underbase3Swatch = ub3;
+   }
+  }
+  if (xmp.doesStructFieldExist("Underbase4Swatch")) {
+   var ub4 = xmp.getStructField("Underbase4Swatch", false);
+   if (ub4 != null && typeof ub4 === "string") {
+    underbase4Swatch = ub4;
+   }
+  }
 
   return JSON.stringify({
    success: true,
    graphicsData: graphicsData,
-   underbase2Swatch: underbase2Swatch
+   underbase2Swatch: underbase2Swatch,
+   underbase3Swatch: underbase3Swatch,
+   underbase4Swatch: underbase4Swatch
   });
 
  } catch (e) {
@@ -4036,7 +3960,24 @@ function getProfilesJsonPath() {
   return null;
  }
 }
-function getProfileCodeFromName(profileName) {
+function normalizeDistressFlagForProfile(value) {
+ if (value === true || value === 1) {
+  return "Y";
+ }
+ if (typeof value === "string") {
+  var normalized = value.replace(/^\s+|\s+$/g, "").toUpperCase();
+  if (normalized === "Y" || normalized === "YES" || normalized === "TRUE" || normalized === "1") {
+   return "Y";
+  }
+ }
+ return "N";
+}
+
+function profileDistressMatchesForLookup(profile, distressFlag) {
+ return normalizeDistressFlagForProfile(profile && profile["Distress"]) === normalizeDistressFlagForProfile(distressFlag);
+}
+
+function getProfileCodeFromName(profileName, distressOption) {
  try {
   if (!profileName) {
    return null;
@@ -4080,16 +4021,27 @@ function getProfileCodeFromName(profileName) {
    return normalizeProfileName(value).replace(/[^a-z0-9]/g, "");
   }
 
+  function extractProfileCode(profile) {
+   var profileCode = profile["Profile Code"] || profile.code || "";
+   return profileCode ? profileCode.toString().replace(/^\s+|\s+$/g, "") : "";
+  }
+
+  var hasDistressFilter = distressOption !== undefined && distressOption !== null;
+  var requestedDistress = hasDistressFilter ? normalizeDistressFlagForProfile(distressOption) : null;
+
   var searchName = normalizeProfileName(profileName);
   var searchNameCompact = compactProfileName(profileName);
   for (var i = 0; i < parsed.length; i++) {
    var profile = parsed[i];
-   var profileNameInFile = profile['Profile Name'] || profile.profileName || '';
+   var profileNameInFile = profile["Profile Name"] || profile.profileName || "";
    var normalizedNameInFile = normalizeProfileName(profileNameInFile);
    if (normalizedNameInFile === searchName) {
-    var profileCode = profile['Profile Code'] || profile.code || '';
-    if (profileCode) {
-     return profileCode.toString().trim();
+    if (hasDistressFilter && !profileDistressMatchesForLookup(profile, requestedDistress)) {
+     continue;
+    }
+    var codeFromName = extractProfileCode(profile);
+    if (codeFromName) {
+     return codeFromName;
     }
    }
   }
@@ -4097,12 +4049,33 @@ function getProfileCodeFromName(profileName) {
   // Secondary safe match only for punctuation/spacing differences.
   for (var j = 0; j < parsed.length; j++) {
    var profile2 = parsed[j];
-   var profileNameInFile2 = profile2['Profile Name'] || profile2.profileName || '';
+   var profileNameInFile2 = profile2["Profile Name"] || profile2.profileName || "";
    var compactNameInFile = compactProfileName(profileNameInFile2);
    if (compactNameInFile && searchNameCompact && compactNameInFile === searchNameCompact) {
-    var profileCode = profile2['Profile Code'] || profile2.code || '';
-    if (profileCode) {
-     return profileCode.toString().trim();
+    if (hasDistressFilter && !profileDistressMatchesForLookup(profile2, requestedDistress)) {
+     continue;
+    }
+    var codeFromCompact = extractProfileCode(profile2);
+    if (codeFromCompact) {
+     return codeFromCompact;
+    }
+   }
+  }
+
+  // Distressed variant missing — fall back to non-distressed (Distress N).
+  if (hasDistressFilter && requestedDistress === "Y") {
+   for (var k = 0; k < parsed.length; k++) {
+    var profile3 = parsed[k];
+    var profileNameInFile3 = profile3["Profile Name"] || profile3.profileName || "";
+    if (normalizeProfileName(profileNameInFile3) !== searchName) {
+     continue;
+    }
+    if (!profileDistressMatchesForLookup(profile3, "N")) {
+     continue;
+    }
+    var codeFromFallback = extractProfileCode(profile3);
+    if (codeFromFallback) {
+     return codeFromFallback;
     }
    }
   }
@@ -4217,13 +4190,14 @@ function handleGetProfileCodeFromName(params_string) {
  try {
   var params = JSON.parse(params_string);
   var profileName = params.profileName;
+  var distress = params.distress;
   if (!profileName) {
    return JSON.stringify({
     success: false,
     error: "Profile name is required"
    });
   }
-  var profileCode = getProfileCodeFromName(profileName);
+  var profileCode = getProfileCodeFromName(profileName, distress);
   return JSON.stringify({
    success: true,
    profileCode: profileCode
@@ -5038,6 +5012,186 @@ function handleDeleteAllPlatesInSeparationDocument(params_string) {
    success: true,
    message: "Deleted " + count + " plate(s)",
    deletedCount: count
+  });
+ } catch (e) {
+  return JSON.stringify({
+   success: false,
+   error: e.message || e.toString()
+  });
+ }
+}
+
+function handleDeleteUbChokeBlockerArtInSeparationDocument(params_string) {
+ try {
+  if (!app.documents.length) {
+   return JSON.stringify({ success: false, error: "No documents open" });
+  }
+  var doc = app.activeDocument;
+  var docPath = doc.fullName && doc.fullName.fsName ? doc.fullName.fsName : "";
+  if (docPath.indexOf("09 SEPARATIONS") === -1) {
+   return JSON.stringify({
+    success: false,
+    error: "Active document is not a separation document. Open a document from 09 SEPARATIONS."
+   });
+  }
+  var sepLayer;
+  try {
+   sepLayer = doc.layers.getByName("SEPARATED_ART");
+   sepLayer.visible = true;
+   sepLayer.locked = false;
+  } catch (e) {
+   return JSON.stringify({ success: false, error: "SEPARATED_ART layer not found" });
+  }
+
+  function trimStr(s) {
+   return String(s || "").replace(/^\s+|\s+$/g, "");
+  }
+  function normalizeLayerNameLocal(name) {
+   return String(name || "").replace(/\s+/g, " ").replace(/^\s+|\s+$/g, "").toLowerCase();
+  }
+  function isUbChokeBlockerLayerName(layerName) {
+   if (!layerName) return false;
+   var n = trimStr(layerName);
+   if (n === "__TEMP_WHITE_UB") return true;
+   var norm = normalizeLayerNameLocal(layerName);
+   if (norm === "choke") return true;
+   if (norm === "blocker" || /^blocker \d+$/.test(norm)) return true;
+   return isWhiteUbLayerName(layerName);
+  }
+  function isUbChokeBlockerColorName(name, profileMetadata, doc) {
+   if (!name) return false;
+   if (isUbChokeBlockerLayerName(name)) return true;
+   var lower = trimStr(name).toLowerCase();
+   if (lower.indexOf("white ub") !== -1 || lower.indexOf("whiteub") !== -1) return true;
+   if (lower === "sl white ub") return true;
+   if (lower === "choke") return true;
+   try {
+    if (profileMetadata && doc) {
+     profileMetadata = enrichProfileMetadataWithGraphicsUnderbaseSwatches(profileMetadata, doc);
+     var indices = getEnabledUnderbaseIndices(profileMetadata);
+     for (var pi = 0; pi < indices.length; pi++) {
+      var sw = getGraphicsUnderbaseSwatchNameForIndex(profileMetadata, doc, indices[pi]);
+      if (sw && normalizeLayerNameLocal(sw) === normalizeLayerNameLocal(name)) return true;
+     }
+     if (profileMetadata.underbaseSwatch &&
+      normalizeLayerNameLocal(profileMetadata.underbaseSwatch) === normalizeLayerNameLocal(name)) {
+      return true;
+     }
+    }
+   } catch (profErr) { }
+   return false;
+  }
+  function isUbChokeBlockerXmpEntry(entry, profileMetadata, doc) {
+   if (!entry) return false;
+   if (isUbChokeBlockerColorName(entry.colorName, profileMetadata, doc)) return true;
+   if (isUbChokeBlockerColorName(entry.swatchName, profileMetadata, doc)) return true;
+   return false;
+  }
+  function collectUbChokeBlockerLayerNames(separatedArtLayer) {
+   var names = [];
+   var seen = {};
+   if (!separatedArtLayer || !separatedArtLayer.layers) return names;
+   var count = separatedArtLayer.layers.length;
+   for (var i = 0; i < count; i++) {
+    try {
+     var layer = separatedArtLayer.layers[i];
+     if (!layer) continue;
+     var layerName = trimStr(layer.name);
+     if (!layerName) continue;
+     if (!isUbChokeBlockerLayerName(layerName)) continue;
+     var key = normalizeLayerNameLocal(layerName);
+     if (seen[key]) continue;
+     seen[key] = true;
+     names.push(layerName);
+    } catch (collectErr) { }
+   }
+   return names;
+  }
+  function removeSubLayerByName(parentLayer, layerName) {
+   var layer = parentLayer.layers.getByName(layerName);
+   layer.visible = true;
+   layer.locked = false;
+   unlockLayerContentsForSelection(layer);
+   try { app.selection = null; } catch (selErr) { }
+   layer.remove();
+  }
+
+  try { app.selection = null; } catch (selClearErr) { }
+
+  var profileMetadata = null;
+  try {
+   var metaXmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
+   if (metaXmp.isXmpCreated && metaXmp.doesStructFieldExist("SeparationProfileMetadata")) {
+    profileMetadata = metaXmp.getStructField("SeparationProfileMetadata", true);
+   }
+  } catch (metaLoadErr) { }
+
+  var namesToRemove = collectUbChokeBlockerLayerNames(sepLayer);
+  var deletedLayers = [];
+  var failedLayers = [];
+  for (var ri = 0; ri < namesToRemove.length; ri++) {
+   var targetName = namesToRemove[ri];
+   try {
+    removeSubLayerByName(sepLayer, targetName);
+    deletedLayers.push(targetName);
+   } catch (rmErr) {
+    failedLayers.push(targetName + ": " + (rmErr.message || rmErr.toString()));
+   }
+  }
+
+  var xmpUpdated = [];
+  var removedFromLayerNames = 0;
+  var removedFromColorsData = 0;
+  try {
+   var sepXmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
+   if (sepXmp.isXmpCreated) {
+    var liveLayerNames = getSeparatedArtLayerNames(doc);
+    sepXmp.setStructField("SeparatedLayerNames", liveLayerNames, true, false);
+    xmpUpdated.push("SeparatedLayerNames");
+    removedFromLayerNames = namesToRemove.length;
+
+    if (sepXmp.doesStructFieldExist("LEAPSeparationColorsData")) {
+     var colorsData = sepXmp.getStructField("LEAPSeparationColorsData", true);
+     if (Array.isArray(colorsData)) {
+      var filteredColors = [];
+      for (var ci = 0; ci < colorsData.length; ci++) {
+       var entry = colorsData[ci];
+       if (isUbChokeBlockerXmpEntry(entry, profileMetadata, doc)) {
+        removedFromColorsData++;
+       } else {
+        filteredColors.push(entry);
+       }
+      }
+      sepXmp.setStructField("LEAPSeparationColorsData", filteredColors, true, false);
+      xmpUpdated.push("LEAPSeparationColorsData");
+     }
+    }
+    if (sepXmp.hasPendingChanges) {
+     sepXmp.commit();
+    }
+   }
+  } catch (xmpErr) { }
+
+  try { doc.save(); } catch (saveErr) { }
+
+  if (deletedLayers.length === 0 && namesToRemove.length > 0 && failedLayers.length > 0) {
+   return JSON.stringify({
+    success: false,
+    error: "Could not remove UB/Choke/Blocker layer(s): " + failedLayers.join("; "),
+    failedLayers: failedLayers,
+    namesToRemove: namesToRemove
+   });
+  }
+
+  return JSON.stringify({
+   success: true,
+   message: "Deleted " + deletedLayers.length + " UB/Choke/Blocker plate layer(s). Swatches were not deleted; XMP updated.",
+   deletedLayers: deletedLayers,
+   deletedLayerCount: deletedLayers.length,
+   failedLayers: failedLayers,
+   xmpUpdated: xmpUpdated,
+   removedFromLayerNames: removedFromLayerNames,
+   removedFromColorsData: removedFromColorsData
   });
  } catch (e) {
   return JSON.stringify({

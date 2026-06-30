@@ -223,22 +223,40 @@ function isProfileFlagEnabled(value) {
 /** How many profile underbase passes are enabled (1–4), with fallback flags when underbaseEnabled[] is missing. */
 function getProfileUnderbasePassCount(profileMetadata) {
 	try {
+		var count = 1;
+		if (isProfileFlagEnabled(profileMetadata && profileMetadata.underbase4Enabled)
+			|| isProfileFlagEnabled(profileMetadata && profileMetadata.ub4Enabled)
+			|| isProfileFlagEnabled(profileMetadata && profileMetadata.underbase4)
+			|| (profileMetadata && isProfileFlagEnabled(profileMetadata["Underbase 4"]))
+			|| (profileMetadata && isProfileFlagEnabled(profileMetadata["UB 4"]))) {
+			count = Math.max(count, 4);
+		}
+		if (isProfileFlagEnabled(profileMetadata && profileMetadata.underbase3Enabled)
+			|| isProfileFlagEnabled(profileMetadata && profileMetadata.ub3Enabled)
+			|| isProfileFlagEnabled(profileMetadata && profileMetadata.underbase3)
+			|| (profileMetadata && isProfileFlagEnabled(profileMetadata["Underbase 3"]))
+			|| (profileMetadata && isProfileFlagEnabled(profileMetadata["UB 3"]))) {
+			count = Math.max(count, 3);
+		}
+		if (isProfileFlagEnabled(profileMetadata && profileMetadata.underbase2Enabled)
+			|| isProfileFlagEnabled(profileMetadata && profileMetadata.ub2Enabled)
+			|| isProfileFlagEnabled(profileMetadata && profileMetadata.underbase2)
+			|| (profileMetadata && isProfileFlagEnabled(profileMetadata["Underbase 2"]))
+			|| (profileMetadata && isProfileFlagEnabled(profileMetadata["UB 2"]))) {
+			count = Math.max(count, 2);
+		}
 		var enabled = profileMetadata && profileMetadata.underbaseEnabled instanceof Array
 			? profileMetadata.underbaseEnabled
 			: null;
 		if (enabled && enabled.length > 0) {
-			var count = enabled[0] !== false ? 1 : 0;
+			var arrayCount = enabled[0] !== false ? 1 : 0;
 			for (var i = 1; i < enabled.length && i < 4; i++) {
-				if (enabled[i] === true) count = i + 1;
+				if (enabled[i] === true) arrayCount = i + 1;
 			}
-			return count < 1 ? 1 : count;
+			if (arrayCount < 1) arrayCount = 1;
+			count = Math.max(count, arrayCount);
 		}
-		if (isProfileFlagEnabled(profileMetadata && profileMetadata.underbase4Enabled)) return 4;
-		if (isProfileFlagEnabled(profileMetadata && profileMetadata.underbase3Enabled)) return 3;
-		if (isProfileFlagEnabled(profileMetadata && profileMetadata.underbase2Enabled)) return 2;
-		if (isProfileFlagEnabled(profileMetadata && profileMetadata.underbase2)) return 2;
-		if (profileMetadata && isProfileFlagEnabled(profileMetadata["Underbase 2"])) return 2;
-		return 1;
+		return count;
 	} catch (e) {
 		return 1;
 	}
@@ -399,17 +417,8 @@ function getUnderbase2SwatchName(profileMetadata, doc) {
 	}
 }
 
-/** True when profile enables a second underbase pass (UB2 uses Graphics swatch layer, never "White UB 2"). */
-function usesGraphicsUnderbase2Layer(profileMetadata) {
-	try {
-		return getProfileUnderbasePassCount(profileMetadata) >= 2;
-	} catch (e) {
-		return false;
-	}
-}
-
 /** Resolve SEPARATED_ART layer + fill swatch for a profile underbase pass index. */
-function resolveUnderbaseLayerAndSwatch(ubIndex, profileMetadata, doc, ub2PlusSwatchName) {
+function resolveUnderbaseLayerAndSwatch(ubIndex, profileMetadata, doc) {
 	if (ubIndex === 0) {
 		return {
 			layerName: CONSTANTS.LAYER_NAMES.WHITE_UB,
@@ -417,68 +426,25 @@ function resolveUnderbaseLayerAndSwatch(ubIndex, profileMetadata, doc, ub2PlusSw
 			clearBeforeCopy: true
 		};
 	}
-	// Underbase 2 always uses the Graphics-tab swatch layer (e.g. PANTONE White C), never "White UB 2".
-	// Never clear — keep original plate art from splitColors and append the UB2 pass geometry.
-	if (ubIndex === 1) {
-		var rawTarget = ub2PlusSwatchName || getUnderbase2SwatchName(profileMetadata, doc);
-		var targetName = resolveDocumentSwatchName(doc, rawTarget);
-		return {
-			layerName: targetName,
-			swatchName: targetName,
-			clearBeforeCopy: false
-		};
-	}
 	var layerName = getUnderbaseLayerNameForIndex(ubIndex);
+	var rawTarget = getGraphicsUnderbaseSwatchNameForIndex(profileMetadata, doc, ubIndex);
+	var swatchName = resolveDocumentSwatchName(doc, rawTarget);
 	return {
 		layerName: layerName,
-		swatchName: layerName,
+		swatchName: swatchName,
 		clearBeforeCopy: true
 	};
 }
 
-/** Layer belongs in the underbase stack (White UB variants or Graphics Underbase 2 swatch layer). */
+/** Layer belongs in the underbase stack (White UB variants). */
 function isUnderbaseStackLayerName(layerName, profileMetadata, doc) {
 	if (!layerName) return false;
-	if (String(layerName).indexOf(CONSTANTS.LAYER_NAMES.WHITE_UB) === 0) return true;
-	if (usesGraphicsUnderbase2Layer(profileMetadata)) {
-		var ub2Name = getUnderbase2SwatchName(profileMetadata, doc);
-		if (String(layerName).replace(/^\s+|\s+$/g, "").toUpperCase() === String(ub2Name).toUpperCase()) {
-			return true;
-		}
-	}
-	return false;
+	return String(layerName).indexOf(CONSTANTS.LAYER_NAMES.WHITE_UB) === 0;
 }
 
-/** Remove legacy "White UB 2" layer (template leftover or old separation builds). */
-function removeStaleWhiteUb2Layer(separatedArtLayer, profileMetadata) {
-	try {
-		if (!separatedArtLayer || !usesGraphicsUnderbase2Layer(profileMetadata)) return;
-		var stale = findSeparatedArtSubLayerByName(separatedArtLayer, CONSTANTS.LAYER_NAMES.WHITE_UB + " 2");
-		if (!stale) return;
-		try { stale.remove(); } catch (rmErr) { }
-		appendLeapSepLog("removed stale White UB 2 layer (Underbase 2 uses Graphics swatch)");
-		try {
-			var doc = app.activeDocument;
-			var staleSwatch = getSwatchByName(doc, CONSTANTS.LAYER_NAMES.WHITE_UB + " 2");
-			if (staleSwatch) {
-				try { staleSwatch.remove(); } catch (swRmErr) { }
-			}
-		} catch (swErr) { }
-	} catch (e) { }
-}
-
-/** Hide legacy "White UB 2" from plate lists when Underbase 2 uses the Graphics swatch layer. */
+/** Plate list uses live SEPARATED_ART layer names (no filtering). */
 function filterPlateLayerNamesForUi(layerNames, profileMetadata) {
-	if (!layerNames || !layerNames.length) return layerNames || [];
-	if (!usesGraphicsUnderbase2Layer(profileMetadata)) return layerNames;
-	var filtered = [];
-	var hideName = String(CONSTANTS.LAYER_NAMES.WHITE_UB + " 2").toUpperCase();
-	for (var i = 0; i < layerNames.length; i++) {
-		var n = String(layerNames[i] || "").replace(/^\s+|\s+$/g, "");
-		if (n.toUpperCase() === hideName) continue;
-		filtered.push(layerNames[i]);
-	}
-	return filtered;
+	return layerNames || [];
 }
 
 function getProfileUnderbaseSwatchName(profileMetadata) {
@@ -632,19 +598,12 @@ function applyLocalizedInkUnderbaseLayers(profileMetadata, separatedArtLayer, ru
 			: null;
 		if (!localized || localized.length === 0) return;
 
-		// UB2+ color comes from the Graphics page "Underbase 2 Swatch" choice
-		// (profileMetadata.underbase2Swatch), falling back to the auto-picked document white.
-		var ub2PlusSwatchName = (profileMetadata && profileMetadata.underbase2Swatch
-			&& String(profileMetadata.underbase2Swatch).replace(/^\s+|\s+$/g, "") !== "")
-			? resolveDocumentSwatchName(app.activeDocument, String(profileMetadata.underbase2Swatch))
-			: resolveDocumentSwatchName(app.activeDocument, getDefaultUnderbaseWhiteSwatchName(app.activeDocument));
-
 		for (var e = 0; e < localized.length; e++) {
 			var entry = localized[e];
 			if (!entry || !(entry.layers instanceof Array) || entry.layers.length === 0) continue;
 
 			var levelIndex = entry.level - 1; // 0-based for layer naming (UB N -> index N-1)
-			var resolved = resolveUnderbaseLayerAndSwatch(levelIndex, profileMetadata, app.activeDocument, ub2PlusSwatchName);
+			var resolved = resolveUnderbaseLayerAndSwatch(levelIndex, profileMetadata, app.activeDocument);
 			var ubLayerName = resolved.layerName;
 			var ubLayer = getOrCreateSeparatedArtSubLayer(app.activeDocument, ubLayerName, separatedArtLayer);
 			var existingCount = 0;
@@ -685,12 +644,6 @@ function isChokeBlockerOrRemovableUnderbaseLayerName(layerName, profileMetadata,
 	if (/^BLOCKER(\s+\d+)?$/i.test(n)) return true;
 	if (up === String(CONSTANTS.LAYER_NAMES.WHITE_UB).toUpperCase()) return true;
 	if (n.indexOf(CONSTANTS.LAYER_NAMES.WHITE_UB + " ") === 0) return true;
-	if (
-		usesGraphicsUnderbase2Layer(profileMetadata) &&
-		up === String(CONSTANTS.LAYER_NAMES.WHITE_UB + " 2").toUpperCase()
-	) {
-		return true;
-	}
 	return false;
 }
 
@@ -813,18 +766,9 @@ function generateUnderbase(_graphicName, cleanupOpts, profileMetadata, genOption
 		}
 
 		var enabledUnderbaseIndices = getEnabledUnderbaseIndices(profileMetadata);
-		var ub2PlusSwatchName = null;
-		var ub2LayerBuilt = false;
 		for (var ub = 0; ub < enabledUnderbaseIndices.length; ub++) {
 			var ubIndex = enabledUnderbaseIndices[ub];
-			if (!ub2PlusSwatchName && ubIndex > 0) {
-				ub2PlusSwatchName = resolveDocumentSwatchName(
-					app.activeDocument,
-					getUnderbase2SwatchName(profileMetadata, app.activeDocument)
-				);
-				appendLeapSepLog("UB2+ target layer/swatch: " + ub2PlusSwatchName);
-			}
-			var resolved = resolveUnderbaseLayerAndSwatch(ubIndex, profileMetadata, app.activeDocument, ub2PlusSwatchName);
+			var resolved = resolveUnderbaseLayerAndSwatch(ubIndex, profileMetadata, app.activeDocument);
 			var ubLayerName = resolved.layerName;
 			var ubLayer = getOrCreateSeparatedArtSubLayer(app.activeDocument, ubLayerName, _separatedArtLayer);
 			var ubSwatchName = resolved.swatchName;
@@ -848,17 +792,11 @@ function generateUnderbase(_graphicName, cleanupOpts, profileMetadata, genOption
 			appendLeapSepLog(
 				"UB" + (ubIndex + 1) + " layer '" + ubLayerName + "': duplicated=" + dupCount + ", items=" + ubItemCount
 			);
-			if (ubIndex === 1 && ubItemCount > 0) {
-				ub2LayerBuilt = true;
-			}
 		}
 
 		// Extra underbase passes required only by specific inks (ink-exception underbase_count
 		// beyond the profile-global count) are built localized — from just those inks' shapes.
 		applyLocalizedInkUnderbaseLayers(profileMetadata, _separatedArtLayer, runLeftoverUb, forceClearUnderbases);
-		if (ub2LayerBuilt || usesGraphicsUnderbase2Layer(profileMetadata)) {
-			removeStaleWhiteUb2Layer(_separatedArtLayer, profileMetadata);
-		}
 
 		if (isBlockerEnabled(profileMetadata)) {
 			ensureSwatchExistsFromSource(
@@ -954,77 +892,38 @@ function reorderGeneratedUnderbaseLayers(separatedArtLayer, profileMetadata) {
 		if (!separatedArtLayer || !separatedArtLayer.layers) return;
 
 		var chokeLayer = null;
-		var baseUnderbaseLayer = null;
 		var blockerLayer = null;
-		var ub2GraphicsLayer = null;
-		var ub2GraphicsName = usesGraphicsUnderbase2Layer(profileMetadata)
-			? resolveDocumentSwatchName(app.activeDocument, getUnderbase2SwatchName(profileMetadata, app.activeDocument))
-			: null;
-		var numberedUbLayers = [];
+		var whiteUbLayers = [];
 
 		for (var i = 0; i < separatedArtLayer.layers.length; i++) {
 			var layer = separatedArtLayer.layers[i];
 			if (!layer || !layer.name) continue;
 			if (layer.name === CONSTANTS.LAYER_NAMES.CHOKE) chokeLayer = layer;
-			if (layer.name === CONSTANTS.LAYER_NAMES.WHITE_UB) baseUnderbaseLayer = layer;
-			if (layer.name === CONSTANTS.LAYER_NAMES.BLOCKER) blockerLayer = layer;
-			if (
-				ub2GraphicsName &&
-				String(layer.name).replace(/^\s+|\s+$/g, "").toUpperCase() === String(ub2GraphicsName).toUpperCase()
-			) {
-				ub2GraphicsLayer = layer;
-			}
-			if (layer.name.indexOf(CONSTANTS.LAYER_NAMES.WHITE_UB + " ") === 0) {
-				numberedUbLayers.push(layer);
-			}
+			else if (layer.name === CONSTANTS.LAYER_NAMES.BLOCKER) blockerLayer = layer;
+			else if (isWhiteUbLayerName(layer.name)) whiteUbLayers.push(layer);
 		}
 
-		// Bottom of SEPARATED_ART: White UB (always lowest), Blocker below that when enabled.
-		if (baseUnderbaseLayer) {
+		whiteUbLayers.sort(function(a, b) {
+			return getWhiteUbLayerNumber(a.name) - getWhiteUbLayerNumber(b.name);
+		});
+
+		var tailOrdered = [];
+		if (chokeLayer) tailOrdered.push(chokeLayer);
+		for (var u = 0; u < whiteUbLayers.length; u++) {
+			tailOrdered.push(whiteUbLayers[u]);
+		}
+		if (blockerLayer) tailOrdered.push(blockerLayer);
+
+		if (tailOrdered.length === 0) return;
+
+		for (var t = tailOrdered.length - 1; t >= 0; t--) {
 			try {
-				baseUnderbaseLayer.move(separatedArtLayer, ElementPlacement.PLACEATEND);
-			} catch (ubMoveErr) { }
-		}
-		if (blockerLayer) {
-			try {
-				blockerLayer.move(separatedArtLayer, ElementPlacement.PLACEATEND);
-			} catch (blkEndErr) { }
-		}
-
-		var anchorForUbStack = baseUnderbaseLayer;
-		if (anchorForUbStack) {
-			for (var n = 0; n < numberedUbLayers.length; n++) {
-				try {
-					numberedUbLayers[n].move(anchorForUbStack, ElementPlacement.PLACEBEFORE);
-				} catch (numMoveErr) { }
-			}
-			if (ub2GraphicsLayer && ub2GraphicsLayer !== baseUnderbaseLayer) {
-				try {
-					ub2GraphicsLayer.move(anchorForUbStack, ElementPlacement.PLACEBEFORE);
-				} catch (ub2MoveErr) { }
-			}
-		}
-
-		// CHOKE sits directly above the topmost underbase layer.
-		var topUnderbaseLayer = null;
-		var topUnderbaseIndex = 999999;
-		for (var t = 0; t < separatedArtLayer.layers.length; t++) {
-			var ubCandidate = separatedArtLayer.layers[t];
-			if (
-				ubCandidate &&
-				ubCandidate.name &&
-				isUnderbaseStackLayerName(ubCandidate.name, profileMetadata, app.activeDocument)
-			) {
-				if (t < topUnderbaseIndex) {
-					topUnderbaseIndex = t;
-					topUnderbaseLayer = ubCandidate;
+				if (t === tailOrdered.length - 1) {
+					tailOrdered[t].move(separatedArtLayer, ElementPlacement.PLACEATEND);
+				} else {
+					tailOrdered[t].move(tailOrdered[t + 1], ElementPlacement.PLACEBEFORE);
 				}
-			}
-		}
-		if (chokeLayer && topUnderbaseLayer) {
-			try {
-				chokeLayer.move(topUnderbaseLayer, ElementPlacement.PLACEBEFORE);
-			} catch (chokeMoveErr) { }
+			} catch (moveErr) { }
 		}
 	} catch (e) { }
 }

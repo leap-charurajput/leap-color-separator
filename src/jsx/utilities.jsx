@@ -456,6 +456,84 @@ function getWhiteUbLayerNumber(name) {
  return match[1] ? parseInt(match[1], 10) : 1;
 }
 
+function getUnderbaseSwatchFieldFromXmp(doc, fieldName) {
+ try {
+  if (!doc) return "";
+  var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
+  if (xmp.isXmpCreated && xmp.doesStructFieldExist(fieldName)) {
+   var val = xmp.getStructField(fieldName, false);
+   if (val != null) return String(val).replace(/^\s+|\s+$/g, "");
+  }
+ } catch (e) { }
+ return "";
+}
+
+function getGraphicsUnderbaseSwatchNameForIndex(profileMetadata, doc, ubIndex) {
+ if (ubIndex <= 0) {
+  return getProfileUnderbaseSwatchName(profileMetadata);
+ }
+ var metaFields = ["underbase2Swatch", "underbase3Swatch", "underbase4Swatch"];
+ var xmpFields = ["Underbase2Swatch", "Underbase3Swatch", "Underbase4Swatch"];
+ var idx = ubIndex > 3 ? 3 : ubIndex;
+ var fieldIdx = idx - 1;
+ var raw = "";
+ if (profileMetadata && profileMetadata[metaFields[fieldIdx]] != null) {
+  raw = String(profileMetadata[metaFields[fieldIdx]]).replace(/^\s+|\s+$/g, "");
+ }
+ if (!raw) raw = getUnderbaseSwatchFieldFromXmp(doc, xmpFields[fieldIdx]);
+ if (!raw && fieldIdx > 0) return getGraphicsUnderbaseSwatchNameForIndex(profileMetadata, doc, idx - 1);
+ if (!raw) raw = getUnderbaseSwatchFieldFromXmp(doc, "Underbase2Swatch");
+ if (!raw) return getUnderbase2SwatchName(profileMetadata, doc);
+ return raw;
+}
+
+function enrichProfileMetadataWithGraphicsUnderbaseSwatches(profileMetadata, doc) {
+ if (!profileMetadata) profileMetadata = {};
+ var pairs = [
+  { meta: "underbase2Swatch", xmp: "Underbase2Swatch" },
+  { meta: "underbase3Swatch", xmp: "Underbase3Swatch" },
+  { meta: "underbase4Swatch", xmp: "Underbase4Swatch" }
+ ];
+ for (var f = 0; f < pairs.length; f++) {
+  var cur = profileMetadata[pairs[f].meta];
+  if (cur != null && String(cur).replace(/^\s+|\s+$/g, "") !== "") continue;
+  var fromXmp = getUnderbaseSwatchFieldFromXmp(doc, pairs[f].xmp);
+  if (fromXmp) profileMetadata[pairs[f].meta] = fromXmp;
+ }
+ return profileMetadata;
+}
+
+function getWhiteUbPassIndexFromLayerName(layerName) {
+ var n = String(layerName || "").replace(/^\s+|\s+$/g, "");
+ if (/^white\s*ub$/i.test(n)) return 0;
+ var m = n.match(/^white\s*ub\s+(\d+)$/i);
+ if (!m || !m[1]) return -1;
+ var num = parseInt(m[1], 10);
+ return isNaN(num) ? -1 : num - 1;
+}
+
+/** Underbase 2 Swatch from document XMP (Graphics tab choice). */
+function getUnderbase2SwatchNameFromDocument(doc) {
+ var name = "";
+ try {
+  if (!doc) return "";
+  var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
+  if (xmp.isXmpCreated && xmp.doesStructFieldExist("SeparationProfileMetadata")) {
+   var profileMeta = xmp.getStructField("SeparationProfileMetadata", true);
+   if (profileMeta && profileMeta.underbase2Swatch != null) {
+    name = String(profileMeta.underbase2Swatch).replace(/^\s+|\s+$/g, "");
+   }
+  }
+  if (!name && xmp.isXmpCreated && xmp.doesStructFieldExist("Underbase2Swatch")) {
+   var ub2Val = xmp.getStructField("Underbase2Swatch", false);
+   if (ub2Val != null) {
+    name = String(ub2Val).replace(/^\s+|\s+$/g, "");
+   }
+  }
+ } catch (e) { }
+ return name;
+}
+
 function getFirstFillColorFromContainer(container) {
  if (!container) {
   return null;
@@ -583,6 +661,14 @@ function resolveLayerSwatchData(doc, layerName) {
   var ubFillColor = getFirstFillColorFromSeparatedArtSublayer(doc, name);
   if (ubFillColor) {
    return buildSwatchDataFromColor(name, ubFillColor);
+  }
+  var ub2FromMeta = getUnderbase2SwatchNameFromDocument(doc);
+  if (ub2FromMeta) {
+   var ub2SwatchData = buildSwatchDataFromDocumentSwatch(doc, ub2FromMeta);
+   if (ub2SwatchData && (ub2SwatchData.cmyk !== null || ub2SwatchData.rgb !== null)) {
+    ub2SwatchData.name = name;
+    return ub2SwatchData;
+   }
   }
   var defaultWhiteName = getDefaultUnderbaseWhiteSwatchName(doc);
   var defaultSwatchData = buildSwatchDataFromDocumentSwatch(doc, defaultWhiteName);
@@ -973,13 +1059,26 @@ function updateGridColorLabels(doc, separationData) {
    if (swatch && swatch.color) {
     swatchColor = swatch.color;
    } else {
-    var isWhiteUbVariant = /^white\s*ub(\s+\d+)?$/i.test(String(swatchLookupName));
+    var isWhiteUbVariant = /^white\s*ub(\s+(\d+))?$/i.test(String(swatchLookupName));
     if (isWhiteUbVariant) {
-     var whiteUbSwatch = getSwatchByName(doc, "White UB");
-     if (whiteUbSwatch && whiteUbSwatch.color) {
-      swatchColor = whiteUbSwatch.color;
-     } else {
-      result.errors.push("Swatch '" + swatchLookupName + "' not found for group '" + groupName + "' and fallback 'White UB' swatch missing");
+     var ubNumMatch = String(swatchLookupName).match(/^white\s*ub(?:\s+(\d+))?$/i);
+     var ubNum = ubNumMatch && ubNumMatch[1] ? parseInt(ubNumMatch[1], 10) : 1;
+     if (ubNum >= 2) {
+      var ub2Name = getUnderbase2SwatchNameFromDocument(doc);
+      if (ub2Name) {
+       var ub2Swatch = getSwatchByName(doc, ub2Name);
+       if (ub2Swatch && ub2Swatch.color) {
+        swatchColor = ub2Swatch.color;
+       }
+      }
+     }
+     if (!swatchColor) {
+      var whiteUbSwatch = getSwatchByName(doc, "White UB");
+      if (whiteUbSwatch && whiteUbSwatch.color) {
+       swatchColor = whiteUbSwatch.color;
+      } else {
+       result.errors.push("Swatch '" + swatchLookupName + "' not found for group '" + groupName + "' and fallback 'White UB' swatch missing");
+      }
      }
     } else {
      result.errors.push("Swatch '" + swatchLookupName + "' not found for group '" + groupName + "'");

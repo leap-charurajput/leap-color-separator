@@ -1,0 +1,12 @@
+<div *ngIf="issues?.length" class="postscript-setup-detail">
+ <div class="postscript-setup-detail-header">
+  <strong>PostScript export not ready</strong>
+  <button type="button" class="postscript-setup-detail-close" aria-label="Close" (click)="onClose()">×</button>
+ </div>
+ <ul class="postscript-setup-detail-list">
+  <li *ngFor="let issue of issues">{{ issue.message }}</li>
+ </ul>
+ <p class="postscript-setup-detail-hint">
+  Fix these in General Settings (PPD) and Illustrator Print Presets, then try export again.
+ </p>
+</div>
