@@ -1,18 +1,52 @@
 <div class="organize-graphics-container">
+ <div
+  *ngIf="hasVersionDocument && !isSeparatedDoc && !isCheckingDocument && !isLoadingGraphics"
+  class="underbase-swatches-section"
+ >
+  <div class="panelTitle mb-5 underbase-swatches-title">
+   <span>Underbase Swatches</span>
+  </div>
+  <div class="underbase-swatches-grid">
+   <div class="underbase-swatch-row">
+    <span class="underbase-swatch-label">Underbase 2, 3 and 4:</span>
+    <app-dropdown
+     [value]="underbase234Swatch"
+     [items]="underbaseSwatchOptions"
+     (onChange)="handleUnderbase234SwatchChange($event)"
+     placeholder="White UB"
+    ></app-dropdown>
+   </div>
+  </div>
+ </div>
+
  <div class="panelTitle mb-5 d-flex align-center justify-between">
   <span>Organize Graphics</span>
-  <button
-   (click)="loadGraphicsList()"
-   class="separation-action-btn"
-   title="Refresh graphics from document"
-  >
-   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9.72 12.35" width="20" height="20">
-    <path
-     fill="currentColor"
-     d="M9.72,7.49c0,1.3-.5,2.52-1.42,3.44-.92.92-2.14,1.42-3.44,1.42s-2.52-.5-3.44-1.42c-.9-.92-1.42-2.14-1.42-3.44s.52-2.5,1.42-3.44c.92-.9,2.12-1.42,3.4-1.42l-.61-2.63,5.04,3.47-4.84,3.69.43-2.81c-1.73.02-3.13,1.4-3.13,3.13s1.42,3.15,3.15,3.15,3.13-1.42,3.13-3.15h1.73Z"
-    />
-   </svg>
-  </button>
+  <div class="organize-graphics-actions">
+   <button
+    *ngIf="showCreateGraphicActions"
+    (click)="openCreateGraphicModal()"
+    class="separation-action-btn create-graphic-btn"
+    [class.disabled]="!hasSelection"
+    [disabled]="!hasSelection"
+    title="Create graphic from selection"
+   >
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="20" height="20">
+     <path fill="currentColor" d="M8 3.5a.5.5 0 0 1 .5.5v3.5H12a.5.5 0 0 1 0 1H8.5V12a.5.5 0 0 1-1 0V8.5H4a.5.5 0 0 1 0-1h3.5V4a.5.5 0 0 1 .5-.5z"/>
+    </svg>
+   </button>
+   <button
+    (click)="loadGraphicsList()"
+    class="separation-action-btn"
+    title="Refresh graphics from document"
+   >
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9.72 12.35" width="20" height="20">
+     <path
+      fill="currentColor"
+      d="M9.72,7.49c0,1.3-.5,2.52-1.42,3.44-.92.92-2.14,1.42-3.44,1.42s-2.52-.5-3.44-1.42c-.9-.92-1.42-2.14-1.42-3.44s.52-2.5,1.42-3.44c.92-.9,2.12-1.42,3.4-1.42l-.61-2.63,5.04,3.47-4.84,3.69.43-2.81c-1.73.02-3.13,1.4-3.13,3.13s1.42,3.15,3.15,3.15,3.13-1.42,3.13-3.15h1.73Z"
+     />
+    </svg>
+   </button>
+  </div>
  </div>
 
  <div *ngIf="isSeparatedDoc" class="organize-graphics-content">
@@ -46,14 +80,11 @@
  </div>
 
  <div
-  *ngIf="!hasVersionDocument && !isSeparatedDoc && !isCheckingDocument"
+  *ngIf="isRunningInBrowser && !isSeparatedDoc && !isCheckingDocument"
   class="organize-graphics-content"
  >
   <div class="panelTitle mx-5" style="text-align: center; padding: 40px 20px">
-   <span *ngIf="isRunningInBrowser">Please run this in Illustrator</span>
-   <span *ngIf="!isRunningInBrowser"
-    >Please open a version file to assign positions and same plates to graphics</span
-   >
+   <span>Please run this in Illustrator</span>
   </div>
  </div>
 
@@ -64,7 +95,7 @@
  </div>
 
  <div
-  *ngIf="hasVersionDocument && !isSeparatedDoc && !isCheckingDocument && !isLoadingGraphics"
+  *ngIf="showOrganizeGraphics"
   class="organize-graphics-content"
  >
   <div class="organize-graphics-table-wrapper">
@@ -200,4 +231,13 @@
   (close)="closeLinkColorsModal()"
   (save)="handleColorsSave(modalState.graphicId!, $event)"
  ></app-link-colors-modal>
+
+ <app-create-graphic-modal
+  [isOpen]="createGraphicModalOpen"
+  [positionOptions]="positionOptions"
+  [isSubmitting]="isCreatingGraphic"
+  [warningMessage]="createGraphicWarning"
+  (cancel)="closeCreateGraphicModal()"
+  (confirm)="handleCreateGraphicConfirm($event)"
+ ></app-create-graphic-modal>
 </div>

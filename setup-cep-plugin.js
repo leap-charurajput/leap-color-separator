@@ -161,6 +161,56 @@ function createIndexHtml() {
         var fs = window.require('fs');
         var path = window.require('path');
         var os = window.require('os');
+        var dns = window.require('dns');
+        var DEFAULT_ORIGIN = 'http://salesforce-connector.metadesign.org.in';
+        var OFFLINE_MESSAGE = 'LEAP Color Separator requires internet connection';
+
+        function showOfflineMessage() {
+          var render = function () {
+            if (!document.body) {
+              return;
+            }
+            document.body.style.margin = '0';
+            document.body.style.background = '#2f2f2f';
+            document.body.style.color = '#f0f0f0';
+            document.body.style.fontFamily = 'Arial,sans-serif';
+            document.body.innerHTML =
+              '<div style="display:flex;align-items:center;justify-content:center;min-height:100vh;padding:16px;box-sizing:border-box;text-align:center;font-size:14px;">' +
+              OFFLINE_MESSAGE +
+              '</div>';
+          };
+
+          if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', render, { once: true });
+            return;
+          }
+          render();
+        }
+
+        function isHostReachable(origin, callback) {
+          try {
+            var hostname = new URL(origin).hostname;
+            dns.lookup(hostname, function (err) {
+              callback(!err);
+            });
+          } catch (err) {
+            callback(false);
+          }
+        }
+
+        function redirectIfOnline(origin) {
+          if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+            showOfflineMessage();
+            return;
+          }
+          isHostReachable(origin, function (reachable) {
+            if (reachable) {
+              window.location.href = origin;
+            } else {
+              showOfflineMessage();
+            }
+          });
+        }
 
         var documentsPath = path.join(os.homedir(), 'Documents');
         var leapSettingsDir = path.join(documentsPath, 'LEAP Settings');
@@ -185,12 +235,11 @@ function createIndexHtml() {
         try {
           var jsonData = fs.readFileSync(newJsonFilePath, 'utf8');
           var parsedData = JSON.parse(jsonData);
-
-          var origin = parsedData?.origin;
-          window.location.href = origin ? origin : 'http://salesforce-connector.metadesign.org.in';
+          var origin = parsedData?.origin || DEFAULT_ORIGIN;
+          redirectIfOnline(origin);
         } catch (error) {
           console.error('Error reading JSON file:', error);
-          window.location.href = 'http://salesforce-connector.metadesign.org.in';
+          redirectIfOnline(DEFAULT_ORIGIN);
         }
       })();
     </script>

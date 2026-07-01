@@ -13,6 +13,7 @@ import { SeparationProfileActionDialogResult } from '../../components/separation
 import { AddSeparationDialogResult, AddSeparationDialogStyleOption } from '../../components/add-separation-dialog/add-separation-dialog.component';
 import { ControllerService } from '../../services/controller.service';
 import { GraphicsDataService } from '../../services/graphics-data.service';
+import { LeapSepsLogService } from '../../services/leap-seps-log.service';
 
 interface Separation {
  id: number;
@@ -108,14 +109,18 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
  styleCatalogOptions: AddSeparationDialogStyleOption[] = [];
  /** Groups read from XMP LEAPSeparationProfileData to persist manual additions across reopen. */
  xmpSeparationGroups: XmpSeparationGroup[] = [];
+ // Checked by default so "Recreate All Plates" performs the same full path cleanup
+ // as "Create Separations" out of the box. Users can untick to skip cleanup.
  recreatePlateCheckboxOptions: ConfirmDialogCheckboxOption[] = [
   {
    id: 'deleteUnpaintedPaths',
-   label: 'Delete unpainted paths after Merge'
+   label: 'Delete unpainted paths after Merge',
+   checked: true
   },
   {
    id: 'deleteLeftoverPaths',
-   label: 'Delete leftover paths after Add'
+   label: 'Delete leftover paths after Add',
+   checked: true
   }
  ];
  private documentActivateHandler: (() => void) | null = null;
@@ -124,7 +129,8 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
  constructor(
   private controller: ControllerService,
   private cdr: ChangeDetectorRef,
-  private graphicsDataService: GraphicsDataService
+  private graphicsDataService: GraphicsDataService,
+  private leapSepsLog: LeapSepsLogService
  ) {
   this.isRunningInBrowser = !(window as any).__adobe_cep__ && !(window as any).leap;
  }
@@ -724,6 +730,12 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
   return [];
  }
 
+ /** Distress flag from Organize Graphics (drives Profiles.json Distress Y/N lookup). */
+ private getGraphicDistress(graphicName: string): boolean {
+  const graphic = this.graphicsData.find((g: any) => g && g.name === graphicName);
+  return !!(graphic && graphic.distress);
+ }
+
  handleGenerateSeparations(separationId: number, graphicName: string): void {
   if (!graphicName) {
    return;
@@ -734,9 +746,18 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
    return;
   }
 
+  this.leapSepsLog.logClick('Generate separation', {
+   separationId,
+   graphicName,
+   profile: separation.profile,
+   styles: separation.styles
+  });
+
   const styleCodes = separation.styles || [];
   const profileName = separation.profile || '';
   const graphicColors = this.getGraphicColors(graphicName);
+  const graphicDistress = this.getGraphicDistress(graphicName);
+  const profileLookupOptions = { distress: graphicDistress };
 
   const getProfileCodeAndCreateSeparation = async () => {
    let profileCode = null;
@@ -744,7 +765,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 
    if (profileName && !this.isRunningInBrowser) {
     try {
-     const result = await this.controller.getProfileCodeFromName(profileName);
+     const result = await this.controller.getProfileCodeFromName(profileName, profileLookupOptions);
 
      if (result && result.success && result.profileCode) {
       profileCode = result.profileCode;
@@ -755,8 +776,11 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
     try {
      const profileLookupKey = profileCode || profileName;
      if (profileLookupKey) {
-      const profileInfoResult = await this.controller.getProfileInformation(profileLookupKey);
-      console.log('[SEPARATIONS][UB_DEBUG] getProfileInformation result for', profileLookupKey, ':', profileInfoResult);
+      const profileInfoResult = await this.controller.getProfileInformation(
+       profileLookupKey,
+       profileLookupOptions
+      );
+      console.log('[SEPARATIONS][UB_DEBUG] getProfileInformation result for', profileLookupKey, 'distress:', graphicDistress, ':', profileInfoResult);
       if (profileInfoResult && profileInfoResult.success && profileInfoResult.profileInfo) {
        profileInfo = profileInfoResult.profileInfo;
       }
@@ -815,9 +839,20 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
     createdDate: new Date().toISOString(),
     artistName: artistName,
     artistInitials: artistInitials,
-    position: position
+    position: position,
+    distress: graphicDistress,
+    profileDistress: graphicDistress ? 'Y' : 'N'
    };
    if (profileInfo && profileInfo.found) {
+    if (profileInfo.profileName) {
+     profileMetadata.resolvedProfileName = String(profileInfo.profileName);
+    }
+    if (profileInfo.profileCode) {
+     profileMetadata.profileCode = String(profileInfo.profileCode);
+    }
+    if (profileInfo.distress != null && String(profileInfo.distress).trim() !== '') {
+     profileMetadata.profileDistress = String(profileInfo.distress).trim().toUpperCase() === 'Y' ? 'Y' : 'N';
+    }
     const toEnabled = (value: any) => {
      if (value === true || value === 1) return true;
      if (typeof value === 'string') {
@@ -874,9 +909,17 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
        ? String((profileInfo as any)['Blocker Mesh'])
        : ''
       );
+   profileMetadata.formatInkNameLabel = !!(profileInfo as any).formatInkNameLabel;
+   profileMetadata.colorNameLabelFormat =
+    (profileInfo as any).colorNameLabelFormat != null && String((profileInfo as any).colorNameLabelFormat).trim() !== ''
+     ? String((profileInfo as any).colorNameLabelFormat)
+     : 'PANTONE XXX C';
     console.log('[SEPARATIONS][UB_DEBUG] profileMetadata underbase flags/meshes:', {
      profileName,
      profileCode,
+     graphicDistress,
+     profileDistress: profileMetadata.profileDistress,
+     resolvedProfileName: profileMetadata.resolvedProfileName,
      underbaseEnabled: profileMetadata.underbaseEnabled,
     underbaseMeshes: profileMetadata.underbaseMeshes,
     underbaseKnockoutBlack: profileMetadata.underbaseKnockoutBlack,
@@ -894,6 +937,18 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
     profileMetadata.bodyColorData = bodyColorData;
    }
 
+   if (!this.isRunningInBrowser && this.teamCode && this.controller.getBatchRowVariableSource) {
+    const docPath = this.versionDocumentPath || undefined;
+    try {
+     const batchVar = await this.controller.getBatchRowVariableSource(this.teamCode, docPath);
+     if (batchVar?.success && batchVar.fields && Object.keys(batchVar.fields).length > 0) {
+      profileMetadata.batchVariableSource = batchVar.fields;
+     }
+    } catch (batchErr) {
+     console.warn('[SEPARATIONS] batchVariableSource from Batch Excel skipped:', batchErr);
+    }
+   }
+
    console.log('[SEPARATIONS][UB_DEBUG] performSeparation payload profileMetadata:', profileMetadata);
    return this.controller.performSeparation(graphicName, styleCodes, profileMetadata, {
     sepsTemplateFileName
@@ -902,6 +957,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 
   getProfileCodeAndCreateSeparation()
    .then((result) => {
+    console.log('[SEPARATIONS] performSeparation result:', result);
     if (result.success) {
      setTimeout(() => {
       this.loadSeparationPaths();
@@ -930,9 +986,19 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
       }, 500);
      }
     } else {
+     const message =
+      result?.error ||
+      'Separation failed. See leap_seps.log in Documents/LEAP Settings/Logs.';
+     this.leapSepsLog.logError('Separations', message, result);
+     console.error('[SEPARATIONS] performSeparation failed:', result);
+     alert(message);
     }
    })
-   .catch((err) => { });
+   .catch((err) => {
+    this.leapSepsLog.logError('Separations', err);
+    console.error('[SEPARATIONS] performSeparation error:', err);
+    alert(err?.message || String(err));
+   });
  }
 
  handleOpenSeparation(filePath: string): void {
@@ -959,6 +1025,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
  }
 
  handleSeparationMenuClick(item: string, separationId: number, graphicName: string): void {
+  this.leapSepsLog.logClick('Separation menu: ' + item, { separationId, graphicName });
   if (this.isRunningInBrowser) {
    return;
   }
@@ -1421,12 +1488,13 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
   if (!graphicName) return;
 
   const evRec = ev && typeof ev === 'object' ? (ev as Record<string, boolean>) : null;
+  // Default to full cleanup (matching Create Separations) when no dialog state is provided.
   const cleanup = evRec
    ? {
      deleteUnpaintedPaths: !!evRec['deleteUnpaintedPaths'],
      deleteLeftoverPaths: !!evRec['deleteLeftoverPaths']
     }
-   : { deleteUnpaintedPaths: false, deleteLeftoverPaths: false };
+   : { deleteUnpaintedPaths: true, deleteLeftoverPaths: true };
 
   this.controller.deleteAllPlatesInSeparationDoc?.()
    ?.then((delRes) => {

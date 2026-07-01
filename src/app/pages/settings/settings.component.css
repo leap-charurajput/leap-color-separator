@@ -49,8 +49,19 @@
 	gap: 10px;
 }
 
-.settings-field.settings-field-inline-input .settings-field-label {
+/* Fixed label column so inputs line up (long labels wrap inside the column). */
+.settings-field.settings-field-inline-input > .settings-field-label,
+.settings-field.settings-field-inline-input > .settings-field-label-stack {
+	flex: 0 0 130px;
+	width: 130px;
 	min-width: 130px;
+	max-width: 130px;
+	box-sizing: border-box;
+	overflow-wrap: break-word;
+}
+
+.settings-field.settings-field-inline-input > .settings-field-label-stack .settings-field-label {
+	min-width: 0;
 }
 
 .settings-field-label {
@@ -93,6 +104,13 @@
 	font-size: 10px;
 	color: rgba(255, 255, 255, 0.55);
 	font-family: 'Adobe Clean', sans-serif;
+}
+
+.settings-field.settings-field-inline-input .settings-field-textarea {
+	flex: 0 0 260px;
+	width: 260px;
+	max-width: 260px;
+	min-width: 260px;
 }
 
 .settings-field-textarea {

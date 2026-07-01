@@ -26,13 +26,23 @@ class ScriptLoader {
 
  evalScript(functionName, params) {
   var params_string = params ? JSON.stringify(params) : '';
-  var eval_string = `${functionName}('${params_string}')`;
+  // Escape for embedding inside single-quoted ExtendScript string literal (apostrophes, backslashes).
+  var escaped_params = params_string.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  var eval_string = `${functionName}('${escaped_params}')`;
   var that = this;
 
   return new Promise((resolve, reject) => {
    var callback = function (eval_res) {
     if (typeof eval_res === 'string') {
-     if (eval_res.toLowerCase().indexOf('error') != -1) {
+     var trimmed = eval_res.replace(/^\s+|\s+$/g, '');
+     // Host handlers return JSON (often includes an "error" key on failure). Do not reject those.
+     if (trimmed.charAt(0) === '{' || trimmed.charAt(0) === '[') {
+      that.log('success eval');
+      resolve(eval_res);
+      return;
+     }
+     var low = eval_res.toLowerCase();
+     if (low.indexOf('evalscript error') !== -1 || low.indexOf('error') !== -1) {
       that.log('err eval');
       reject(that.createScriptError(eval_res));
       return;
@@ -50,7 +60,11 @@ class ScriptLoader {
   return { reason, data };
  }
 
- log(val) {}
+ log(val) {
+  if (typeof window !== 'undefined' && typeof window.leapSepsWrite === 'function') {
+   window.leapSepsWrite('LOG', 'LeapSrc', String(val));
+  }
+ }
 
  get name() {
   return 'ScriptLoader:: ';
@@ -122,6 +136,58 @@ function findExcelFileInBatchFolder(documentPath) {
  try {
   if (!documentPath || !fs.existsSync(documentPath)) {
    return null;
+  }
+
+  const resolveFirstExcelFromBatchFolder = (batchFolderPath) => {
+   if (!batchFolderPath || !fs.existsSync(batchFolderPath)) {
+    return null;
+   }
+   const files = fs
+    .readdirSync(batchFolderPath)
+    .filter((file) => {
+     const filePath = path.join(batchFolderPath, file);
+     return fs.statSync(filePath).isFile() && file.toLowerCase().endsWith('.xlsx');
+    })
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+   if (!files || files.length === 0) {
+    return null;
+   }
+   const excelFilePath = path.resolve(path.join(batchFolderPath, files[0]));
+   if (!fs.existsSync(excelFilePath)) {
+    return null;
+   }
+   try {
+    fs.accessSync(excelFilePath, fs.constants.R_OK);
+   } catch (accessError) {
+    return null;
+   }
+   return excelFilePath;
+  };
+
+  let walkDir = path.dirname(documentPath);
+  while (walkDir) {
+   const entries = fs.existsSync(walkDir) ? fs.readdirSync(walkDir) : [];
+   const batchFolderName = entries.find((entry) => {
+    const entryPath = path.join(walkDir, entry);
+    return fs.statSync(entryPath).isDirectory() && entry.toUpperCase() === 'BATCH';
+   });
+   if (batchFolderName) {
+    const excelFromAncestor = resolveFirstExcelFromBatchFolder(path.join(walkDir, batchFolderName));
+    if (excelFromAncestor) {
+     console.log(
+      '[Separations] findExcelFileInBatchFolder – documentPath:',
+      documentPath,
+      '| excelFilePath:',
+      excelFromAncestor
+     );
+     return excelFromAncestor;
+    }
+   }
+   const parentWalkDir = path.dirname(walkDir);
+   if (!parentWalkDir || parentWalkDir === walkDir) {
+    break;
+   }
+   walkDir = parentWalkDir;
   }
 
   let currentDir = path.dirname(documentPath);
@@ -521,6 +587,146 @@ async function getStyleCodesFromExcel(teamCode, documentPath) {
   return styleCodes;
  } catch (error) {
   throw new Error(`Failed to read Excel file: ${error.message}`);
+ }
+}
+
+function normalizeBatchLookupKey(str) {
+ return String(str || '')
+  .toLowerCase()
+  .replace(/[\s_-]/g, '');
+}
+
+function findBatchTeamColumnIndex(headerRow) {
+ if (!headerRow || !headerRow.length) {
+  return -1;
+ }
+ const exactOrder = ['Lineup Org Code', 'Team Code', 'TeamCode'];
+ for (let e = 0; e < exactOrder.length; e++) {
+  const ex = exactOrder[e];
+  const idx = headerRow.findIndex((col) => String(col || '').trim() === ex);
+  if (idx !== -1) {
+   return idx;
+  }
+ }
+ for (let i = 0; i < headerRow.length; i++) {
+  const nk = normalizeBatchLookupKey(String(headerRow[i] || ''));
+  if (nk === 'lineuporgcode' || nk === 'teamcode') {
+   return i;
+  }
+ }
+ return -1;
+}
+
+async function getBatchRowVariableSource(teamCode, documentPath) {
+ try {
+  const normTeam = String(teamCode || '').trim();
+  if (!normTeam || !documentPath) {
+   return {};
+  }
+  const excelFilePath = findExcelFileInBatchFolder(documentPath);
+  if (!excelFilePath) {
+   return {};
+  }
+  let workbook;
+  try {
+   try {
+    const fileBuffer = fs.readFileSync(excelFilePath);
+    workbook = XLSX.read(fileBuffer, { type: 'buffer' });
+   } catch (bufferError) {
+    workbook = XLSX.readFile(excelFilePath);
+   }
+  } catch (readError) {
+   console.warn('[Leap] getBatchRowVariableSource read error:', readError.message);
+   return {};
+  }
+  const sheetName = workbook.SheetNames[0];
+  const worksheet = workbook.Sheets[sheetName];
+  const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+  if (!data.length) {
+   return {};
+  }
+  const headerRow = data[0];
+  const teamCol = findBatchTeamColumnIndex(headerRow);
+  if (teamCol === -1) {
+   return {};
+  }
+  for (let row = 1; row < data.length; row++) {
+   const rowData = data[row];
+   if (!rowData || rowData[teamCol] == null || String(rowData[teamCol]).trim() === '') {
+    continue;
+   }
+   if (String(rowData[teamCol]).trim() !== normTeam) {
+    continue;
+   }
+   const fields = {};
+   for (let c = 0; c < headerRow.length; c++) {
+    const headerName = headerRow[c];
+    if (headerName == null || String(headerName).trim() === '') {
+     continue;
+    }
+    const key = String(headerName).trim();
+    const cell = rowData[c];
+    if (cell == null) {
+     continue;
+    }
+    const txt = String(cell).trim();
+    if (txt !== '') {
+     fields[key] = txt;
+    }
+   }
+   return fields;
+  }
+  return {};
+ } catch (error) {
+  console.warn('[Leap] getBatchRowVariableSource:', error.message);
+  return {};
+ }
+}
+
+async function getBatchExcelColumnNames(documentPath) {
+ try {
+  if (!documentPath) {
+   return [];
+  }
+
+  const excelFilePath = findExcelFileInBatchFolder(documentPath);
+  if (!excelFilePath) {
+   const batchRecordsFromJson = getBatchExcelRecordsFromJson(documentPath);
+   return batchRecordsFromJson ? Object.keys(batchRecordsFromJson).filter((key) => String(key || '').trim() !== '') : [];
+  }
+
+  let workbook;
+  try {
+   try {
+    const fileBuffer = fs.readFileSync(excelFilePath);
+    workbook = XLSX.read(fileBuffer, { type: 'buffer' });
+   } catch (bufferError) {
+    workbook = XLSX.readFile(excelFilePath);
+   }
+  } catch (readError) {
+   console.warn('[Leap] getBatchExcelColumnNames read error:', readError.message);
+   return [];
+  }
+
+  const sheetName = workbook && workbook.SheetNames && workbook.SheetNames[0];
+  const worksheet = sheetName ? workbook.Sheets[sheetName] : null;
+  if (!worksheet) {
+   return [];
+  }
+
+  const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+  const headerRow = Array.isArray(data) && Array.isArray(data[0]) ? data[0] : [];
+  const seen = new Set();
+  return headerRow
+   .map((header) => String(header == null ? '' : header).trim())
+   .filter((header) => {
+    if (!header || seen.has(header)) return false;
+    seen.add(header);
+    return true;
+   });
+ } catch (error) {
+  console.warn('[Leap] getBatchExcelColumnNames:', error.message);
+  return [];
  }
 }
 
@@ -956,7 +1162,10 @@ async function getGraphicPlacementOptions(documentPath, teamCode) {
   }
 
   if (!excelFilePath && batchRecordsFromJson) {
-   const placementsRaw = getUniqueValuesFromBatchRecords(batchRecordsFromJson, 'Graphic Placement');
+   const placementsRaw = [
+    ...getUniqueValuesFromBatchRecords(batchRecordsFromJson, 'Graphic Placement'),
+    ...getUniqueValuesFromBatchRecords(batchRecordsFromJson, 'Graphic Position')
+   ];
    const placementSet = new Set();
    placementsRaw.forEach((value) => {
     value.split(',').forEach((item) => {
@@ -999,27 +1208,33 @@ async function getGraphicPlacementOptions(documentPath, teamCode) {
   }
 
   const headerRow = data[0];
-  const graphicPlacementColIndex = headerRow.findIndex((col) => col === 'Graphic Placement');
+  const normalizedHeaders = headerRow.map((col) => String(col || '').trim().toLowerCase());
+  const graphicPlacementColIndices = normalizedHeaders
+   .map((header, index) => (header === 'graphic placement' || header === 'graphic position' ? index : -1))
+   .filter((index) => index >= 0);
 
-  if (graphicPlacementColIndex === -1) {
+  if (graphicPlacementColIndices.length === 0) {
    return [];
   }
 
   const placementSet = new Set();
   for (let row = 1; row < data.length; row++) {
    const rowData = data[row];
-   if (rowData && rowData[graphicPlacementColIndex]) {
-    const placementValue = String(rowData[graphicPlacementColIndex]).trim();
-    if (placementValue !== '') {
-     const placements = placementValue.split(',');
-     placements.forEach((placement) => {
-      const trimmedPlacement = placement.trim();
-      if (trimmedPlacement !== '') {
-       placementSet.add(trimmedPlacement);
-      }
-     });
+   if (!rowData) continue;
+   graphicPlacementColIndices.forEach((graphicPlacementColIndex) => {
+    if (rowData[graphicPlacementColIndex]) {
+     const placementValue = String(rowData[graphicPlacementColIndex]).trim();
+     if (placementValue !== '') {
+      const placements = placementValue.split(',');
+      placements.forEach((placement) => {
+       const trimmedPlacement = placement.trim();
+       if (trimmedPlacement !== '') {
+        placementSet.add(trimmedPlacement);
+       }
+      });
+     }
     }
-   }
+   });
   }
 
   const placements = Array.from(placementSet).sort();
@@ -1029,7 +1244,84 @@ async function getGraphicPlacementOptions(documentPath, teamCode) {
  }
 }
 
-async function getProfileInformation(profileCode) {
+function normalizeProfileNameForLookup(value) {
+ return String(value || '')
+  .replace(/[\u2010-\u2015]/g, '-')
+  .replace(/\s+/g, ' ')
+  .trim()
+  .toUpperCase();
+}
+
+function normalizeDistressFlag(value) {
+ if (value === true || value === 1) return 'Y';
+ if (typeof value === 'string') {
+  const normalized = value.trim().toUpperCase();
+  if (normalized === 'Y' || normalized === 'YES' || normalized === 'TRUE' || normalized === '1') {
+   return 'Y';
+  }
+ }
+ return 'N';
+}
+
+function profileMatchesLookupKey(profile, lookupKey) {
+ if (!profile || !lookupKey) return false;
+ const normalizedLookup = normalizeProfileNameForLookup(lookupKey);
+ const codeValue =
+  profile['Profile Code'] != null ? String(profile['Profile Code']).trim().toUpperCase() : '';
+ const nameValue = normalizeProfileNameForLookup(profile['Profile Name']);
+ return codeValue === normalizedLookup || nameValue === normalizedLookup;
+}
+
+function profileDistressMatches(profile, distressFlag) {
+ return normalizeDistressFlag(profile && profile['Distress']) === normalizeDistressFlag(distressFlag);
+}
+
+/**
+ * Resolve a Profiles.json row by code/name, optionally filtered by Distress (Y/N).
+ * When distress is requested but no row matches, falls back to Distress N.
+ */
+function findProfileInProfilesData(profilesData, lookupKey, options) {
+ const hasDistressFilter =
+  options &&
+  options.distress !== undefined &&
+  options.distress !== null;
+ const requestedDistress = hasDistressFilter ? normalizeDistressFlag(options.distress) : null;
+
+ if (hasDistressFilter) {
+  const exact = profilesData.find(
+   (profile) =>
+    profileMatchesLookupKey(profile, lookupKey) &&
+    profileDistressMatches(profile, requestedDistress)
+  );
+  if (exact) {
+   return { profile: exact, requestedDistress, matchedDistress: requestedDistress, fallbackUsed: false };
+  }
+  if (requestedDistress === 'Y') {
+   const fallback = profilesData.find(
+    (profile) => profileMatchesLookupKey(profile, lookupKey) && profileDistressMatches(profile, 'N')
+   );
+   if (fallback) {
+    console.warn(
+     '[LEAP][UB_DEBUG] No distressed profile for',
+     lookupKey,
+     '- falling back to Distress N'
+    );
+    return { profile: fallback, requestedDistress, matchedDistress: 'N', fallbackUsed: true };
+   }
+  }
+  return { profile: null, requestedDistress, matchedDistress: null, fallbackUsed: false };
+ }
+
+ const first = profilesData.find((profile) => profileMatchesLookupKey(profile, lookupKey));
+ return {
+  profile: first || null,
+  requestedDistress: null,
+  matchedDistress: first ? normalizeDistressFlag(first['Distress']) : null,
+  fallbackUsed: false
+ };
+}
+
+async function getProfileInformation(profileCode, options) {
  try {
   if (!profileCode) {
    throw new Error('Profile code is required');
@@ -1041,7 +1333,7 @@ async function getProfileInformation(profileCode) {
   }
 
   const normalizedBasePath = serverBasePath.replace(/\/$/, '');
-  const profilesFilePath = path.join(normalizedBasePath, 'SETTINGS', 'LEAP_SEPS', 'Profiles.json');
+  const profilesFilePath = path.join(normalizedBasePath, 'SETTINGS', 'LEAP_SEPS', 'Data', 'Profiles.json');
 
   if (!fs.existsSync(profilesFilePath)) {
    throw new Error(`Profiles.json file not found at: ${profilesFilePath}`);
@@ -1052,17 +1344,11 @@ async function getProfileInformation(profileCode) {
    throw new Error('Profiles.json does not contain an array');
   }
 
-  const normalizedLookup = String(profileCode).trim().toUpperCase();
-  const matchedProfile = profilesData.find((profile) => {
-   const codeValue =
-    profile && profile['Profile Code'] != null ? String(profile['Profile Code']).trim().toUpperCase() : '';
-   const nameValue =
-    profile && profile['Profile Name'] != null ? String(profile['Profile Name']).trim().toUpperCase() : '';
-   return codeValue === normalizedLookup || nameValue === normalizedLookup;
-  });
+  const findResult = findProfileInProfilesData(profilesData, profileCode, options || {});
+  const matchedProfile = findResult.profile;
 
   if (!matchedProfile) {
-   console.warn('[LEAP][UB_DEBUG] Profile not found in Profiles.json for code:', profileCode);
+   console.warn('[LEAP][UB_DEBUG] Profile not found in Profiles.json for code:', profileCode, options || {});
    return {
     found: false,
     profileCode: profileCode,
@@ -1124,6 +1410,10 @@ async function getProfileInformation(profileCode) {
   console.log('[LEAP][UB_DEBUG] Matched profile row:', {
    profileCode,
    profileName: matchedProfile['Profile Name'] || '',
+   distress: matchedProfile['Distress'] || 'N',
+   distressRequested: findResult.requestedDistress,
+   distressMatched: findResult.matchedDistress,
+   distressFallbackUsed: findResult.fallbackUsed,
    underbase2Raw: matchedProfile['Underbase 2'] != null ? matchedProfile['Underbase 2'] : matchedProfile['UB 2'],
    underbase3Raw: matchedProfile['Underbase 3'] != null ? matchedProfile['Underbase 3'] : matchedProfile['UB 3'],
    underbase4Raw: matchedProfile['Underbase 4'] != null ? matchedProfile['Underbase 4'] : matchedProfile['UB 4'],
@@ -1138,9 +1428,14 @@ async function getProfileInformation(profileCode) {
    ub4Mesh: matchedProfile['UB 4 Mesh'] || ''
   });
 
+  const resolvedProfileCode =
+   matchedProfile['Profile Code'] != null
+    ? String(matchedProfile['Profile Code']).trim()
+    : String(profileCode).trim();
+
   return {
    found: true,
-   profileCode: profileCode,
+   profileCode: resolvedProfileCode,
    profileName: matchedProfile['Profile Name'] || '',
    flash: flash,
    cool: cool,
@@ -1183,7 +1478,12 @@ async function getProfileInformation(profileCode) {
       matchedProfile['Blocker Mesh'] != null
        ? String(matchedProfile['Blocker Mesh'])
        : ''
-      )
+      ),
+   formatInkNameLabel: toEnabled(matchedProfile.formatInkNameLabel || false),
+   colorNameLabelFormat:
+    matchedProfile.colorNameLabelFormat != null && String(matchedProfile.colorNameLabelFormat).trim() !== ''
+     ? String(matchedProfile.colorNameLabelFormat)
+     : 'PANTONE XXX C'
   };
  } catch (error) {
   console.error('[LEAP][UB_DEBUG] getProfileInformation failed:', profileCode, error.message);
@@ -1199,7 +1499,100 @@ async function getProfileInformation(profileCode) {
  }
 }
 
-async function getInkInformation(inkName, profileName) {
+function normalizeInkMatchString(value) {
+ if (value == null) return '';
+ return String(value).trim().toUpperCase();
+}
+
+function escapeRegExpForInkMatch(str) {
+ return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Numeric Pantone codes must match the full number — "123" must not match "1235". */
+function inkExceptionNameMatchesInk(inkName, exceptionInkColor) {
+ const needle = normalizeInkMatchString(exceptionInkColor);
+ const target = normalizeInkMatchString(inkName);
+ if (!needle || !target) return false;
+ if (target === needle) return true;
+
+ const numericNeedle = needle.replace(/\s+/g, '');
+ if (/^\d+[A-Z]?$/.test(numericNeedle)) {
+  const pantoneRe = new RegExp(
+   `PANTONE\\s+${escapeRegExpForInkMatch(numericNeedle)}(?:\\s|$)`,
+   'i'
+  );
+  if (pantoneRe.test(target)) return true;
+  if (target === numericNeedle) return true;
+  return false;
+ }
+
+ if (target.indexOf(needle) !== -1) return true;
+ if (needle.indexOf(target) !== -1) return true;
+ return false;
+}
+
+async function loadInkExceptionsForProfileCode(profileCode) {
+ try {
+  if (!profileCode) return [];
+  const codeKey = String(profileCode).trim().toUpperCase();
+  if (!codeKey) return [];
+  const serverBasePath = await getServerBasePathWithRetry();
+  if (!serverBasePath) return [];
+  const jsonPath = path.join(
+   serverBasePath.replace(/\/$/, ''),
+   'SETTINGS',
+   'LEAP_SEPS',
+   'Data',
+   'profile_ink_exceptions.json'
+  );
+  if (!fs.existsSync(jsonPath)) return [];
+  const parsed = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter((entry) => {
+   if (!entry) return false;
+   const entryCode =
+    entry.profileCode != null ? String(entry.profileCode).trim().toUpperCase() : '';
+   return entryCode !== '' && entryCode === codeKey;
+  });
+ } catch (e) {
+  return [];
+ }
+}
+
+function inkExceptionEntryToInfo(entry) {
+ if (!entry) return null;
+ const twoHitsRaw = entry.Two_Hits != null ? String(entry.Two_Hits).trim().toUpperCase() : 'N';
+ let hitsCount = twoHitsRaw === 'Y' || twoHitsRaw === 'YES' ? 2 : 1;
+ if (entry.hitsCount != null) {
+  const parsed = parseInt(entry.hitsCount, 10);
+  if (!isNaN(parsed) && parsed >= 1) hitsCount = parsed;
+ }
+ const meshRaw = entry.Color_Mesh;
+ const mesh = meshRaw == null || meshRaw === '' ? '110' : String(meshRaw).trim();
+ return { mesh, twoHits: hitsCount >= 2, hitsCount };
+}
+
+async function resolveInkExceptionOverride(inkName, profileCode) {
+ const entries = await loadInkExceptionsForProfileCode(profileCode);
+ for (let i = 0; i < entries.length; i++) {
+  const entry = entries[i];
+  const inkColor = entry.Ink_Color != null ? String(entry.Ink_Color).trim() : '';
+  if (!inkColor || !inkExceptionNameMatchesInk(inkName, inkColor)) continue;
+  const info = inkExceptionEntryToInfo(entry);
+  if (!info) continue;
+  return {
+   found: true,
+   mesh: info.mesh,
+   twoHits: info.twoHits,
+   inkName,
+   profileCode,
+   source: 'inkException'
+  };
+ }
+ return null;
+}
+
+async function getInkInformation(inkName, profileName, inkExceptionProfileCode) {
  try {
   if (!inkName) {
    throw new Error('Ink name is required');
@@ -1244,25 +1637,7 @@ async function getInkInformation(inkName, profileName) {
    const rowData = data[row];
    if (rowData && rowData[inkColorColIndex]) {
     const excelInkColor = String(rowData[inkColorColIndex]).trim().toUpperCase();
-    let inkColorMatches = false;
-
-    if (inkNameUpper.includes(excelInkColor) || excelInkColor.includes(inkNameUpper)) {
-     inkColorMatches = true;
-    } else {
-     const inkNameParts = inkNameUpper.match(/\d+[A-Z]*/g);
-     const excelParts = excelInkColor.match(/\d+[A-Z]*/g);
-     if (inkNameParts && excelParts) {
-      for (const inkPart of inkNameParts) {
-       for (const excelPart of excelParts) {
-        if (inkPart === excelPart) {
-         inkColorMatches = true;
-         break;
-        }
-       }
-       if (inkColorMatches) break;
-      }
-     }
-    }
+    const inkColorMatches = inkExceptionNameMatchesInk(inkNameUpper, excelInkColor);
 
     if (inkColorMatches) {
      if (profileNameUpper && profileColIndex !== -1) {
@@ -1281,7 +1656,16 @@ async function getInkInformation(inkName, profileName) {
    }
   }
 
+  const codeForException =
+   inkExceptionProfileCode != null && String(inkExceptionProfileCode).trim() !== ''
+    ? String(inkExceptionProfileCode).trim()
+    : null;
+
   if (!matchedRow) {
+   const fromException = await resolveInkExceptionOverride(inkName, codeForException);
+   if (fromException) {
+    return fromException;
+   }
    return {
     found: false,
     mesh: '110',
@@ -1310,7 +1694,7 @@ async function getInkInformation(inkName, profileName) {
    profileInfo = await getProfileInformation(profileCode);
   }
 
-  return {
+  let result = {
    found: true,
    mesh: meshValue,
    twoHits: twoHits,
@@ -1319,7 +1703,24 @@ async function getInkInformation(inkName, profileName) {
    profileName: matchedProfileName,
    profileInfo: profileInfo
   };
+  const exceptionOverride = await resolveInkExceptionOverride(inkName, codeForException);
+  if (exceptionOverride) {
+   result = {
+    ...result,
+    mesh: exceptionOverride.mesh || result.mesh,
+    twoHits: exceptionOverride.twoHits,
+    source: 'inkException'
+   };
+  }
+  return result;
  } catch (error) {
+  const fromException = await resolveInkExceptionOverride(
+   inkName,
+   inkExceptionProfileCode != null ? String(inkExceptionProfileCode).trim() : null
+  );
+  if (fromException) {
+   return fromException;
+  }
   return {
    found: false,
    mesh: '110',
@@ -1331,7 +1732,7 @@ async function getInkInformation(inkName, profileName) {
  }
 }
 
-async function getInkInformationBatch(inkNames, profileName) {
+async function getInkInformationBatch(inkNames, profileName, profileCode) {
  try {
   if (!inkNames || !Array.isArray(inkNames) || inkNames.length === 0) {
    throw new Error('Ink names array is required');
@@ -1357,7 +1758,7 @@ async function getInkInformationBatch(inkNames, profileName) {
   for (let i = 0; i < inkNames.length; i++) {
    const inkName = inkNames[i];
    const profileNameForInk = profileNames ? profileNames[i] : null;
-   const inkInfo = await getInkInformation(inkName, profileNameForInk);
+   const inkInfo = await getInkInformation(inkName, profileNameForInk, profileCode);
    results.push(inkInfo);
   }
 
@@ -1476,6 +1877,64 @@ class Leap {
   }
  }
 
+ async getBatchRowVariableSource(teamCode, documentPath) {
+  try {
+   if (!documentPath) {
+    try {
+     const docPathResult = await scriptLoader.evalScript('handleGetActiveDocumentPath', {});
+     const docPathData = JSON.parse(docPathResult);
+     if (docPathData.success && docPathData.documentPath) {
+      documentPath = docPathData.documentPath;
+      this.log(`Retrieved document path from host: ${documentPath}`);
+     }
+    } catch (docPathError) {
+     this.log(`Could not get document path from host: ${docPathError.message}`);
+    }
+   }
+   const fields = await getBatchRowVariableSource(teamCode, documentPath);
+   return {
+    success: true,
+    fields: fields || {}
+   };
+  } catch (error) {
+   this.log(`Error getBatchRowVariableSource: ${error.message}`);
+   return {
+    success: false,
+    error: error.message,
+    fields: {}
+   };
+  }
+ }
+
+ async getBatchExcelColumnNames(documentPath) {
+  try {
+   if (!documentPath) {
+    try {
+     const docPathResult = await scriptLoader.evalScript('handleGetActiveDocumentPath', {});
+     const docPathData = JSON.parse(docPathResult);
+     if (docPathData.success && docPathData.documentPath) {
+      documentPath = docPathData.documentPath;
+      this.log(`Retrieved document path from host: ${documentPath}`);
+     }
+    } catch (docPathError) {
+     this.log(`Could not get document path from host: ${docPathError.message}`);
+    }
+   }
+   const columns = await getBatchExcelColumnNames(documentPath);
+   return {
+    success: true,
+    columns: columns || []
+   };
+  } catch (error) {
+   this.log(`Error getBatchExcelColumnNames: ${error.message}`);
+   return {
+    success: false,
+    error: error.message,
+    columns: []
+   };
+  }
+ }
+
  async getProfileNamesFromExcel(styleCodes) {
   try {
    const profileMap = await getProfileNamesFromExcel(styleCodes);
@@ -1569,9 +2028,9 @@ class Leap {
   }
  }
 
- async getInkInformation(inkName, profileName) {
+ async getInkInformation(inkName, profileName, inkExceptionProfileCode) {
   try {
-   const inkInfo = await getInkInformation(inkName, profileName);
+   const inkInfo = await getInkInformation(inkName, profileName, inkExceptionProfileCode);
    return {
     success: true,
     inkInfo: inkInfo
@@ -1585,9 +2044,9 @@ class Leap {
   }
  }
 
- async getInkInformationBatch(inkNames, profileName) {
+ async getInkInformationBatch(inkNames, profileName, profileCode) {
   try {
-   const inkInfoList = await getInkInformationBatch(inkNames, profileName);
+   const inkInfoList = await getInkInformationBatch(inkNames, profileName, profileCode);
    return {
     success: true,
     inkInfoList: inkInfoList
@@ -1601,9 +2060,9 @@ class Leap {
   }
  }
 
- async getProfileInformation(profileCode) {
+ async getProfileInformation(profileCode, options) {
   try {
-   const profileInfo = await getProfileInformation(profileCode);
+   const profileInfo = await getProfileInformation(profileCode, options || {});
    return {
     success: true,
     profileInfo: profileInfo
@@ -1617,7 +2076,11 @@ class Leap {
   }
  }
 
- log(val) {}
+ log(val) {
+  if (typeof window !== 'undefined' && typeof window.leapSepsWrite === 'function') {
+   window.leapSepsWrite('LOG', 'LeapSrc', String(val));
+  }
+ }
 
  get name() {
   return 'LEAP:: ';

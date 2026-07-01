@@ -1,5 +1,21 @@
 #include "./constants.jsx"
 
+/** Append one line to ~/Documents/LEAP Settings/Logs/leap_seps.log */
+function appendLeapSepLog(message) {
+ try {
+  var logFolder = new Folder(Folder.myDocuments.fsName + "/LEAP Settings/Logs");
+  if (!logFolder.exists) {
+   logFolder.create();
+  }
+  var logFile = new File(logFolder.fsName + "/leap_seps.log");
+  logFile.encoding = "UTF-8";
+  if (logFile.open("a")) {
+   logFile.writeln("[" + new Date().toISOString() + "] [JSX] " + message);
+   logFile.close();
+  }
+ } catch (e) {}
+}
+
 function cmykToRgb(c, m, y, k) {
  c = c / 100;
  m = m / 100;
@@ -99,6 +115,205 @@ function duplicateItemToLayer(item, targetLayer, copiedItems) {
  return newItem;
 }
 
+/** Show SIZED_ART / SIZED_GRAPHICS and unlock so graphic art can be selected for splitColors / underbase. */
+function showSizedLayersForProcessing(doc) {
+ if (!doc) return;
+ try {
+  var sizedArt = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_ART);
+  var layerStack = [sizedArt];
+  var layerCount = 0;
+  var maxLayers = 64;
+  while (layerStack.length > 0 && layerCount < maxLayers) {
+   var lyr = layerStack.pop();
+   layerCount++;
+   try {
+    lyr.visible = true;
+    lyr.locked = false;
+   } catch (e0) { }
+   try {
+    if (lyr.layers && lyr.layers.length > 0) {
+     for (var i = 0; i < lyr.layers.length; i++) {
+      layerStack.push(lyr.layers[i]);
+     }
+    }
+   } catch (e1) { }
+  }
+ } catch (e) { }
+}
+
+/** Unlock item + ancestor groups/layers only. */
+function unlockPageItemForProcessing(item) {
+ if (!item) return;
+ var maxDepth = 64;
+ var depth = 0;
+ var current = item;
+ while (current && depth < maxDepth) {
+  try {
+   if (current.locked) current.locked = false;
+   if (current.hidden) current.hidden = false;
+  } catch (e0) { }
+  try {
+   if (current.parent && current.parent.typename === "GroupItem") {
+    current = current.parent;
+    depth++;
+   } else {
+    break;
+   }
+  } catch (e1) {
+   break;
+  }
+ }
+ try {
+  if (item.layer) {
+   var layer = item.layer;
+   depth = 0;
+   while (layer && depth < maxDepth) {
+    layer.locked = false;
+    layer.visible = true;
+    if (layer.parent && layer.parent.typename === "Layer") {
+     layer = layer.parent;
+     depth++;
+    } else {
+     break;
+    }
+   }
+  }
+ } catch (e2) { }
+}
+
+/** Iterative (stack) unlock of item + all descendants — required before group.selected = true. */
+function unlockPageItemTreeForProcessing(rootItem) {
+ if (!rootItem) return;
+ var stack = [rootItem];
+ var count = 0;
+ var maxItems = 100000;
+ while (stack.length > 0 && count < maxItems) {
+  var node = stack.pop();
+  count++;
+  try {
+   if (node.locked) node.locked = false;
+   if (node.hidden) node.hidden = false;
+  } catch (e0) { }
+  try {
+   if (node.typename === "GroupItem" && node.pageItems && node.pageItems.length > 0) {
+    for (var i = node.pageItems.length - 1; i >= 0; i--) {
+     stack.push(node.pageItems[i]);
+    }
+   }
+  } catch (e1) { }
+  try {
+   if (node.typename === "CompoundPathItem" && node.pathItems && node.pathItems.length > 0) {
+    for (var p = node.pathItems.length - 1; p >= 0; p--) {
+     stack.push(node.pathItems[p]);
+    }
+   }
+  } catch (e2) { }
+ }
+}
+
+function unlockLayerContentsForSelection(layer) {
+ if (!layer) return;
+ var maxDepth = 64;
+ var depth = 0;
+ var current = layer;
+ while (current && depth < maxDepth) {
+  try {
+   current.locked = false;
+   current.visible = true;
+  } catch (e0) { }
+  try {
+   if (current.parent && current.parent.typename === "Layer") {
+    current = current.parent;
+    depth++;
+   } else {
+    break;
+   }
+  } catch (e1) {
+   break;
+  }
+ }
+ try {
+  if (layer.pageItems && layer.pageItems.length > 0) {
+   for (var i = 0; i < layer.pageItems.length; i++) {
+    unlockPageItemTreeForProcessing(layer.pageItems[i]);
+   }
+  }
+ } catch (e2) { }
+}
+
+function unlockAllLayersInDocument(doc) {
+ if (!doc || !doc.layers) return;
+ var layerStack = [];
+ try {
+  for (var i = 0; i < doc.layers.length; i++) {
+   layerStack.push(doc.layers[i]);
+  }
+ } catch (e0) { }
+ var layerCount = 0;
+ var maxLayers = 500;
+ while (layerStack.length > 0 && layerCount < maxLayers) {
+  var lyr = layerStack.pop();
+  layerCount++;
+  try {
+   lyr.visible = true;
+   lyr.locked = false;
+  } catch (e1) { }
+  try {
+   if (lyr.layers && lyr.layers.length > 0) {
+    for (var j = 0; j < lyr.layers.length; j++) {
+     layerStack.push(lyr.layers[j]);
+    }
+   }
+  } catch (e2) { }
+ }
+}
+
+/** Show/unlock SIZED_ART subtree and every page item inside SIZED_GRAPHICS. */
+function unlockSizedGraphicsContents(doc) {
+ showSizedLayersForProcessing(doc);
+ if (!doc) return;
+ try {
+  var sizedArt = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_ART);
+  var sizedGraphics = sizedArt.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_GRAPHICS);
+  if (sizedGraphics.pageItems && sizedGraphics.pageItems.length > 0) {
+   for (var i = 0; i < sizedGraphics.pageItems.length; i++) {
+    unlockPageItemTreeForProcessing(sizedGraphics.pageItems[i]);
+   }
+  }
+ } catch (e) { }
+}
+
+function prepareSizedArtGraphicForProcessing(doc, graphicItem) {
+ unlockSizedGraphicsContents(doc);
+ if (graphicItem) {
+  unlockPageItemForProcessing(graphicItem);
+  unlockPageItemTreeForProcessing(graphicItem);
+ }
+}
+
+/** Choke / Blocker are not PG ink rows — exclude from [C#] ink count. */
+function isNonInkSeparationLayerName(layerName) {
+ if (!layerName) return true;
+ var n = String(layerName).replace(/^\s+|\s+$/g, "");
+ var up = n.toUpperCase();
+ if (up === String(CONSTANTS.LAYER_NAMES.CHOKE).toUpperCase()) return true;
+ if (up === String(CONSTANTS.LAYER_NAMES.BLOCKER).toUpperCase()) return true;
+ if (/^BLOCKER(\s+\d+)?$/i.test(n)) return true;
+ return false;
+}
+
+/** Count PG ink rows (matches SEP TABLE row count, not raw SEPARATED_ART sublayer count). */
+function countPgInkColorsFromLayerNames(layerNames) {
+ if (!layerNames || !layerNames.length) return 0;
+ var count = 0;
+ for (var i = 0; i < layerNames.length; i++) {
+  if (!isNonInkSeparationLayerName(layerNames[i])) {
+   count++;
+  }
+ }
+ return count;
+}
+
 function expandObject() {
  try {
   app.executeMenuCommand('outline');
@@ -186,6 +401,371 @@ function getSwatchByName(doc, swatchName) {
  }
 }
 
+function swatchNameHasTrailingNumber(name) {
+ return /\s+\d+$/.test(String(name || ""));
+}
+
+function getSwatchCmykComponentsFromColor(color) {
+ if (!color) {
+  return null;
+ }
+ var base = color;
+ if (color.typename === CONSTANTS.COLOR_TYPES.SPOT && color.spot && color.spot.color) {
+  base = color.spot.color;
+ }
+ if (base.typename === CONSTANTS.COLOR_TYPES.CMYK) {
+  return {
+   c: Number(base.cyan) || 0,
+   m: Number(base.magenta) || 0,
+   y: Number(base.yellow) || 0,
+   k: Number(base.black) || 0
+  };
+ }
+ if (base.typename === CONSTANTS.COLOR_TYPES.GRAY) {
+  return { c: 0, m: 0, y: 0, k: Number(base.gray) || 0 };
+ }
+ return null;
+}
+
+function getSwatchCmykSum(doc, swatch) {
+ if (!doc || !swatch || !swatch.color) {
+  return null;
+ }
+ var cmyk = getSwatchCmykComponentsFromColor(swatch.color);
+ if (!cmyk) {
+  return null;
+ }
+ return cmyk.c + cmyk.m + cmyk.y + cmyk.k;
+}
+
+/**
+ * Default white swatch for UB2+ layers during separation generation.
+ * 1) Prefer a document swatch whose name contains "White", excluding White UB variants.
+ * 2) If several match, use the sole swatch without a trailing number; otherwise the first match.
+ * 3) If none match, use the swatch with the lowest C+M+Y+K total.
+ */
+function isWhiteUbLayerName(name) {
+ return /^white\s*ub(\s+\d+)?$/i.test(String(name || ""));
+}
+
+function getWhiteUbLayerNumber(name) {
+ var match = String(name || "").match(/^white\s*ub(?:\s+(\d+))?$/i);
+ if (!match) {
+  return -1;
+ }
+ return match[1] ? parseInt(match[1], 10) : 1;
+}
+
+function getUnderbaseSwatchFieldFromXmp(doc, fieldName) {
+ try {
+  if (!doc) return "";
+  var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
+  if (xmp.isXmpCreated && xmp.doesStructFieldExist(fieldName)) {
+   var val = xmp.getStructField(fieldName, false);
+   if (val != null) return String(val).replace(/^\s+|\s+$/g, "");
+  }
+ } catch (e) { }
+ return "";
+}
+
+function getGraphicsUnderbaseSwatchNameForIndex(profileMetadata, doc, ubIndex) {
+ if (ubIndex <= 0) {
+  return getProfileUnderbaseSwatchName(profileMetadata);
+ }
+ var metaFields = ["underbase2Swatch", "underbase3Swatch", "underbase4Swatch"];
+ var xmpFields = ["Underbase2Swatch", "Underbase3Swatch", "Underbase4Swatch"];
+ var idx = ubIndex > 3 ? 3 : ubIndex;
+ var fieldIdx = idx - 1;
+ var raw = "";
+ if (profileMetadata && profileMetadata[metaFields[fieldIdx]] != null) {
+  raw = String(profileMetadata[metaFields[fieldIdx]]).replace(/^\s+|\s+$/g, "");
+ }
+ if (!raw) raw = getUnderbaseSwatchFieldFromXmp(doc, xmpFields[fieldIdx]);
+ if (!raw && fieldIdx > 0) return getGraphicsUnderbaseSwatchNameForIndex(profileMetadata, doc, idx - 1);
+ if (!raw) raw = getUnderbaseSwatchFieldFromXmp(doc, "Underbase2Swatch");
+ if (!raw) return getUnderbase2SwatchName(profileMetadata, doc);
+ return raw;
+}
+
+function enrichProfileMetadataWithGraphicsUnderbaseSwatches(profileMetadata, doc) {
+ if (!profileMetadata) profileMetadata = {};
+ var pairs = [
+  { meta: "underbase2Swatch", xmp: "Underbase2Swatch" },
+  { meta: "underbase3Swatch", xmp: "Underbase3Swatch" },
+  { meta: "underbase4Swatch", xmp: "Underbase4Swatch" }
+ ];
+ for (var f = 0; f < pairs.length; f++) {
+  var cur = profileMetadata[pairs[f].meta];
+  if (cur != null && String(cur).replace(/^\s+|\s+$/g, "") !== "") continue;
+  var fromXmp = getUnderbaseSwatchFieldFromXmp(doc, pairs[f].xmp);
+  if (fromXmp) profileMetadata[pairs[f].meta] = fromXmp;
+ }
+ return profileMetadata;
+}
+
+function getWhiteUbPassIndexFromLayerName(layerName) {
+ var n = String(layerName || "").replace(/^\s+|\s+$/g, "");
+ if (/^white\s*ub$/i.test(n)) return 0;
+ var m = n.match(/^white\s*ub\s+(\d+)$/i);
+ if (!m || !m[1]) return -1;
+ var num = parseInt(m[1], 10);
+ return isNaN(num) ? -1 : num - 1;
+}
+
+/** Underbase 2 Swatch from document XMP (Graphics tab choice). */
+function getUnderbase2SwatchNameFromDocument(doc) {
+ var name = "";
+ try {
+  if (!doc) return "";
+  var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
+  if (xmp.isXmpCreated && xmp.doesStructFieldExist("SeparationProfileMetadata")) {
+   var profileMeta = xmp.getStructField("SeparationProfileMetadata", true);
+   if (profileMeta && profileMeta.underbase2Swatch != null) {
+    name = String(profileMeta.underbase2Swatch).replace(/^\s+|\s+$/g, "");
+   }
+  }
+  if (!name && xmp.isXmpCreated && xmp.doesStructFieldExist("Underbase2Swatch")) {
+   var ub2Val = xmp.getStructField("Underbase2Swatch", false);
+   if (ub2Val != null) {
+    name = String(ub2Val).replace(/^\s+|\s+$/g, "");
+   }
+  }
+ } catch (e) { }
+ return name;
+}
+
+function getFirstFillColorFromContainer(container) {
+ if (!container) {
+  return null;
+ }
+ try {
+  if (container.typename === "PathItem" && container.filled && container.fillColor) {
+   return container.fillColor;
+  }
+  if (container.typename === "CompoundPathItem" && container.pathItems && container.pathItems.length > 0) {
+   var firstPath = container.pathItems[0];
+   if (firstPath && firstPath.filled && firstPath.fillColor) {
+    return firstPath.fillColor;
+   }
+  }
+  if (container.pageItems && container.pageItems.length > 0) {
+   for (var i = 0; i < container.pageItems.length; i++) {
+    var found = getFirstFillColorFromContainer(container.pageItems[i]);
+    if (found) {
+     return found;
+    }
+   }
+  }
+  if (container.layers && container.layers.length > 0) {
+   for (var l = 0; l < container.layers.length; l++) {
+    var layerFill = getFirstFillColorFromContainer(container.layers[l]);
+    if (layerFill) {
+     return layerFill;
+    }
+   }
+  }
+ } catch (e) { }
+ return null;
+}
+
+function getFirstFillColorFromSeparatedArtSublayer(doc, layerName) {
+ try {
+  var separatedArtLayer = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SEPARATED_ART);
+  if (!separatedArtLayer || !separatedArtLayer.layers) {
+   return null;
+  }
+  var targetLayer = null;
+  for (var i = 0; i < separatedArtLayer.layers.length; i++) {
+   if (String(separatedArtLayer.layers[i].name) === String(layerName)) {
+    targetLayer = separatedArtLayer.layers[i];
+    break;
+   }
+  }
+  if (!targetLayer) {
+   return null;
+  }
+  return getFirstFillColorFromContainer(targetLayer);
+ } catch (e) {
+  return null;
+ }
+}
+
+function buildSwatchDataFromColor(swatchName, color) {
+ var swatchData = {
+  name: swatchName,
+  hex: "#808080",
+  cmyk: null,
+  rgb: null,
+  fillSwatchName: null
+ };
+ if (!color) {
+  return swatchData;
+ }
+
+ swatchData.hex = getColorHex(color);
+ swatchData.fillSwatchName = getColorName(color);
+
+ if (color.typename === CONSTANTS.COLOR_TYPES.SPOT) {
+  var spotColor = color.spot.color;
+  if (spotColor.typename === CONSTANTS.COLOR_TYPES.CMYK) {
+   swatchData.cmyk = {
+    c: Math.round(spotColor.cyan),
+    m: Math.round(spotColor.magenta),
+    y: Math.round(spotColor.yellow),
+    k: Math.round(spotColor.black)
+   };
+  }
+ } else if (color.typename === CONSTANTS.COLOR_TYPES.CMYK) {
+  swatchData.cmyk = {
+   c: Math.round(color.cyan),
+   m: Math.round(color.magenta),
+   y: Math.round(color.yellow),
+   k: Math.round(color.black)
+  };
+ }
+
+ if (color.typename === CONSTANTS.COLOR_TYPES.RGB) {
+  swatchData.rgb = {
+   r: Math.round(color.red),
+   g: Math.round(color.green),
+   b: Math.round(color.blue)
+  };
+ } else if (swatchData.cmyk) {
+  swatchData.rgb = cmykToRgb(
+   swatchData.cmyk.c,
+   swatchData.cmyk.m,
+   swatchData.cmyk.y,
+   swatchData.cmyk.k
+  );
+ }
+
+ return swatchData;
+}
+
+function buildSwatchDataFromDocumentSwatch(doc, swatchName) {
+ var swatch = getSwatchByName(doc, swatchName);
+ if (swatch && swatch.color) {
+  return buildSwatchDataFromColor(swatchName, swatch.color);
+ }
+ return null;
+}
+
+/**
+ * Resolve swatch display data for a SEPARATED_ART layer name.
+ * For White UB 2+, prefers the actual layer fill swatch (e.g. PANTONE White C).
+ */
+function resolveLayerSwatchData(doc, layerName) {
+ var name = String(layerName || "");
+
+ if (isWhiteUbLayerName(name) && getWhiteUbLayerNumber(name) >= 2) {
+  var ubFillColor = getFirstFillColorFromSeparatedArtSublayer(doc, name);
+  if (ubFillColor) {
+   return buildSwatchDataFromColor(name, ubFillColor);
+  }
+  var ub2FromMeta = getUnderbase2SwatchNameFromDocument(doc);
+  if (ub2FromMeta) {
+   var ub2SwatchData = buildSwatchDataFromDocumentSwatch(doc, ub2FromMeta);
+   if (ub2SwatchData && (ub2SwatchData.cmyk !== null || ub2SwatchData.rgb !== null)) {
+    ub2SwatchData.name = name;
+    return ub2SwatchData;
+   }
+  }
+  var defaultWhiteName = getDefaultUnderbaseWhiteSwatchName(doc);
+  var defaultSwatchData = buildSwatchDataFromDocumentSwatch(doc, defaultWhiteName);
+  if (defaultSwatchData) {
+   defaultSwatchData.name = name;
+   return defaultSwatchData;
+  }
+ }
+
+ var swatchData = buildSwatchDataFromDocumentSwatch(doc, name);
+ if (swatchData && (swatchData.cmyk !== null || swatchData.rgb !== null)) {
+  return swatchData;
+ }
+
+ var fillColor = getFirstFillColorFromSeparatedArtSublayer(doc, name);
+ if (fillColor) {
+  return buildSwatchDataFromColor(name, fillColor);
+ }
+
+ if (swatchData) {
+  return swatchData;
+ }
+
+ return buildSwatchDataFromColor(name, null);
+}
+
+function getDefaultUnderbaseWhiteSwatchName(doc) {
+ var fallback = CONSTANTS.SWATCH_NAMES.WHITE_UB;
+ try {
+  if (!doc || !doc.swatches || doc.swatches.length === 0) {
+   return fallback;
+  }
+
+  var whiteSwatches = [];
+  for (var i = 0; i < doc.swatches.length; i++) {
+   var swatch = doc.swatches[i];
+   if (!swatch || !swatch.name || !swatch.color) {
+    continue;
+   }
+   var name = String(swatch.name);
+   var isWhiteUbVariant = /^white\s*ub(\s*\d+)?$/i.test(name);
+   if (name.charAt(0) === "[") {
+    continue;
+   }
+   if (isWhiteUbVariant) {
+    continue;
+   }
+   if (name.toLowerCase().indexOf("white") === -1) {
+    continue;
+   }
+   whiteSwatches.push(swatch);
+  }
+
+  if (whiteSwatches.length === 1) {
+   return whiteSwatches[0].name;
+  }
+  if (whiteSwatches.length > 1) {
+   var withoutTrailingNumber = [];
+   for (var w = 0; w < whiteSwatches.length; w++) {
+    if (!swatchNameHasTrailingNumber(whiteSwatches[w].name)) {
+     withoutTrailingNumber.push(whiteSwatches[w]);
+    }
+   }
+   if (withoutTrailingNumber.length === 1) {
+    return withoutTrailingNumber[0].name;
+   }
+   return whiteSwatches[0].name;
+  }
+
+  var lowestSum = null;
+  var lowestName = null;
+  for (var s = 0; s < doc.swatches.length; s++) {
+   var candidate = doc.swatches[s];
+   if (!candidate || !candidate.name || !candidate.color) {
+    continue;
+   }
+   var candidateName = String(candidate.name);
+   if (candidateName.charAt(0) === "[") {
+    continue;
+   }
+   var sum = getSwatchCmykSum(doc, candidate);
+   if (sum === null) {
+    continue;
+   }
+   if (lowestSum === null || sum < lowestSum) {
+    lowestSum = sum;
+    lowestName = candidateName;
+   }
+  }
+
+  if (lowestName && getSwatchByName(doc, lowestName)) {
+   return lowestName;
+  }
+ } catch (e) { }
+ return fallback;
+}
+
 function applySwatchToFill(doc, swatchName) {
  var swatch = getSwatchByName(doc, swatchName);
  if (swatch) {
@@ -210,7 +790,7 @@ function applyStroke(doc, swatchName, strokeWidth) {
 function getGeneralSettingsFromDisk() {
  try {
   var documentsFolder = Folder.myDocuments || new Folder("~/Documents");
-  var settingsPath = documentsFolder.fsName + "/LEAP Settings/LEAP_Seps/general_Settings.json";
+  var settingsPath = documentsFolder.fsName + "/LEAP Settings/LEAP_Seps/general_settings.json";
   var settingsFile = new File(settingsPath);
   if (!settingsFile.exists) {
    return null;
@@ -235,7 +815,7 @@ function getGeneralSettingsFromDisk() {
  }
 }
 
-/** Choke stroke swatch from general_Settings.json, or GARMENT if unset, blank, or not in doc. */
+/** Choke stroke swatch from general_settings.json, or GARMENT if unset, blank, or not in doc. */
 function getChokeStrokeSwatchNameForDocument(doc) {
  var fallback = CONSTANTS.SWATCH_NAMES.GARMENT;
  var gen = getGeneralSettingsFromDisk();
@@ -351,6 +931,95 @@ function applyColorToRectanglesInGroup(group, color) {
  }
 }
 
+/**
+ * Rename a separation ink in the document: SEPARATED_ART sublayer and spot swatch (by name).
+ * Used when formatted labels (e.g. LS 186) replace formal names (PANTONE 186 C) in swatches and layers.
+ * Returns { success, error?, renamedLayer, renamedSwatch }.
+ */
+function renameSeparationInkInDocument(doc, fromName, toName) {
+ var result = { success: true, error: null, renamedLayer: false, renamedSwatch: false };
+ var from = String(fromName || "").replace(/^\s+|\s+$/g, "");
+ var to = String(toName || "").replace(/^\s+|\s+$/g, "");
+ if (!from || !to) {
+  result.success = false;
+  result.error = "Missing from or to ink name.";
+  return result;
+ }
+ if (from.toLowerCase() === to.toLowerCase()) {
+  return result;
+ }
+
+ var existingTargetSwatch = getSwatchByName(doc, to);
+ var sourceSwatchForConflict = getSwatchByName(doc, from);
+ if (existingTargetSwatch) {
+  if (
+   !sourceSwatchForConflict ||
+   String(existingTargetSwatch.name).toLowerCase() !== String(sourceSwatchForConflict.name).toLowerCase()
+  ) {
+   result.success = false;
+   result.error = "A swatch named \"" + to + "\" already exists.";
+   return result;
+  }
+ }
+
+ var sep = null;
+ try {
+  sep = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SEPARATED_ART);
+ } catch (eSep) { }
+ if (sep) {
+  var i;
+  var lyr = null;
+  for (i = 0; i < sep.layers.length; i++) {
+   if (String(sep.layers[i].name).toLowerCase() === from.toLowerCase()) {
+    lyr = sep.layers[i];
+    break;
+   }
+  }
+  if (lyr) {
+   try {
+    lyr.name = to;
+    result.renamedLayer = true;
+   } catch (eLyr) {
+    result.success = false;
+    result.error = (result.error ? result.error + " " : "") + "Layer rename: " + (eLyr.message || eLyr);
+   }
+  }
+ }
+
+ var sw = getSwatchByName(doc, from);
+ if (result.success && sw && sw.color) {
+  try {
+   if (sw.color.typename === "SpotColor" && sw.color.spot) {
+    sw.color.spot.name = to;
+    result.renamedSwatch = true;
+   } else {
+    try {
+     sw.name = to;
+     result.renamedSwatch = true;
+    } catch (eNm) { }
+   }
+  } catch (eSw) {
+   result.success = false;
+   result.error = (result.error ? result.error + " " : "") + "Swatch rename: " + (eSw.message || eSw);
+  }
+ }
+
+ if (!result.success) {
+  return result;
+ }
+
+ if (!result.renamedLayer && !result.renamedSwatch) {
+  result.success = false;
+  result.error =
+   (result.error ? result.error + " " : "") +
+   "No SEPARATED_ART sublayer or swatch found named \"" +
+   from +
+   "\".";
+ }
+
+ return result;
+}
+
 function updateGridColorLabels(doc, separationData) {
  var result = {
   updatedLabels: 0,
@@ -384,21 +1053,35 @@ function updateGridColorLabels(doc, separationData) {
   }
 
   var swatchColor = null;
-  if (sepData.colorName) {
-   var swatch = getSwatchByName(doc, sepData.colorName);
+  var swatchLookupName = sepData.swatchName || sepData.colorName;
+  if (swatchLookupName) {
+   var swatch = getSwatchByName(doc, swatchLookupName);
    if (swatch && swatch.color) {
     swatchColor = swatch.color;
    } else {
-    var isWhiteUbVariant = /^white\s*ub(\s+\d+)?$/i.test(String(sepData.colorName));
+    var isWhiteUbVariant = /^white\s*ub(\s+(\d+))?$/i.test(String(swatchLookupName));
     if (isWhiteUbVariant) {
-     var whiteUbSwatch = getSwatchByName(doc, "White UB");
-     if (whiteUbSwatch && whiteUbSwatch.color) {
-      swatchColor = whiteUbSwatch.color;
-     } else {
-      result.errors.push("Swatch '" + sepData.colorName + "' not found for group '" + groupName + "' and fallback 'White UB' swatch missing");
+     var ubNumMatch = String(swatchLookupName).match(/^white\s*ub(?:\s+(\d+))?$/i);
+     var ubNum = ubNumMatch && ubNumMatch[1] ? parseInt(ubNumMatch[1], 10) : 1;
+     if (ubNum >= 2) {
+      var ub2Name = getUnderbase2SwatchNameFromDocument(doc);
+      if (ub2Name) {
+       var ub2Swatch = getSwatchByName(doc, ub2Name);
+       if (ub2Swatch && ub2Swatch.color) {
+        swatchColor = ub2Swatch.color;
+       }
+      }
+     }
+     if (!swatchColor) {
+      var whiteUbSwatch = getSwatchByName(doc, "White UB");
+      if (whiteUbSwatch && whiteUbSwatch.color) {
+       swatchColor = whiteUbSwatch.color;
+      } else {
+       result.errors.push("Swatch '" + swatchLookupName + "' not found for group '" + groupName + "' and fallback 'White UB' swatch missing");
+      }
      }
     } else {
-     result.errors.push("Swatch '" + sepData.colorName + "' not found for group '" + groupName + "'");
+     result.errors.push("Swatch '" + swatchLookupName + "' not found for group '" + groupName + "'");
     }
    }
   }
@@ -511,7 +1194,363 @@ function formatSeparationDate(isoStr) {
  }
 }
 
-// Update variables in document ([ARTIST], [Artist Initials], [POS], [DATE], [STYLE_CODE], and jsonData keys)
+// Read the graphic position lookup JSON from the configured server base path.
+// Expected location: <ServerBasePath>/SETTINGS/graphic_positions.json
+// Expected shape: [{ "ABBV": "FT", "DESC": "FRONT" }, ...]
+function loadGraphicPositionLookup() {
+ try {
+  if (typeof getServerBasePath !== 'function') return [];
+  var serverBasePath = getServerBasePath();
+  if (!serverBasePath) return [];
+  var normalizedBasePath = String(serverBasePath).replace(/\/$/, "");
+  var lookupPath = normalizedBasePath + "/SETTINGS/graphic_positions.json";
+  var lookupFile = new File(lookupPath);
+  if (!lookupFile.exists) return [];
+  if (!lookupFile.open("r")) return [];
+  var content = lookupFile.read();
+  lookupFile.close();
+  if (!content || !content.length) return [];
+  var parsed;
+  if (typeof JSON !== "undefined" && JSON.parse) {
+   parsed = JSON.parse(content);
+  } else {
+   parsed = eval("(" + content + ")");
+  }
+  return (parsed && parsed instanceof Array) ? parsed : [];
+ } catch (e) {
+  return [];
+ }
+}
+
+function normalizeInkMatchString(value) {
+ if (value == null) return "";
+ return String(value).replace(/^\s+|\s+$/g, "").toUpperCase();
+}
+
+function escapeRegExpForInkMatch(str) {
+ return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Match ink exception Ink_Color (e.g. "123") to a plate/ink name (e.g. "PANTONE 123 C").
+ * Numeric Pantone codes must match the full number token — "123" must not match "1235".
+ */
+function inkExceptionNameMatchesName(exceptionInk, targetName) {
+ var needle = normalizeInkMatchString(exceptionInk);
+ var target = normalizeInkMatchString(targetName);
+ if (!needle || !target) return false;
+ if (target === needle) return true;
+
+ var numericNeedle = needle.replace(/\s+/g, "");
+ if (/^\d+[A-Z]?$/.test(numericNeedle)) {
+  var pantoneRe = new RegExp(
+   "PANTONE\\s+" + escapeRegExpForInkMatch(numericNeedle) + "(?:\\s|$)",
+   "i"
+  );
+  if (pantoneRe.test(target)) return true;
+  if (target === numericNeedle) return true;
+  return false;
+ }
+
+ if (target.indexOf(needle) !== -1) return true;
+ if (needle.indexOf(target) !== -1) return true;
+ return false;
+}
+
+// Read/write profile ink exceptions JSON from the configured server base path.
+// Expected location: <ServerBasePath>/SETTINGS/LEAP_SEPS/Data/profile_ink_exceptions.json
+function getProfileInkExceptionsJsonPath() {
+ try {
+  if (typeof getServerBasePath !== "function") return null;
+  var serverBasePath = getServerBasePath();
+  if (!serverBasePath) return null;
+  var normalizedBasePath = String(serverBasePath).replace(/\/$/, "");
+  return normalizedBasePath + "/SETTINGS/LEAP_SEPS/Data/profile_ink_exceptions.json";
+ } catch (e) {
+  return null;
+ }
+}
+
+function loadProfileInkExceptionsJson() {
+ try {
+  var jsonPath = getProfileInkExceptionsJsonPath();
+  if (!jsonPath) return [];
+  var jsonFile = new File(jsonPath);
+  if (!jsonFile.exists) return [];
+  if (!jsonFile.open("r")) return [];
+  var content = jsonFile.read();
+  jsonFile.close();
+  if (!content || !content.length) return [];
+  var parsed;
+  if (typeof JSON !== "undefined" && JSON.parse) {
+   parsed = JSON.parse(content);
+  } else {
+   parsed = eval("(" + content + ")");
+  }
+  return (parsed && parsed instanceof Array) ? parsed : [];
+ } catch (e) {
+  return [];
+ }
+}
+
+function saveProfileInkExceptionsJson(entries) {
+ try {
+  var jsonPath = getProfileInkExceptionsJsonPath();
+  if (!jsonPath) {
+   return { success: false, error: "Could not determine profile_ink_exceptions.json path" };
+  }
+  var jsonFile = new File(jsonPath);
+  var jsonFolder = jsonFile.parent;
+  if (!jsonFolder.exists) {
+   jsonFolder.create();
+  }
+  if (!jsonFile.open("w")) {
+   return { success: false, error: "Failed to open profile_ink_exceptions.json for writing" };
+  }
+  var jsonString = JSON.stringify(entries, null, 2);
+  jsonFile.write(jsonString);
+  jsonFile.close();
+  return { success: true };
+ } catch (e) {
+  return { success: false, error: e.message || e.toString() };
+ }
+}
+
+// Return the ABBV for a given position DESC using the graphic position lookup.
+// Falls back to the original positionDesc when no match is found.
+function getGraphicPositionAbbreviation(positionDesc) {
+ if (positionDesc == null) return '';
+ var original = String(positionDesc).trim();
+ if (!original) return '';
+ try {
+  var target = original.toLowerCase();
+  var lookup = loadGraphicPositionLookup();
+  for (var i = 0; i < lookup.length; i++) {
+   var entry = lookup[i];
+   if (!entry) continue;
+   var desc = entry.DESC != null ? entry.DESC : (entry.desc != null ? entry.desc : '');
+   if (!desc) continue;
+   if (String(desc).trim().toLowerCase() === target) {
+    var abbv = entry.ABBV != null ? entry.ABBV : (entry.abbv != null ? entry.abbv : '');
+    if (abbv != null && String(abbv).trim() !== '') {
+     return String(abbv).trim();
+    }
+    break;
+   }
+  }
+ } catch (e) { }
+ return original;
+}
+
+function formatSeparationVersionLabel(versionNumber) {
+ var n = parseInt(versionNumber, 10);
+ if (isNaN(n) || n < 1) {
+  n = 1;
+ }
+ return "V" + n;
+}
+
+function separationProfileNameFromEntry(entry) {
+ if (entry && entry.profileMetadata && entry.profileMetadata.profileName) {
+  return String(entry.profileMetadata.profileName);
+ }
+ return "";
+}
+
+function findSeparationEntryIndex(separations, graphicName, profileName) {
+ if (!separations || !separations.length || !graphicName) {
+  return -1;
+ }
+ var graphicKey = String(graphicName);
+ var profileKey = profileName != null ? String(profileName) : "";
+ for (var i = 0; i < separations.length; i++) {
+  var entry = separations[i];
+  if (!entry || String(entry.graphicName) !== graphicKey) {
+   continue;
+  }
+  var entryProfile = separationProfileNameFromEntry(entry);
+  if (profileKey && entryProfile) {
+   if (entryProfile === profileKey) {
+    return i;
+   }
+  } else if (!profileKey && !entryProfile) {
+   return i;
+  }
+ }
+ return -1;
+}
+
+function getStoredSeparationVersionFromEntry(entry) {
+ if (!entry) {
+  return 0;
+ }
+ var fromMeta = entry.profileMetadata && entry.profileMetadata.separationVersion != null
+  ? parseInt(entry.profileMetadata.separationVersion, 10)
+  : NaN;
+ if (!isNaN(fromMeta) && fromMeta > 0) {
+  return fromMeta;
+ }
+ var fromEntry = entry.separationVersion != null ? parseInt(entry.separationVersion, 10) : NaN;
+ if (!isNaN(fromEntry) && fromEntry > 0) {
+  return fromEntry;
+ }
+ return 0;
+}
+
+function loadSeparationsFromVersionDoc(versionDoc) {
+ var separations = [];
+ if (!versionDoc) {
+  return separations;
+ }
+ try {
+  var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", versionDoc);
+  if (xmp.isXmpCreated && xmp.doesStructFieldExist("LEAPSeparationProfileData")) {
+   var existing = xmp.getStructField("LEAPSeparationProfileData", true);
+   if (existing instanceof Array) {
+    separations = existing;
+   }
+  }
+ } catch (e) { }
+ return separations;
+}
+
+function persistSeparationVersionOnVersionDoc(versionDoc, graphicName, profileName, versionNumber) {
+ if (!versionDoc || !graphicName || versionNumber == null) {
+  return false;
+ }
+ var version = parseInt(versionNumber, 10);
+ if (isNaN(version) || version < 1) {
+  return false;
+ }
+ try {
+  var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", versionDoc);
+  if (!xmp.isXmpCreated) {
+   return false;
+  }
+  var separations = loadSeparationsFromVersionDoc(versionDoc);
+  var idx = findSeparationEntryIndex(separations, graphicName, profileName);
+  if (idx < 0) {
+   separations.push({
+    graphicName: String(graphicName),
+    profileMetadata: {
+     profileName: profileName != null ? String(profileName) : "",
+     separationVersion: version
+    },
+    separatedDocumentPath: "",
+    separationVersion: version
+   });
+  } else {
+   var entry = separations[idx];
+   if (!entry.profileMetadata || typeof entry.profileMetadata !== "object") {
+    entry.profileMetadata = {};
+   }
+   entry.profileMetadata.separationVersion = version;
+   entry.separationVersion = version;
+   separations[idx] = entry;
+  }
+  xmp.setStructField("LEAPSeparationProfileData", separations, true, false);
+  xmp.commit();
+  if (versionDoc.fullName && versionDoc.fullName.fsName) {
+   try {
+    versionDoc.save();
+   } catch (saveErr) { }
+  }
+  return true;
+ } catch (e) {
+  return false;
+ }
+}
+
+function getNextSeparationVersion(versionDoc, graphicName, profileName) {
+ var separations = loadSeparationsFromVersionDoc(versionDoc);
+ var idx = findSeparationEntryIndex(separations, graphicName, profileName);
+ if (idx < 0) {
+  return 1;
+ }
+ return getStoredSeparationVersionFromEntry(separations[idx]) + 1;
+}
+
+function bumpSeparationVersionOnVersionDoc(versionDoc, graphicName, profileName) {
+ var nextVersion = getNextSeparationVersion(versionDoc, graphicName, profileName);
+ persistSeparationVersionOnVersionDoc(versionDoc, graphicName, profileName, nextVersion);
+ return nextVersion;
+}
+
+/** Find an open team version document (01 TEAMOUTS, not a separation file). */
+function findOpenVersionDocument() {
+ var versionDoc = null;
+ try {
+  if (app.documents.length > 0) {
+   var activeDoc = app.activeDocument;
+   if (activeDoc && activeDoc.fullName && activeDoc.fullName.fsName) {
+    var activeDocPath = activeDoc.fullName.fsName;
+    var isSeparatedDoc = activeDocPath.indexOf("09 SEPARATIONS") !== -1;
+    var isVersionDoc = activeDocPath.indexOf("01 TEAMOUTS") !== -1 && !isSeparatedDoc;
+    if (isVersionDoc) {
+     versionDoc = activeDoc;
+    }
+   }
+  }
+  if (!versionDoc) {
+   for (var d = 0; d < app.documents.length; d++) {
+    var doc = app.documents[d];
+    if (!doc || !doc.fullName || !doc.fullName.fsName) {
+     continue;
+    }
+    var docPath = doc.fullName.fsName;
+    var isSeparatedDoc2 = docPath.indexOf("09 SEPARATIONS") !== -1;
+    var isVersionDoc2 = docPath.indexOf("01 TEAMOUTS") !== -1 && !isSeparatedDoc2;
+    if (isVersionDoc2) {
+     versionDoc = doc;
+     break;
+    }
+   }
+  }
+ } catch (e) { }
+ return versionDoc;
+}
+
+/** Update [C#] (ink count) and/or [V#] (separation version label) in all document text frames. */
+function updateSeparationPageVariables(doc, colorCount, separationVersion) {
+ if (!doc || !doc.textFrames) {
+  return;
+ }
+ var hasColor = colorCount !== null && colorCount !== undefined && colorCount !== "";
+ var hasVersion = separationVersion !== null && separationVersion !== undefined && separationVersion !== "";
+ if (!hasColor && !hasVersion) {
+  return;
+ }
+ try {
+  for (var i = 0; i < doc.textFrames.length; i++) {
+   var textFrame = doc.textFrames[i];
+   var content = textFrame.contents;
+   var updatedContent = content;
+   var regex = /\[([^\]]+)\]/g;
+   var match;
+   while ((match = regex.exec(content)) !== null) {
+    var variableName = String(match[1] || "");
+    var fullMatch = match[0];
+    var key = variableName.toLowerCase().replace(/\s/g, "_");
+    var value = null;
+    if (hasColor && (key === "c#" || variableName === "C#")) {
+     value = String(colorCount);
+    } else if (hasVersion && (key === "v#" || variableName === "V#")) {
+     value = formatSeparationVersionLabel(separationVersion);
+    }
+    if (value !== null && value !== undefined) {
+     updatedContent = updatedContent.split(fullMatch).join(value);
+    }
+   }
+   if (updatedContent !== content) {
+    textFrame.contents = updatedContent;
+   }
+  }
+ } catch (e) {
+  $.writeln("Error updating separation page variables: " + e.message);
+ }
+}
+
+// Update variables in document ([ARTIST], [Artist Initials], [POS], [DATE], [STYLE_CODE], jsonData keys; optional profileMetadata.batchVariableSource from BATCH .xlsx after JSON)
 function updateVariablesInDocument(doc, jsonData, styleCodes, profileMetadata) {
  try {
   var meta = profileMetadata || {};
@@ -542,11 +1581,32 @@ function updateVariablesInDocument(doc, jsonData, styleCodes, profileMetadata) {
     } else if (key === 'artist_initials' || key === 'artistinitials') {
      value = (meta.artistInitials != null && meta.artistInitials !== '') ? String(meta.artistInitials).trim() : '';
     } else if (key === 'pos') {
-     value = (meta.position != null && meta.position !== '') ? String(meta.position).trim() : (findValueInJSON(jsonData, 'Position') || findValueInJSON(jsonData, 'position') || '');
+     var rawPosition = (meta.position != null && meta.position !== '') ? String(meta.position).trim() : (findValueInJSON(jsonData, 'Position') || findValueInJSON(jsonData, 'position') || '');
+     value = rawPosition ? getGraphicPositionAbbreviation(rawPosition) : '';
     } else if (key === 'date') {
      value = formatSeparationDate(meta.createdDate || '');
+    } else if (key === 'c#') {
+     if (meta.separationColorCount != null && meta.separationColorCount !== '') {
+      value = String(meta.separationColorCount);
+     }
+    } else if (key === 'v#') {
+     if (meta.separationVersion != null && meta.separationVersion !== '') {
+      value = formatSeparationVersionLabel(meta.separationVersion);
+     }
     } else {
      value = findValueInJSON(jsonData, variableName);
+    }
+
+    var batchSrc = meta.batchVariableSource;
+    if (
+     (value === null || value === undefined || value === '') &&
+     batchSrc &&
+     typeof batchSrc === 'object'
+    ) {
+     var fromBatch = findValueInJSON(batchSrc, variableName);
+     if (fromBatch !== null && fromBatch !== undefined && fromBatch !== '') {
+      value = fromBatch;
+     }
     }
 
     if (value !== null && value !== undefined) {
@@ -616,9 +1676,50 @@ function deleteNonFillStrokeItems() {
   _tempRectangle.fillColor = _noneSwatch.color;
   _tempRectangle.strokeColor = _noneSwatch.color;
   app.executeMenuCommand('Find Fill & Stroke menu item');
+
+
+  for (var i = app.selection.length - 1; i >= 0; i--) {
+   var selectedItem = app.selection[i];
+   if (!selectedItem) continue;
+   // Top-level PathItem that is a clipping path
+   if (selectedItem.typename === "PathItem" && selectedItem.clipping === true) {
+    selectedItem.selected = false;
+    // Top-level GroupItem that is a clipping group, or contains one deeper
+   } else if (selectedItem.typename === "CompoundPathItem" && selectedItem.pathItems[0].clipping) {
+    selectedItem.selected = false;
+   } else if (selectedItem.typename === "GroupItem") {
+    deselectedClippedItemsInGroup(selectedItem);
+   }
+  }
+
   app.doScript("Clear", "LEAP Color Seps");
  }
  catch (e) {
+ }
+}
+
+function deselectedClippedItemsInGroup(item) {
+ if (!item) return;
+ // PathItem: .clipping === true means this path IS the clipping mask
+ if (item.typename === "PathItem" && item.clipping === true) {
+  item.selected = false;
+  return;
+ }
+ if (item.typename === "CompoundPathItem" && item.pathItems[0].clipping) {
+  item.selected = false;
+  return;
+ }
+ // GroupItem: .clipped === true means the group contains a clipping mask
+ if (item.typename === "GroupItem") {
+  if (item.clipped === true) {
+   item.selected = false;
+   return;
+  }
+  if (item.pageItems) {
+   for (var j = item.pageItems.length - 1; j >= 0; j--) {
+    deselectedClippedItemsInGroup(item.pageItems[j]);
+   }
+  }
  }
 }
 

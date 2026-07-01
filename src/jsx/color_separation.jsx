@@ -7,12 +7,34 @@ function splitColors(_graphicName, cleanupOpts) {
 		var runLeftover = cleanupOpts == null || cleanupOpts.deleteLeftoverPaths === true;
 		var _sizedArtLayer = app.activeDocument.layers.getByName("SIZED_ART");
 		var _sizedGraphicLayer = _sizedArtLayer.layers.getByName("SIZED_GRAPHICS");
-		var _graphicItem = _sizedGraphicLayer.pageItems.getByName(_graphicName);
+		var _graphicItem = null;
+		try {
+			_graphicItem = _sizedGraphicLayer.pageItems.getByName(_graphicName);
+		} catch (nameErr) {
+			if (_sizedGraphicLayer.pageItems && _sizedGraphicLayer.pageItems.length > 0) {
+				_graphicItem = _sizedGraphicLayer.pageItems[0];
+				appendLeapSepLog(
+					"splitColors: graphic \"" + _graphicName + "\" not found; using first item \"" +
+					_graphicItem.name + "\" in SIZED_GRAPHICS"
+				);
+			}
+		}
+		if (!_graphicItem) {
+			throw new Error(
+				"Graphic \"" + _graphicName + "\" not found in SIZED_GRAPHICS (place graphic AI first)"
+			);
+		}
+		prepareSizedArtGraphicForProcessing(app.activeDocument, _graphicItem);
 		_graphicItem.selected = true;
 		app.redraw();
 		app.executeMenuCommand('copy');
 		app.executeMenuCommand('pasteInPlace');
 		app.redraw();
+		if (app.selection && app.selection.length > 0) {
+			for (var selIdx = 0; selIdx < app.selection.length; selIdx++) {
+				unlockPageItemTreeForProcessing(app.selection[selIdx]);
+			}
+		}
 		expandObject();
 		app.executeMenuCommand('group');
 		pathFinderDivide();
@@ -40,6 +62,7 @@ function splitColors(_graphicName, cleanupOpts) {
 
 
 				app.selection = null;
+				unlockLayerContentsForSelection(colorSubLayer);
 				app.activeDocument.activeLayer = colorSubLayer;
 				app.activeDocument.activeLayer.hasSelectedArtwork = true;
 				app.redraw();
@@ -50,11 +73,14 @@ function splitColors(_graphicName, cleanupOpts) {
 			}
 		}
 		app.redraw();
+		return JSON.stringify({ success: true });
 
 	} catch (e) {
+		var msg = e.message || e.toString();
+		appendLeapSepLog("splitColors error: " + msg);
 		return JSON.stringify({
 			success: false,
-			error: e.message || e.toString()
+			error: msg
 		});
 	}
 }
@@ -185,21 +211,93 @@ function removeKnockoutFilledItemsFromUnderbaseLayer(whiteUBLayer, profileMetada
 	}
 }
 
-function getEnabledUnderbaseIndices(profileMetadata) {
+function isProfileFlagEnabled(value) {
+	if (value === true || value === 1) return true;
+	if (typeof value === "string") {
+		var normalized = value.replace(/^\s+|\s+$/g, "").toUpperCase();
+		return normalized === "Y" || normalized === "YES" || normalized === "TRUE" || normalized === "1";
+	}
+	return false;
+}
+
+/** How many profile underbase passes are enabled (1–4), with fallback flags when underbaseEnabled[] is missing. */
+function getProfileUnderbasePassCount(profileMetadata) {
 	try {
+		var count = 1;
+		if (isProfileFlagEnabled(profileMetadata && profileMetadata.underbase4Enabled)
+			|| isProfileFlagEnabled(profileMetadata && profileMetadata.ub4Enabled)
+			|| isProfileFlagEnabled(profileMetadata && profileMetadata.underbase4)
+			|| (profileMetadata && isProfileFlagEnabled(profileMetadata["Underbase 4"]))
+			|| (profileMetadata && isProfileFlagEnabled(profileMetadata["UB 4"]))) {
+			count = Math.max(count, 4);
+		}
+		if (isProfileFlagEnabled(profileMetadata && profileMetadata.underbase3Enabled)
+			|| isProfileFlagEnabled(profileMetadata && profileMetadata.ub3Enabled)
+			|| isProfileFlagEnabled(profileMetadata && profileMetadata.underbase3)
+			|| (profileMetadata && isProfileFlagEnabled(profileMetadata["Underbase 3"]))
+			|| (profileMetadata && isProfileFlagEnabled(profileMetadata["UB 3"]))) {
+			count = Math.max(count, 3);
+		}
+		if (isProfileFlagEnabled(profileMetadata && profileMetadata.underbase2Enabled)
+			|| isProfileFlagEnabled(profileMetadata && profileMetadata.ub2Enabled)
+			|| isProfileFlagEnabled(profileMetadata && profileMetadata.underbase2)
+			|| (profileMetadata && isProfileFlagEnabled(profileMetadata["Underbase 2"]))
+			|| (profileMetadata && isProfileFlagEnabled(profileMetadata["UB 2"]))) {
+			count = Math.max(count, 2);
+		}
 		var enabled = profileMetadata && profileMetadata.underbaseEnabled instanceof Array
 			? profileMetadata.underbaseEnabled
 			: null;
-		if (!enabled || enabled.length === 0) return [0];
-		var indices = [];
-		for (var i = 0; i < enabled.length; i++) {
-			if (enabled[i] === true) indices.push(i);
+		if (enabled && enabled.length > 0) {
+			var arrayCount = enabled[0] !== false ? 1 : 0;
+			for (var i = 1; i < enabled.length && i < 4; i++) {
+				if (enabled[i] === true) arrayCount = i + 1;
+			}
+			if (arrayCount < 1) arrayCount = 1;
+			count = Math.max(count, arrayCount);
 		}
-		if (indices.length === 0) indices.push(0);
-		return indices;
+		return count;
+	} catch (e) {
+		return 1;
+	}
+}
+
+function getEnabledUnderbaseIndices(profileMetadata) {
+	try {
+		var passCount = getProfileUnderbasePassCount(profileMetadata);
+		var indices = [];
+		for (var j = 0; j < passCount; j++) {
+			indices.push(j);
+		}
+		return indices.length > 0 ? indices : [0];
 	} catch (e) {
 		return [0];
 	}
+}
+
+/** Resolve swatch name to the document's exact spelling (case-insensitive lookup). */
+function resolveDocumentSwatchName(doc, preferredName) {
+	if (!doc || !preferredName) return preferredName;
+	var swatch = getSwatchByName(doc, preferredName);
+	if (swatch && swatch.name) return swatch.name;
+	try {
+		var search = String(preferredName).replace(/^\s+|\s+$/g, "").toUpperCase();
+		for (var i = 0; i < doc.swatches.length; i++) {
+			var candidate = doc.swatches[i];
+			if (candidate && candidate.name && String(candidate.name).replace(/^\s+|\s+$/g, "").toUpperCase() === search) {
+				return candidate.name;
+			}
+		}
+	} catch (e) { }
+	return String(preferredName).replace(/^\s+|\s+$/g, "");
+}
+
+function getOrCreateSeparatedArtSubLayer(doc, layerName, separatedArtLayer) {
+	var existing = findSeparatedArtSubLayerByName(separatedArtLayer, layerName);
+	if (existing) return existing;
+	var layer = separatedArtLayer.layers.add();
+	layer.name = layerName;
+	return layer;
 }
 
 /** Normalize profile swatch list: true Array, or object map from XMP/JSON bridge. */
@@ -306,6 +404,49 @@ function getUnderbaseLayerNameForIndex(index) {
 	return CONSTANTS.LAYER_NAMES.WHITE_UB + " " + (index + 1);
 }
 
+/** Graphics-page Underbase 2 swatch name, or auto-picked document white when unset. */
+function getUnderbase2SwatchName(profileMetadata, doc) {
+	try {
+		var raw = profileMetadata && profileMetadata.underbase2Swatch != null
+			? String(profileMetadata.underbase2Swatch).replace(/^\s+|\s+$/g, "")
+			: "";
+		if (raw) return raw;
+		return getDefaultUnderbaseWhiteSwatchName(doc || app.activeDocument);
+	} catch (e) {
+		return CONSTANTS.SWATCH_NAMES.WHITE_UB;
+	}
+}
+
+/** Resolve SEPARATED_ART layer + fill swatch for a profile underbase pass index. */
+function resolveUnderbaseLayerAndSwatch(ubIndex, profileMetadata, doc) {
+	if (ubIndex === 0) {
+		return {
+			layerName: CONSTANTS.LAYER_NAMES.WHITE_UB,
+			swatchName: getProfileUnderbaseSwatchName(profileMetadata),
+			clearBeforeCopy: true
+		};
+	}
+	var layerName = getUnderbaseLayerNameForIndex(ubIndex);
+	var rawTarget = getGraphicsUnderbaseSwatchNameForIndex(profileMetadata, doc, ubIndex);
+	var swatchName = resolveDocumentSwatchName(doc, rawTarget);
+	return {
+		layerName: layerName,
+		swatchName: swatchName,
+		clearBeforeCopy: true
+	};
+}
+
+/** Layer belongs in the underbase stack (White UB variants). */
+function isUnderbaseStackLayerName(layerName, profileMetadata, doc) {
+	if (!layerName) return false;
+	return String(layerName).indexOf(CONSTANTS.LAYER_NAMES.WHITE_UB) === 0;
+}
+
+/** Plate list uses live SEPARATED_ART layer names (no filtering). */
+function filterPlateLayerNamesForUi(layerNames, profileMetadata) {
+	return layerNames || [];
+}
+
 function getProfileUnderbaseSwatchName(profileMetadata) {
 	try {
 		var raw = profileMetadata && profileMetadata.underbaseSwatch != null
@@ -377,17 +518,46 @@ function isBlockerEnabled(profileMetadata) {
 	}
 }
 
+function applySpotFillToContainer(container, color) {
+	if (!container || !color) return;
+	try {
+		if (container.typename === "PathItem") {
+			if (container.filled) container.fillColor = color;
+			return;
+		}
+		if (container.typename === "CompoundPathItem" && container.pathItems) {
+			for (var p = 0; p < container.pathItems.length; p++) {
+				if (container.pathItems[p].filled) container.pathItems[p].fillColor = color;
+			}
+			return;
+		}
+		if (container.pageItems) {
+			for (var i = 0; i < container.pageItems.length; i++) {
+				applySpotFillToContainer(container.pageItems[i], color);
+			}
+		}
+	} catch (e) { }
+}
+
 function finalizeUnderbaseLayer(underbaseLayer, runLeftoverUb, swatchName) {
 	try {
-		// Use the provided swatch name; fall back to the default White UB constant if not supplied.
-		var resolvedSwatch = (swatchName && String(swatchName).replace(/^\s+|\s+$/g, "") !== "")
-			? String(swatchName)
-			: CONSTANTS.SWATCH_NAMES.WHITE_UB;
+		var doc = app.activeDocument;
+		var resolvedSwatch = resolveDocumentSwatchName(
+			doc,
+			(swatchName && String(swatchName).replace(/^\s+|\s+$/g, "") !== "")
+				? String(swatchName)
+				: CONSTANTS.SWATCH_NAMES.WHITE_UB
+		);
 		app.selection = null;
-		app.activeDocument.activeLayer = underbaseLayer;
-		app.activeDocument.activeLayer.hasSelectedArtwork = true;
+		unlockLayerContentsForSelection(underbaseLayer);
+		doc.activeLayer = underbaseLayer;
+		doc.activeLayer.hasSelectedArtwork = true;
 		app.redraw();
-		applySwatchToFill(app.activeDocument, resolvedSwatch);
+		applySwatchToFill(doc, resolvedSwatch);
+		var swatch = getSwatchByName(doc, resolvedSwatch);
+		if (swatch && swatch.color) {
+			applySpotFillToContainer(underbaseLayer, swatch.color);
+		}
 		app.executeMenuCommand('sendToBack');
 		pathFinderAdd();
 		if (runLeftoverUb) {
@@ -397,47 +567,236 @@ function finalizeUnderbaseLayer(underbaseLayer, runLeftoverUb, swatchName) {
 	} catch (e) { }
 }
 
-function generateUnderbase(_graphicName, cleanupOpts, profileMetadata) {
+/** Local case-insensitive lookup of a direct SEPARATED_ART sublayer by name. */
+function findSeparatedArtSubLayerByName(separatedArtLayer, layerName) {
+	if (!separatedArtLayer || !layerName) return null;
+	var search = String(layerName).replace(/^\s+|\s+$/g, "").toUpperCase();
+	try {
+		for (var i = 0; i < separatedArtLayer.layers.length; i++) {
+			var candidate = separatedArtLayer.layers[i];
+			if (candidate && candidate.name && String(candidate.name).replace(/^\s+|\s+$/g, "").toUpperCase() === search) {
+				return candidate;
+			}
+		}
+	} catch (e) { }
+	return null;
+}
+
+/**
+ * Build localized extra-pass underbase layers from per-ink ink-exception counts.
+ *
+ * profileMetadata.inkLocalizedUnderbase is [{ level, layers:[plateNames] }] (set by
+ * mergeInkExceptionUnderbaseIntoProfileMetadata). For level N (1-based) we create
+ * "White UB N" filled from ONLY the geometry of the listed ink plates, so the extra
+ * white pass sits under just those inks. All inks needing pass N share one "White UB N"
+ * layer; finalizeUnderbaseLayer() unions overlaps via pathfinder and recolors to white.
+ */
+function applyLocalizedInkUnderbaseLayers(profileMetadata, separatedArtLayer, runLeftoverUb, forceClearBeforeCopy) {
+	try {
+		var localized = profileMetadata && profileMetadata.inkLocalizedUnderbase instanceof Array
+			? profileMetadata.inkLocalizedUnderbase
+			: null;
+		if (!localized || localized.length === 0) return;
+
+		for (var e = 0; e < localized.length; e++) {
+			var entry = localized[e];
+			if (!entry || !(entry.layers instanceof Array) || entry.layers.length === 0) continue;
+
+			var levelIndex = entry.level - 1; // 0-based for layer naming (UB N -> index N-1)
+			var resolved = resolveUnderbaseLayerAndSwatch(levelIndex, profileMetadata, app.activeDocument);
+			var ubLayerName = resolved.layerName;
+			var ubLayer = getOrCreateSeparatedArtSubLayer(app.activeDocument, ubLayerName, separatedArtLayer);
+			var existingCount = 0;
+			try { existingCount = ubLayer.pageItems ? ubLayer.pageItems.length : 0; } catch (ecErr) { }
+			if (resolved.clearBeforeCopy || forceClearBeforeCopy === true) {
+				clearLayerPageItems(ubLayer);
+			}
+
+			var copied = 0;
+			for (var s = 0; s < entry.layers.length; s++) {
+				var sourceInkLayer = findSeparatedArtSubLayerByName(separatedArtLayer, entry.layers[s]);
+				if (!sourceInkLayer) continue;
+				copied += duplicateLayerItems(sourceInkLayer, ubLayer);
+			}
+
+			if (copied === 0) {
+				if (existingCount === 0) {
+					try { ubLayer.remove(); } catch (rmErr) { }
+				}
+				continue;
+			}
+
+			finalizeUnderbaseLayer(ubLayer, runLeftoverUb, resolved.swatchName);
+			appendLeapSepLog(
+				"localized " + ubLayerName + " built from " + entry.layers.join(" + ") + " (" + copied + " items)"
+			);
+		}
+	} catch (e) { }
+}
+
+/** Choke, Blocker, and numbered White UB layers removed before regenerating underbase from inks. */
+function isChokeBlockerOrRemovableUnderbaseLayerName(layerName, profileMetadata, doc) {
+	if (!layerName) return false;
+	var n = String(layerName).replace(/^\s+|\s+$/g, "");
+	var up = n.toUpperCase();
+	if (up === String(CONSTANTS.LAYER_NAMES.CHOKE).toUpperCase()) return true;
+	if (up === String(CONSTANTS.LAYER_NAMES.BLOCKER).toUpperCase()) return true;
+	if (/^BLOCKER(\s+\d+)?$/i.test(n)) return true;
+	if (up === String(CONSTANTS.LAYER_NAMES.WHITE_UB).toUpperCase()) return true;
+	if (n.indexOf(CONSTANTS.LAYER_NAMES.WHITE_UB + " ") === 0) return true;
+	return false;
+}
+
+/** Ink color plates in SEPARATED_ART (excludes choke / underbase stack layers). */
+function isInkPlateLayerNameForUnderbaseMerge(layerName, profileMetadata, doc) {
+	if (!layerName || layerName === "__TEMP_WHITE_UB") return false;
+	return !isChokeBlockerOrRemovableUnderbaseLayerName(layerName, profileMetadata, doc);
+}
+
+function removeChokeAndUnderbaseLayers(separatedArtLayer, profileMetadata, doc) {
+	if (!separatedArtLayer || !separatedArtLayer.layers) return 0;
+	var removed = 0;
+	for (var i = separatedArtLayer.layers.length - 1; i >= 0; i--) {
+		var layer = separatedArtLayer.layers[i];
+		if (!layer || !layer.name) continue;
+		if (layer.name === "__TEMP_WHITE_UB") {
+			try { layer.remove(); removed++; } catch (tempErr) { }
+			continue;
+		}
+		if (isChokeBlockerOrRemovableUnderbaseLayerName(layer.name, profileMetadata, doc)) {
+			try { layer.remove(); removed++; } catch (rmErr) { }
+		}
+	}
+	appendLeapSepLog(
+		"regenerate underbase: removed " + removed + " choke/underbase layer(s); ink plates kept"
+	);
+	return removed;
+}
+
+function populateTempLayerFromExistingInkPlates(separatedArtLayer, profileMetadata, doc, tempWhiteUBLayer, runUnpainted) {
+	clearLayerPageItems(tempWhiteUBLayer);
+	var inksCopied = 0;
+	var inkNames = [];
+	for (var i = 0; i < separatedArtLayer.layers.length; i++) {
+		var inkLayer = separatedArtLayer.layers[i];
+		if (!inkLayer || !inkLayer.name) continue;
+		if (!isInkPlateLayerNameForUnderbaseMerge(inkLayer.name, profileMetadata, doc)) continue;
+		var dup = duplicateLayerItems(inkLayer, tempWhiteUBLayer);
+		if (dup > 0) {
+			inksCopied += dup;
+			inkNames.push(inkLayer.name);
+		}
+	}
+	if (inksCopied < 1) {
+		throw new Error("No ink plate artwork found in SEPARATED_ART to build underbase from");
+	}
+	appendLeapSepLog(
+		"underbase from existing inks: merged " + inkNames.length + " layer(s): " + inkNames.join(", ")
+	);
+	app.selection = null;
+	unlockLayerContentsForSelection(tempWhiteUBLayer);
+	app.activeDocument.activeLayer = tempWhiteUBLayer;
+	app.activeDocument.activeLayer.hasSelectedArtwork = true;
+	app.redraw();
+	setFillOverprintOnContainer(tempWhiteUBLayer, false);
+	app.redraw();
+	pathFinderMerge();
+	app.executeMenuCommand('ungroup');
+	if (runUnpainted) {
+		deleteNonFillStrokeItems();
+	}
+}
+
+function generateUnderbase(_graphicName, cleanupOpts, profileMetadata, genOptions) {
+	genOptions = genOptions || {};
+	var fromExistingInks = genOptions.fromExistingInks === true;
+	var forceClearUnderbases = fromExistingInks === true;
 	try {
 		var runUnpainted = cleanupOpts == null || cleanupOpts.deleteUnpaintedPaths === true;
 		var runLeftoverUb = cleanupOpts == null || cleanupOpts.deleteLeftoverPaths === true;
 		var _separatedArtLayer = getOrCreateLayer(app.activeDocument, CONSTANTS.LAYER_NAMES.SEPARATED_ART);
-		var _sizedArtLayer = app.activeDocument.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_ART);
-		var _sizedGraphicLayer = _sizedArtLayer.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_GRAPHICS);
-		var _graphicItem = _sizedGraphicLayer.pageItems.getByName(_graphicName);
+
+		if (fromExistingInks) {
+			removeChokeAndUnderbaseLayers(_separatedArtLayer, profileMetadata, app.activeDocument);
+		} else {
+			var _sizedArtLayer = app.activeDocument.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_ART);
+			var _sizedGraphicLayer = _sizedArtLayer.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_GRAPHICS);
+			var _graphicItem = null;
+			try {
+				_graphicItem = _sizedGraphicLayer.pageItems.getByName(_graphicName);
+			} catch (nameErr) {
+				if (_sizedGraphicLayer.pageItems && _sizedGraphicLayer.pageItems.length > 0) {
+					_graphicItem = _sizedGraphicLayer.pageItems[0];
+				}
+			}
+			if (!_graphicItem) {
+				throw new Error(
+					"Graphic \"" + _graphicName + "\" not found in SIZED_GRAPHICS (place graphic AI first)"
+				);
+			}
+			prepareSizedArtGraphicForProcessing(app.activeDocument, _graphicItem);
+		}
 
 		var tempWhiteUBLayer = getOrCreateLayer(app.activeDocument, "__TEMP_WHITE_UB", _separatedArtLayer);
-		clearLayerPageItems(tempWhiteUBLayer);
-		duplicateItemToLayer(_graphicItem, tempWhiteUBLayer);
+		if (fromExistingInks) {
+			populateTempLayerFromExistingInkPlates(
+				_separatedArtLayer,
+				profileMetadata,
+				app.activeDocument,
+				tempWhiteUBLayer,
+				runUnpainted
+			);
+		} else {
+			clearLayerPageItems(tempWhiteUBLayer);
+			duplicateItemToLayer(_graphicItem, tempWhiteUBLayer);
 
-		app.selection = null;
-		app.activeDocument.activeLayer = tempWhiteUBLayer;
-		app.activeDocument.activeLayer.hasSelectedArtwork = true;
-		app.redraw();
-		setFillOverprintOnContainer(tempWhiteUBLayer, false);
-		app.redraw();
+			app.selection = null;
+			unlockLayerContentsForSelection(tempWhiteUBLayer);
+			app.activeDocument.activeLayer = tempWhiteUBLayer;
+			app.activeDocument.activeLayer.hasSelectedArtwork = true;
+			app.redraw();
+			setFillOverprintOnContainer(tempWhiteUBLayer, false);
+			app.redraw();
 
-		pathFinderMerge();
-		app.executeMenuCommand('ungroup');
-		if (runUnpainted) {
-			deleteNonFillStrokeItems();
+			pathFinderMerge();
+			app.executeMenuCommand('ungroup');
+			if (runUnpainted) {
+				deleteNonFillStrokeItems();
+			}
 		}
 
 		var enabledUnderbaseIndices = getEnabledUnderbaseIndices(profileMetadata);
-		var profileUnderbaseSwatch = getProfileUnderbaseSwatchName(profileMetadata);
 		for (var ub = 0; ub < enabledUnderbaseIndices.length; ub++) {
 			var ubIndex = enabledUnderbaseIndices[ub];
-			var ubLayerName = getUnderbaseLayerNameForIndex(ubIndex);
-			var ubLayer = getOrCreateLayer(app.activeDocument, ubLayerName, _separatedArtLayer);
-			// Match React behavior:
-			// - UB1 uses selected profile underbase swatch
-			// - UB2+ remain White UB flow
-			var ubSwatchName = ubIndex === 0 ? profileUnderbaseSwatch : CONSTANTS.SWATCH_NAMES.WHITE_UB;
-			clearLayerPageItems(ubLayer);
-			duplicateLayerItems(tempWhiteUBLayer, ubLayer);
+			var resolved = resolveUnderbaseLayerAndSwatch(ubIndex, profileMetadata, app.activeDocument);
+			var ubLayerName = resolved.layerName;
+			var ubLayer = getOrCreateSeparatedArtSubLayer(app.activeDocument, ubLayerName, _separatedArtLayer);
+			var ubSwatchName = resolved.swatchName;
+			if (!getSwatchByName(app.activeDocument, ubSwatchName)) {
+				appendLeapSepLog("UB" + (ubIndex + 1) + " warning: swatch '" + ubSwatchName + "' not found in document");
+			}
+			var existingCount = 0;
+			try { existingCount = ubLayer.pageItems ? ubLayer.pageItems.length : 0; } catch (ecErr) { }
+			if (resolved.clearBeforeCopy || forceClearUnderbases) {
+				clearLayerPageItems(ubLayer);
+			} else if (existingCount > 0) {
+				appendLeapSepLog(
+					"UB" + (ubIndex + 1) + " preserving " + existingCount + " existing item(s) on '" + ubLayerName + "'"
+				);
+			}
+			var dupCount = duplicateLayerItems(tempWhiteUBLayer, ubLayer);
 			removeKnockoutFilledItemsFromUnderbaseLayer(ubLayer, profileMetadata, ubIndex);
 			finalizeUnderbaseLayer(ubLayer, runLeftoverUb, ubSwatchName);
+			var ubItemCount = 0;
+			try { ubItemCount = ubLayer.pageItems ? ubLayer.pageItems.length : 0; } catch (cntErr) { }
+			appendLeapSepLog(
+				"UB" + (ubIndex + 1) + " layer '" + ubLayerName + "': duplicated=" + dupCount + ", items=" + ubItemCount
+			);
 		}
+
+		// Extra underbase passes required only by specific inks (ink-exception underbase_count
+		// beyond the profile-global count) are built localized — from just those inks' shapes.
+		applyLocalizedInkUnderbaseLayers(profileMetadata, _separatedArtLayer, runLeftoverUb, forceClearUnderbases);
 
 		if (isBlockerEnabled(profileMetadata)) {
 			ensureSwatchExistsFromSource(
@@ -452,7 +811,8 @@ function generateUnderbase(_graphicName, cleanupOpts, profileMetadata) {
 		}
 
 		// Generate Choke
-		generateChoke(tempWhiteUBLayer, _separatedArtLayer);
+		generateChoke(tempWhiteUBLayer, _separatedArtLayer, profileMetadata);
+		reorderGeneratedUnderbaseLayers(_separatedArtLayer, profileMetadata);
 		try { tempWhiteUBLayer.remove(); } catch (tempRemoveErr) { }
 		app.activeDocument.selection = null;
 	} catch (e) {
@@ -464,24 +824,28 @@ function generateUnderbase(_graphicName, cleanupOpts, profileMetadata) {
 }
 
 
-function generateChoke(sourceLayer, separatedArtLayer) {
+function generateChoke(sourceLayer, separatedArtLayer, profileMetadata) {
 
 	var chokeLayer = getOrCreateLayer(app.activeDocument, CONSTANTS.LAYER_NAMES.CHOKE, separatedArtLayer);
 	try {
-		var topMostWhiteUbLayer = null;
-		var topMostWhiteUbIndex = 999999;
+		var topMostUnderbaseLayer = null;
+		var topMostUnderbaseIndex = 999999;
 		for (var layerIndex = 0; layerIndex < separatedArtLayer.layers.length; layerIndex++) {
 			var candidateLayer = separatedArtLayer.layers[layerIndex];
-			if (candidateLayer && candidateLayer.name && candidateLayer.name.indexOf(CONSTANTS.LAYER_NAMES.WHITE_UB) === 0) {
-				if (layerIndex < topMostWhiteUbIndex) {
-					topMostWhiteUbIndex = layerIndex;
-					topMostWhiteUbLayer = candidateLayer;
+			if (
+				candidateLayer &&
+				candidateLayer.name &&
+				isUnderbaseStackLayerName(candidateLayer.name, profileMetadata, app.activeDocument)
+			) {
+				if (layerIndex < topMostUnderbaseIndex) {
+					topMostUnderbaseIndex = layerIndex;
+					topMostUnderbaseLayer = candidateLayer;
 				}
 			}
 		}
 
-		if (topMostWhiteUbLayer) {
-			chokeLayer.move(topMostWhiteUbLayer, ElementPlacement.PLACEBEFORE);
+		if (topMostUnderbaseLayer) {
+			chokeLayer.move(topMostUnderbaseLayer, ElementPlacement.PLACEBEFORE);
 		} else {
 			chokeLayer.move(separatedArtLayer, ElementPlacement.PLACEATBEGINNING);
 		}
@@ -490,6 +854,7 @@ function generateChoke(sourceLayer, separatedArtLayer) {
 	}
 	clearLayerPageItems(chokeLayer);
 
+	unlockLayerContentsForSelection(sourceLayer);
 	app.activeDocument.activeLayer = sourceLayer;
 	app.activeDocument.activeLayer.hasSelectedArtwork = true;
 	pathFinderAdd();
@@ -504,6 +869,7 @@ function generateChoke(sourceLayer, separatedArtLayer) {
 
 	app.redraw();
 	app.selection = null;
+	unlockLayerContentsForSelection(chokeLayer);
 	app.activeDocument.activeLayer = chokeLayer;
 	app.activeDocument.activeLayer.hasSelectedArtwork = true;
 	deleteLeftoverPathsInLayer(chokeLayer);
@@ -519,6 +885,47 @@ function generateChoke(sourceLayer, separatedArtLayer) {
 
 	applyChokeStroke(app.activeDocument, CONSTANTS.STYLES.CHOKE_STROKE_WIDTH);
 	setStrokeOverprintOnContainer(chokeLayer, true);
+}
+
+function reorderGeneratedUnderbaseLayers(separatedArtLayer, profileMetadata) {
+	try {
+		if (!separatedArtLayer || !separatedArtLayer.layers) return;
+
+		var chokeLayer = null;
+		var blockerLayer = null;
+		var whiteUbLayers = [];
+
+		for (var i = 0; i < separatedArtLayer.layers.length; i++) {
+			var layer = separatedArtLayer.layers[i];
+			if (!layer || !layer.name) continue;
+			if (layer.name === CONSTANTS.LAYER_NAMES.CHOKE) chokeLayer = layer;
+			else if (layer.name === CONSTANTS.LAYER_NAMES.BLOCKER) blockerLayer = layer;
+			else if (isWhiteUbLayerName(layer.name)) whiteUbLayers.push(layer);
+		}
+
+		whiteUbLayers.sort(function(a, b) {
+			return getWhiteUbLayerNumber(a.name) - getWhiteUbLayerNumber(b.name);
+		});
+
+		var tailOrdered = [];
+		if (chokeLayer) tailOrdered.push(chokeLayer);
+		for (var u = 0; u < whiteUbLayers.length; u++) {
+			tailOrdered.push(whiteUbLayers[u]);
+		}
+		if (blockerLayer) tailOrdered.push(blockerLayer);
+
+		if (tailOrdered.length === 0) return;
+
+		for (var t = tailOrdered.length - 1; t >= 0; t--) {
+			try {
+				if (t === tailOrdered.length - 1) {
+					tailOrdered[t].move(separatedArtLayer, ElementPlacement.PLACEATEND);
+				} else {
+					tailOrdered[t].move(tailOrdered[t + 1], ElementPlacement.PLACEBEFORE);
+				}
+			} catch (moveErr) { }
+		}
+	} catch (e) { }
 }
 
 

@@ -1,5 +1,6 @@
 import { Component, Input, OnChanges, OnInit, SimpleChanges } from '@angular/core';
 import { csInterface } from '../../../libs/helper';
+import { ExportSettings } from '../../components/export-settings-panel/export-settings-panel.component';
 import { ControllerService } from '../../services/controller.service';
 
 interface Profile {
@@ -32,7 +33,7 @@ interface Profile {
  styleUrls: ['./settings.component.css']
 })
 export class SettingsComponent implements OnInit, OnChanges {
- @Input() selectedSectionFromMenu: 'Separation Profiles' | 'General Settings' = 'Separation Profiles';
+ @Input() selectedSectionFromMenu: 'Separation Profiles' | 'General Settings' | 'Export Settings' = 'Separation Profiles';
  profiles: Profile[] = [];
  isLoading = true;
  editModalOpen = false;
@@ -46,9 +47,17 @@ export class SettingsComponent implements OnInit, OnChanges {
  ppdName = 'IBlock v2';
  chokeStrokeColorSwatch = '';
  koDarkColorNames = 'Black, PANTONE PROCESS BLACK C';
+ meshValues = '';
  sepsTemplateFileName = 'SEP-GRID-TEMPLATE.ai';
  sepsTemplateFiles: string[] = [];
  selectedSection = 'Separation Profiles';
+ exportSettings: ExportSettings = {
+  printGuideFilePath: '',
+  separationPreviewFilePath: '',
+  postscriptFilePath: ''
+ };
+ exportExcelColumns: string[] = [];
+ exportGraphicPositions: string[] = [];
 
  // 🔑 Environment config
  environments = {
@@ -66,7 +75,9 @@ export class SettingsComponent implements OnInit, OnChanges {
  constructor(private controller: ControllerService) {}
 
  get pageTitle(): string {
-  return this.selectedSection === 'General Settings' ? 'General Settings' : 'Manage Profiles';
+  if (this.selectedSection === 'General Settings') return 'General Settings';
+  if (this.selectedSection === 'Export Settings') return 'Export Settings';
+  return 'Manage Profiles';
  }
 
  ngOnChanges(changes: SimpleChanges): void {
@@ -80,6 +91,8 @@ export class SettingsComponent implements OnInit, OnChanges {
   this.loadProfiles();
   this.loadLeapServerPath();
   this.loadGeneralSettings();
+  this.loadExportSettings();
+  this.loadExportTokenData();
   this.loadSepsTemplateFiles();
 
   try {
@@ -133,6 +146,7 @@ export class SettingsComponent implements OnInit, OnChanges {
      result.data.koDarkColorNames !== undefined && result.data.koDarkColorNames !== null
       ? String(result.data.koDarkColorNames)
       : 'Black, PANTONE PROCESS BLACK C';
+    this.meshValues = result.data.meshValues != null ? String(result.data.meshValues) : '';
     this.sepsTemplateFileName =
      result.data.sepsTemplateFileName != null && String(result.data.sepsTemplateFileName).trim() !== ''
       ? String(result.data.sepsTemplateFileName).trim()
@@ -150,6 +164,7 @@ export class SettingsComponent implements OnInit, OnChanges {
    ppdName: this.ppdName,
    chokeStrokeColorSwatch: this.chokeStrokeColorSwatch,
    koDarkColorNames: this.koDarkColorNames,
+   meshValues: this.meshValues,
    sepsTemplateFileName: this.sepsTemplateFileName
   };
   this.controller.saveGeneralSettings(settings).then((result) => {
@@ -157,6 +172,65 @@ export class SettingsComponent implements OnInit, OnChanges {
     console.error('Failed to save general settings:', result.error);
    }
   });
+ }
+
+ loadExportSettings(): void {
+  this.controller.loadExportSettings().then((result) => {
+   if (result.success && result.data) {
+    this.exportSettings = this.normalizeExportSettings(result.data);
+   }
+  });
+ }
+
+ saveExportSettings(): void {
+  this.controller.saveExportSettings(this.exportSettings).then((result) => {
+   if (!result.success) {
+    console.error('Failed to save export settings:', result.error);
+   }
+  });
+ }
+
+ onExportSettingChange(update: { field: keyof ExportSettings; value: string }): void {
+  this.exportSettings = {
+   ...this.exportSettings,
+   [update.field]: update.value
+  };
+  this.saveExportSettings();
+ }
+
+ loadExportTokenData(): void {
+  this.controller
+   .getExportSettingsTokenData()
+   .then((result) => {
+    if (result?.success) {
+     this.exportExcelColumns = Array.isArray(result.excelColumns) ? result.excelColumns : [];
+     this.exportGraphicPositions = Array.isArray(result.graphicPositions) ? result.graphicPositions : [];
+    }
+   })
+   .catch(() => {
+    this.exportExcelColumns = [];
+    this.exportGraphicPositions = [];
+   });
+ }
+
+ get exportProfileCodes(): string[] {
+  const seen = new Set<string>();
+  return (Array.isArray(this.profiles) ? this.profiles : [])
+   .map((profile) => String(profile?.code || '').trim())
+   .filter((code) => {
+    if (!code || seen.has(code)) return false;
+    seen.add(code);
+    return true;
+   });
+ }
+
+ private normalizeExportSettings(settings: any): ExportSettings {
+  return {
+   printGuideFilePath: settings?.printGuideFilePath != null ? String(settings.printGuideFilePath) : '',
+   separationPreviewFilePath:
+    settings?.separationPreviewFilePath != null ? String(settings.separationPreviewFilePath) : '',
+   postscriptFilePath: settings?.postscriptFilePath != null ? String(settings.postscriptFilePath) : ''
+  };
  }
 
  loadLeapServerPath(): void {

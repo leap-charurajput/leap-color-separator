@@ -1,0 +1,64 @@
+<div *ngIf="isOpen" class="create-graphic-modal-overlay" (click)="onCancel()">
+ <div class="create-graphic-modal" (click)="$event.stopPropagation()">
+  <div class="create-graphic-modal-title">Create Graphic</div>
+
+  <div *ngIf="warningMessage" class="create-graphic-warning">
+   {{ warningMessage }}
+  </div>
+
+  <div class="create-graphic-field">
+   <label class="create-graphic-label">Position:</label>
+   <div class="create-graphic-control">
+    <app-dropdown
+     [value]="position"
+     [items]="positionOptions"
+     (onChange)="onPositionChange($event)"
+     placeholder="Choose..."
+    ></app-dropdown>
+   </div>
+  </div>
+
+  <div class="create-graphic-field">
+   <label class="create-graphic-label">Name:</label>
+   <div class="create-graphic-control">
+    <input
+     type="text"
+     class="create-graphic-input"
+     [(ngModel)]="name"
+     placeholder="Graphic"
+    />
+   </div>
+  </div>
+
+  <div class="create-graphic-field">
+   <label class="create-graphic-label">Size:</label>
+   <div class="create-graphic-size-row">
+    <span class="create-graphic-size-label">W</span>
+    <input
+     type="text"
+     class="create-graphic-size-input"
+     [(ngModel)]="width"
+     (keypress)="onDimensionKeypress($event)"
+    />
+    <span class="create-graphic-unit">in</span>
+    <span class="create-graphic-size-label">H</span>
+    <input
+     type="text"
+     class="create-graphic-size-input"
+     [(ngModel)]="height"
+     (keypress)="onDimensionKeypress($event)"
+    />
+    <span class="create-graphic-unit">in</span>
+   </div>
+  </div>
+
+  <div class="create-graphic-footer">
+   <app-button variant="secondary" size="medium" [disabled]="isSubmitting" (onClick)="onCancel()"
+    >Cancel</app-button
+   >
+   <app-button variant="primary" size="medium" [disabled]="!canSubmit" (onClick)="onCreate()">
+    {{ isSubmitting ? 'Creating...' : 'Create' }}
+   </app-button>
+  </div>
+ </div>
+</div>

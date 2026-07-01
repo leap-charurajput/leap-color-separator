@@ -67,14 +67,14 @@
         </div>
       </div>
 
-      <div class="settings-field">
+      <div class="settings-field settings-field-inline-input">
         <label class="settings-field-label" for="chokeStrokeSwatch">Choke stroke color swatch</label>
-        <input id="chokeStrokeSwatch" type="text" class="settings-field-input settings-field-input-wide"
+        <input id="chokeStrokeSwatch" type="text" class="settings-field-input"
           [(ngModel)]="chokeStrokeColorSwatch" (ngModelChange)="saveGeneralSettings()"
           placeholder="Swatch name (e.g. GARMENT)" />
       </div>
 
-      <div class="settings-field settings-field-textarea-row">
+      <div class="settings-field settings-field-inline-input settings-field-textarea-row">
         <div class="settings-field-label-stack">
           <label class="settings-field-label" for="koDarkColorNames">Default Black color names</label>
           <span class="settings-field-sublabel">(Comma separated)</span>
@@ -83,11 +83,28 @@
           [(ngModel)]="koDarkColorNames" (ngModelChange)="saveGeneralSettings()"
           placeholder="Black, PANTONE PROCESS BLACK C"></textarea>
       </div>
+
+      <div class="settings-field settings-field-inline-input">
+        <label class="settings-field-label" for="meshValues">Mesh values</label>
+        <input id="meshValues" type="text" class="settings-field-input" [(ngModel)]="meshValues"
+          (ngModelChange)="saveGeneralSettings()" />
+      </div>
     </div>
+
+    <app-export-settings-panel
+      *ngIf="selectedSection === 'Export Settings'"
+      [exportSettings]="exportSettings"
+      [excelColumns]="exportExcelColumns"
+      [graphicPositions]="exportGraphicPositions"
+      [profileCodes]="exportProfileCodes"
+      (exportSettingChange)="onExportSettingChange($event)"
+    ></app-export-settings-panel>
   </div>
 
   <app-edit-separation-profile-modal [isOpen]="editModalOpen"
     [profile]="duplicateProfileDraft || selectedProfile"
-    [defaultBlackColorNames]="koDarkColorNames" (close)="handleModalClose()"
+    [defaultBlackColorNames]="koDarkColorNames"
+    [meshValues]="meshValues"
+    (close)="handleModalClose()"
     (save)="handleModalSave($event)"></app-edit-separation-profile-modal>
 </div>

@@ -10,6 +10,7 @@ import {
 } from '@angular/core';
 import { ControllerService } from '../../services/controller.service';
 import { GraphicsDataService } from '../../services/graphics-data.service';
+import { CreateGraphicModalResult } from '../../components/create-graphic-modal/create-graphic-modal.component';
 
 interface Graphic {
  id: string;
@@ -63,6 +64,12 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
  };
  availableColors: string[] = [];
  positionOptions: string[] = [];
+
+ // --- Underbase 2–4 swatch (UB1 lives in profile settings) ---
+ underbaseSwatchOptions: string[] = ['White UB'];
+ underbase234Swatch = 'White UB';
+ requiredUnderbasePassCount = 2;
+
  isSaving = false;
  hasVersionDocument = false;
  isCheckingDocument = false;
@@ -75,8 +82,15 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
  } = {};
  samePlatesOptions: string[] = [];
 
+ hasSelection = false;
+ hasActiveDocument = false;
+ createGraphicModalOpen = false;
+ isCreatingGraphic = false;
+ createGraphicWarning = '';
+
  private isMounted = true;
  private teamCodeCheckInterval: any;
+ private selectionPollInterval: any;
 
  get teamCode(): string {
   return this._teamCode;
@@ -102,10 +116,14 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
  }
 
  ngOnInit(): void {
+  this.startSelectionPolling();
   this.checkVersionDocument().then(() => {
    if (this.hasVersionDocument) {
     this.loadGraphicsList();
     this.loadTeamCode();
+    this.loadPositionOptions();
+    this.loadUnderbaseSwatchOptions();
+   } else if (this.hasActiveDocument) {
     this.loadPositionOptions();
    }
   });
@@ -119,10 +137,135 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
       this.loadGraphicsList();
       this.loadTeamCode();
       this.loadPositionOptions();
+      this.loadUnderbaseSwatchOptions();
+     } else if (this.hasActiveDocument) {
+      this.loadPositionOptions();
      }
     });
    }, 200);
   }
+ }
+
+ private startSelectionPolling(): void {
+  if (this.isRunningInBrowser) return;
+  this.refreshSelectionState();
+  this.selectionPollInterval = setInterval(() => {
+   if (this.isMounted) {
+    this.refreshSelectionState();
+   }
+  }, 700);
+ }
+
+ private refreshSelectionState(): void {
+  Promise.all([
+   this.controller.getSelectionCount().catch(() => 0),
+   this.controller.hasActiveIllustratorDocument().catch(() => false)
+  ]).then(([count, hasDoc]) => {
+   if (!this.isMounted) return;
+   this.hasSelection = count > 0;
+   this.hasActiveDocument = hasDoc;
+   this.cdr.detectChanges();
+  });
+ }
+
+ /**
+  * Build the option list for the Underbase 2–4 swatch dropdown:
+  * "White UB" first, followed by every spot swatch in the document whose
+  * name contains "White" (case-insensitive).
+  */
+ loadUnderbaseSwatchOptions(): void {
+  Promise.all([
+   this.controller.getSpotColorSwatches().catch(() => [] as string[]),
+   this.controller.loadGraphicsData().catch(() => ({} as any)),
+   this.controller.getSeparationProfiles().catch(() => ({ profiles: [] }))
+  ])
+   .then(([names, loaded, profilesResult]: [string[], any, any]) => {
+    const whiteSwatches = (names || [])
+     .map((n) => String(n || '').trim())
+     .filter((n) => n.length > 0 && /white/i.test(n));
+
+    const options: string[] = ['White UB'];
+    whiteSwatches.forEach((n) => {
+     if (options.indexOf(n) === -1) options.push(n);
+    });
+    this.underbaseSwatchOptions = options;
+
+    const profiles = profilesResult?.profiles || profilesResult?.data || profilesResult || [];
+    this.requiredUnderbasePassCount = Math.max(2, this.computeMaxUnderbasePassFromProfiles(profiles));
+
+    const defaultWhite = options.find((n) => n !== 'White UB') || 'White UB';
+    this.underbase234Swatch = this.pickSavedUnderbaseSwatch(
+     loaded?.underbase2Swatch,
+     options,
+     defaultWhite
+    );
+
+    this.cdr.detectChanges();
+   })
+   .catch(() => {
+    this.underbaseSwatchOptions = ['White UB'];
+    this.underbase234Swatch = 'White UB';
+    this.requiredUnderbasePassCount = 2;
+    this.cdr.detectChanges();
+   });
+ }
+
+ private toProfileFlagEnabled(value: unknown): boolean {
+  if (value === true || value === 1) return true;
+  if (typeof value === 'string') {
+   const normalized = value.trim().toUpperCase();
+   return normalized === 'Y' || normalized === 'YES' || normalized === 'TRUE' || normalized === '1';
+  }
+  return false;
+ }
+
+ private computeMaxUnderbasePassFromProfile(profile: any): number {
+  if (!profile) return 1;
+  let count = 1;
+  if (this.toProfileFlagEnabled(profile['Underbase 4']) || this.toProfileFlagEnabled(profile['UB 4'])
+   || this.toProfileFlagEnabled(profile.underbase4Enabled) || this.toProfileFlagEnabled(profile.ub4Enabled)
+   || this.toProfileFlagEnabled(profile.underbase4)) {
+   count = Math.max(count, 4);
+  }
+  if (this.toProfileFlagEnabled(profile['Underbase 3']) || this.toProfileFlagEnabled(profile['UB 3'])
+   || this.toProfileFlagEnabled(profile.underbase3Enabled) || this.toProfileFlagEnabled(profile.ub3Enabled)
+   || this.toProfileFlagEnabled(profile.underbase3)) {
+   count = Math.max(count, 3);
+  }
+  if (this.toProfileFlagEnabled(profile['Underbase 2']) || this.toProfileFlagEnabled(profile['UB 2'])
+   || this.toProfileFlagEnabled(profile.underbase2Enabled) || this.toProfileFlagEnabled(profile.ub2Enabled)
+   || this.toProfileFlagEnabled(profile.underbase2)) {
+   count = Math.max(count, 2);
+  }
+  const enabled = profile.underbaseEnabled;
+  if (Array.isArray(enabled) && enabled.length > 0) {
+   let arrayCount = enabled[0] !== false ? 1 : 0;
+   for (let i = 1; i < enabled.length && i < 4; i++) {
+    if (enabled[i]) arrayCount = i + 1;
+   }
+   if (arrayCount < 1) arrayCount = 1;
+   count = Math.max(count, arrayCount);
+  }
+  return count;
+ }
+
+ private computeMaxUnderbasePassFromProfiles(profiles: any[]): number {
+  let max = 1;
+  if (!Array.isArray(profiles)) return max;
+  for (const profile of profiles) {
+   max = Math.max(max, this.computeMaxUnderbasePassFromProfile(profile));
+  }
+  return max;
+ }
+
+ private pickSavedUnderbaseSwatch(saved: string | undefined, options: string[], fallback: string): string {
+  const trimmed = typeof saved === 'string' ? saved.trim() : '';
+  if (trimmed && options.indexOf(trimmed) !== -1) return trimmed;
+  return fallback;
+ }
+
+ handleUnderbase234SwatchChange(value: string): void {
+  this.underbase234Swatch = value;
  }
 
  checkVersionDocument(): Promise<void> {
@@ -165,21 +308,27 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
     return this.controller.getTemplateInfo();
    })
    .then((result) => {
-    if (this.isSeparatedDoc || !result) return;
-    if (result.success && result.hasDocument) {
-     const isVersionFile = result.hasDocument && result.data && result.data.teamCode;
-     this.hasVersionDocument = isVersionFile || false;
-    } else {
-     this.hasVersionDocument = false;
-    }
-    this.isCheckingDocument = false;
-    this.cdr.detectChanges();
+    if (this.isSeparatedDoc) return;
+    return this.controller.hasActiveIllustratorDocument().then((hasDoc) => {
+     this.hasActiveDocument = hasDoc;
+     if (result && result.success && result.hasDocument) {
+      const isVersionFile = result.hasDocument && result.data && result.data.teamCode;
+      this.hasVersionDocument = isVersionFile || false;
+     } else {
+      this.hasVersionDocument = false;
+     }
+     this.isCheckingDocument = false;
+     this.cdr.detectChanges();
+    });
    })
    .catch((err) => {
     if (err !== 'No leap') {
      this.hasVersionDocument = false;
-     this.isCheckingDocument = false;
-     this.cdr.detectChanges();
+     this.controller.hasActiveIllustratorDocument().then((hasDoc) => {
+      this.hasActiveDocument = hasDoc;
+      this.isCheckingDocument = false;
+      this.cdr.detectChanges();
+     });
     } else {
      this.isCheckingDocument = false;
      this.cdr.detectChanges();
@@ -246,12 +395,11 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
 
  loadPositionOptions(): void {
   this.controller
-   .getGraphicPlacementOptions(this.teamCode)
+   .getGraphicPositionOptionsFromJson()
    .then((result) => {
     let placements: string[] = [];
 
     if (result.success && Array.isArray(result.placements)) {
-     // Remove "Choose" (case-insensitive)
      placements = result.placements.filter((p: string) => p.trim().toLowerCase() !== 'choose');
     }
 
@@ -394,6 +542,9 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
   this.isMounted = false;
   if (this.teamCodeCheckInterval) {
    clearInterval(this.teamCodeCheckInterval);
+  }
+  if (this.selectionPollInterval) {
+   clearInterval(this.selectionPollInterval);
   }
  }
 
@@ -622,7 +773,11 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
 
   this.isSaving = true;
   this.controller
-   .saveGraphicsData(graphicsToSave)
+   .saveGraphicsData(graphicsToSave, {
+    underbase2Swatch: this.underbase234Swatch,
+    underbase3Swatch: this.underbase234Swatch,
+    underbase4Swatch: this.underbase234Swatch
+   })
    .then((result) => {
     if (result.success) {
      // Sync to shared service to notify other components/tabs
@@ -655,5 +810,90 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
  openDocument(filePath: string): void {
   if (this.isRunningInBrowser) return;
   this.controller.openSeparationDocument(filePath);
+ }
+
+ openCreateGraphicModal(): void {
+  if (!this.hasSelection || this.isRunningInBrowser) return;
+  this.createGraphicWarning = '';
+  this.createGraphicModalOpen = true;
+  this.cdr.detectChanges();
+ }
+
+ closeCreateGraphicModal(): void {
+  this.createGraphicModalOpen = false;
+  this.createGraphicWarning = '';
+  this.cdr.detectChanges();
+ }
+
+ handleCreateGraphicConfirm(payload: CreateGraphicModalResult): void {
+  this.isCreatingGraphic = true;
+  this.createGraphicWarning = '';
+  this.cdr.detectChanges();
+
+  this.controller
+   .createGraphicFromSelection(payload)
+   .then((result) => {
+    if (!result?.success) {
+     this.createGraphicWarning = result?.error || 'Could not create graphic.';
+     return;
+    }
+
+    if (result.hasNonSpotColors && result.nonSpotWarning) {
+     this.createGraphicWarning = result.nonSpotWarning;
+    }
+
+    const newGraphicName = result.graphicName || payload.position;
+    const existingGraphic = this.graphics.find((g) => g.id !== 'all' && g.name === newGraphicName);
+    if (!existingGraphic) {
+     this.graphics = [
+      ...this.graphics,
+      {
+       id: `graphic-${Date.now()}`,
+       name: newGraphicName,
+       position: payload.position,
+       samePlates: '',
+       colors: null,
+       distress: false
+      }
+     ];
+     this.graphicNames = [...this.graphicNames, newGraphicName];
+     this.samePlatesOptions = [...this.graphicNames, 'None'];
+     this.saveToLocalStorage();
+    } else {
+     this.graphics = this.graphics.map((g) =>
+      g.name === newGraphicName ? { ...g, position: payload.position } : g
+     );
+     this.saveToLocalStorage();
+    }
+
+    if (!this.createGraphicWarning) {
+     this.createGraphicModalOpen = false;
+    }
+
+    setTimeout(() => {
+     this.loadGraphicsList();
+     this.refreshSelectionState();
+    }, 300);
+   })
+   .catch((err) => {
+    this.createGraphicWarning = err?.message || 'Could not create graphic.';
+   })
+   .finally(() => {
+    this.isCreatingGraphic = false;
+    this.cdr.detectChanges();
+   });
+ }
+
+ get showOrganizeGraphics(): boolean {
+  return (
+   this.hasVersionDocument &&
+   !this.isSeparatedDoc &&
+   !this.isCheckingDocument &&
+   !this.isLoadingGraphics
+  );
+ }
+
+ get showCreateGraphicActions(): boolean {
+  return !this.isSeparatedDoc && !this.isRunningInBrowser && this.hasActiveDocument;
  }
 }

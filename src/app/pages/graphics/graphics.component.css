@@ -28,6 +28,23 @@
 	color: rgba(255, 255, 255, 0.9);
 }
 
+.organize-graphics-actions {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.create-graphic-btn {
+	width: 20px;
+	height: 20px;
+}
+
+.create-graphic-btn.disabled,
+.create-graphic-btn:disabled {
+	opacity: 0.35;
+	cursor: not-allowed;
+}
+
 .organize-graphics-content {
 	position: relative;
 	display: flex;
@@ -75,6 +92,42 @@
 
 .organize-graphics-table-wrapper .thRow .col {
 	padding: 8px;
+}
+
+/* --- Underbase Swatches section --- */
+.underbase-swatches-section {
+	margin-bottom: 10px;
+}
+
+.underbase-swatches-title {
+	margin-bottom: 6px !important;
+}
+
+.underbase-swatches-grid {
+	display: flex;
+	flex-direction: row;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px 10px;
+}
+
+.underbase-swatch-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 0;
+	width: 100%;
+}
+
+.underbase-swatch-label {
+	flex: 0 0 auto;
+	font-size: 11px;
+	white-space: nowrap;
+}
+
+.underbase-swatch-row app-dropdown {
+	flex: 1 1 auto;
+	min-width: 0;
 }
 
 .organize-graphics-table-wrapper .thRow .col:nth-child(2) {

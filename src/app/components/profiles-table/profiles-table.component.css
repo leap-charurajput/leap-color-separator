@@ -39,6 +39,11 @@
 	cursor: pointer;
 }
 
+.row-action-button.border-1 {
+	border: 1px solid #d0d0d0;
+	border-radius: 0px !important;
+}
+
 .row-action-button:hover {
 	background: rgba(255, 255, 255, 0.12);
 	color: #ffffff;

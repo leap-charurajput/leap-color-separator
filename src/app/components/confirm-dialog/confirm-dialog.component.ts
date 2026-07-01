@@ -10,6 +10,8 @@ import {
 export interface ConfirmDialogCheckboxOption {
  id: string;
  label: string;
+ /** Initial state when the dialog opens. Defaults to false (unchecked). */
+ checked?: boolean;
 }
 
 /**
@@ -51,7 +53,7 @@ export class ConfirmDialogComponent implements OnChanges {
  private resetCheckboxState(): void {
   this.checkboxState = {};
   for (const o of this.checkboxOptions || []) {
-   this.checkboxState[o.id] = false;
+   this.checkboxState[o.id] = o.checked === true;
   }
  }
 

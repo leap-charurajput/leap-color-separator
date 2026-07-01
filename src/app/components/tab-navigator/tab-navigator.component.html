@@ -20,21 +20,31 @@
  <span class="tab-title">{{tab.title}}</span>
  <span class="hoverTitle">{{tab.title}}</span>
 </li>
-<li class="settingsMenuTrigger" [class.active]="selectedMenuOption === 'General Settings' || selectedMenuOption === 'Manage Profiles'">
- <app-sub-menu [items]="['General Settings', 'Manage Profiles']" iconClass="material-icons settings-menu-icon"
+<li class="settingsMenuTrigger" [class.settings-menu-active]="selectedMenuOption === 'General Settings' || selectedMenuOption === 'Manage Profiles' || selectedMenuOption === 'Export Settings'">
+ <app-postscript-setup-alert
+  [issues]="postscriptIssues"
+  [detailOpen]="postscriptDetailOpen"
+  (detailOpenChange)="onPostscriptDetailOpenChange($event)"
+ ></app-postscript-setup-alert>
+ <app-sub-menu [items]="['General Settings', 'Manage Profiles', 'Export Settings']" iconClass="material-icons settings-menu-icon"
   iconText="settings" (onItemClick)="handleSettingsMenuClick($event)"></app-sub-menu>
 </li>
 </ul>
 <div class="settingsTabContent">
+ <app-postscript-setup-detail
+  *ngIf="postscriptDetailOpen && postscriptIssues?.length"
+  [issues]="postscriptIssues"
+  (close)="closePostscriptDetail()"
+ ></app-postscript-setup-detail>
 <div *ngFor="let tab of tabs; let i = index" [class.innerTabContent]="true" [class.show]="activeTab === i">
  <app-graphics *ngIf="i === 0" [documentRefreshKey]="documentRefreshKey"></app-graphics>
  <app-separations *ngIf="i === 1" [documentRefreshKey]="documentRefreshKey"></app-separations>
  <app-separation-colors *ngIf="i === 2" [documentRefreshKey]="documentRefreshKey"></app-separation-colors>
 </div>
 <div [class.innerTabContent]="true"
- [class.show]="selectedMenuOption === 'General Settings' || selectedMenuOption === 'Manage Profiles'">
+ [class.show]="selectedMenuOption === 'General Settings' || selectedMenuOption === 'Manage Profiles' || selectedMenuOption === 'Export Settings'">
  <app-settings
-  *ngIf="selectedMenuOption === 'General Settings' || selectedMenuOption === 'Manage Profiles'"
+  *ngIf="selectedMenuOption === 'General Settings' || selectedMenuOption === 'Manage Profiles' || selectedMenuOption === 'Export Settings'"
   [selectedSectionFromMenu]="getSettingsSection(selectedMenuOption)"></app-settings>
 </div>
 </div>
