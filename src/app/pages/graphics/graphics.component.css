@@ -125,7 +125,27 @@
 	white-space: nowrap;
 }
 
-.underbase-swatch-row app-dropdown {
+.organize-graphics-table-wrapper .exportFieldTable .row {
+	border-bottom: none;
+}
+
+.organize-graphics-table-wrapper .exportFieldTable .row:first-child {
+	border-bottom: 1px solid #525252;
+}
+
+.graphic-underbase-row {
+	padding: 6px 8px 8px 8px;
+	margin-left: 0;
+	background-color: rgba(255, 255, 255, 0.03);
+	border-bottom: 1px solid #525252;
+}
+
+.graphic-underbase-row .underbase-swatch-label {
+	min-width: 20%;
+}
+
+.underbase-swatch-row app-dropdown,
+.graphic-underbase-row app-dropdown {
 	flex: 1 1 auto;
 	min-width: 0;
 }

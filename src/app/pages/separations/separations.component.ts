@@ -937,6 +937,17 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
     profileMetadata.bodyColorData = bodyColorData;
    }
 
+   const graphicUnderbaseSwatch =
+    graphicData?.underbase234Swatch ||
+    graphicData?.underbase2Swatch ||
+    '';
+   if (graphicUnderbaseSwatch && String(graphicUnderbaseSwatch).trim() !== '') {
+    const ubSwatch = String(graphicUnderbaseSwatch).trim();
+    profileMetadata.underbase2Swatch = ubSwatch;
+    profileMetadata.underbase3Swatch = ubSwatch;
+    profileMetadata.underbase4Swatch = ubSwatch;
+   }
+
    if (!this.isRunningInBrowser && this.teamCode && this.controller.getBatchRowVariableSource) {
     const docPath = this.versionDocumentPath || undefined;
     try {

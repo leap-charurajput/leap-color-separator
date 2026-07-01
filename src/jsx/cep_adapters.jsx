@@ -901,6 +901,28 @@ function getSeparatedArtLayerNames(doc) {
  return layerNames;
 }
 
+/** True when doc is a LEAP separation file (XMP DocumentType, or legacy path under 09 SEPARATIONS). */
+function isActiveSeparationDocument(doc) {
+ if (!doc) return false;
+ try {
+  var docPath = "";
+  if (doc.fullName && doc.fullName.fsName) {
+   docPath = doc.fullName.fsName;
+  }
+  if (docPath.indexOf("09 SEPARATIONS") !== -1) {
+   return true;
+  }
+  var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
+  if (xmp.isXmpCreated && xmp.doesStructFieldExist("DocumentType")) {
+   var documentType = xmp.getStructField("DocumentType");
+   if (documentType && documentType.toString().trim() === "Separation Document") {
+    return true;
+   }
+  }
+ } catch (e) { }
+ return false;
+}
+
 /** Match ink exception Ink_Color (e.g. "123") to a SEPARATED_ART plate name (e.g. "PANTONE 123 C"). */
 function inkExceptionNameMatchesLayerName(exceptionInk, layerName) {
  return inkExceptionNameMatchesName(exceptionInk, layerName);
@@ -2181,11 +2203,10 @@ function handleRegenerateUnderbaseFromExistingInks(params_string) {
    });
   }
   var doc = app.activeDocument;
-  var docPath = doc.fullName && doc.fullName.fsName ? doc.fullName.fsName : "";
-  if (docPath.indexOf("09 SEPARATIONS") === -1) {
+  if (!isActiveSeparationDocument(doc)) {
    return JSON.stringify({
     success: false,
-    error: "Active document is not a separation document. Open a document from 09 SEPARATIONS."
+    error: "Active document is not a separation document."
    });
   }
   try {
@@ -2279,6 +2300,42 @@ function handleGetGraphicsList(params_string) {
   });
  }
 }
+
+function handleGetGraphicsArtWhiteSwatches(params_string) {
+ try {
+  if (!app.documents.length) {
+   return JSON.stringify({
+    success: false,
+    error: "No active document found",
+    swatches: []
+   });
+  }
+  var params = {};
+  try {
+   params = params_string ? JSON.parse(params_string) : {};
+  } catch (parseErr) {
+   params = {};
+  }
+  var graphicName = params && params.graphicName != null
+   ? String(params.graphicName).replace(/^\s+|\s+$/g, "")
+   : "";
+  var swatches = getWhiteSpotNamesFromGraphicsArt(
+   app.activeDocument,
+   graphicName || undefined
+  );
+  return JSON.stringify({
+   success: true,
+   swatches: swatches
+  });
+ } catch (e) {
+  return JSON.stringify({
+   success: false,
+   error: e.message || e.toString(),
+   swatches: []
+  });
+ }
+}
+
 function handleToggleLayerVisibility(params_string) {
  try {
   var params = JSON.parse(params_string);
@@ -3252,20 +3309,14 @@ function handleGetGraphicSwatches(params_string) {
   var docPath = docFile.fsName;
 
   var rootFolder, league, teamCode, leagueFolder;
-  var isSeparatedDocument = docPath.indexOf("09 SEPARATIONS") !== -1;
+  var isSeparatedDocument = isActiveSeparationDocument(activeDoc);
   var layerNames = null;
 
   // For separated documents, get layer names from XMP (works even when file is moved outside 09 SEPARATIONS)
   var profileMetaForPlates = null;
-  try {
-   var sepXmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", activeDoc);
-   if (sepXmp.isXmpCreated && sepXmp.doesStructFieldExist("DocumentType")) {
-    var documentType = sepXmp.getStructField("DocumentType");
-    if (documentType && documentType.toString().trim() === "Separation Document") {
-     isSeparatedDocument = true;
-    }
-   }
-   if (isSeparatedDocument) {
+  if (isSeparatedDocument) {
+   try {
+    var sepXmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", activeDoc);
     if (sepXmp.isXmpCreated && sepXmp.doesStructFieldExist("SeparatedLayerNames")) {
      layerNames = sepXmp.getStructField("SeparatedLayerNames", true);
     }
@@ -3278,9 +3329,9 @@ function handleGetGraphicSwatches(params_string) {
     if (!layerNames || !layerNames.length) {
      layerNames = getSeparatedArtLayerNames(activeDoc);
     }
+   } catch (e) {
+    layerNames = null;
    }
-  } catch (e) {
-   layerNames = null;
   }
 
   // If SeparatedLayerNames found, use it (for separated documents)
@@ -4979,11 +5030,10 @@ function handleDeleteAllPlatesInSeparationDocument(params_string) {
    return JSON.stringify({ success: false, error: "No documents open" });
   }
   var doc = app.activeDocument;
-  var docPath = doc.fullName && doc.fullName.fsName ? doc.fullName.fsName : "";
-  if (docPath.indexOf("09 SEPARATIONS") === -1) {
+  if (!isActiveSeparationDocument(doc)) {
    return JSON.stringify({
     success: false,
-    error: "Active document is not a separation document. Open a document from 09 SEPARATIONS."
+    error: "Active document is not a separation document."
    });
   }
   var sepLayer;
@@ -5036,11 +5086,10 @@ function handleDeleteUbChokeBlockerArtInSeparationDocument(params_string) {
    return JSON.stringify({ success: false, error: "No documents open" });
   }
   var doc = app.activeDocument;
-  var docPath = doc.fullName && doc.fullName.fsName ? doc.fullName.fsName : "";
-  if (docPath.indexOf("09 SEPARATIONS") === -1) {
+  if (!isActiveSeparationDocument(doc)) {
    return JSON.stringify({
     success: false,
-    error: "Active document is not a separation document. Open a document from 09 SEPARATIONS."
+    error: "Active document is not a separation document."
    });
   }
   var sepLayer;

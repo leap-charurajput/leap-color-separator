@@ -19,6 +19,7 @@ interface Graphic {
  samePlates: string;
  colors: string[] | null;
  distress: boolean;
+ underbase234Swatch?: string;
 }
 
 interface ModalState {
@@ -65,9 +66,8 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
  availableColors: string[] = [];
  positionOptions: string[] = [];
 
- // --- Underbase 2–4 swatch (UB1 lives in profile settings) ---
- underbaseSwatchOptions: string[] = ['White UB'];
- underbase234Swatch = 'White UB';
+ // --- Per-graphic Underbase 2–4 swatch (UB1 lives in profile settings) ---
+ underbaseSwatchOptionsByGraphic: { [graphicName: string]: string[] } = {};
  requiredUnderbasePassCount = 2;
 
  isSaving = false;
@@ -122,7 +122,7 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
     this.loadGraphicsList();
     this.loadTeamCode();
     this.loadPositionOptions();
-    this.loadUnderbaseSwatchOptions();
+    this.loadUnderbaseSwatchOptionsForAllGraphics();
    } else if (this.hasActiveDocument) {
     this.loadPositionOptions();
    }
@@ -137,7 +137,7 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
       this.loadGraphicsList();
       this.loadTeamCode();
       this.loadPositionOptions();
-      this.loadUnderbaseSwatchOptions();
+      this.loadUnderbaseSwatchOptionsForAllGraphics();
      } else if (this.hasActiveDocument) {
       this.loadPositionOptions();
      }
@@ -169,45 +169,91 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
  }
 
  /**
-  * Build the option list for the Underbase 2–4 swatch dropdown:
-  * "White UB" first, followed by every spot swatch in the document whose
-  * name contains "White" (case-insensitive).
+  * Build per-graphic option lists for Underbase 2–4 from each graphic's own art whites.
   */
- loadUnderbaseSwatchOptions(): void {
+ loadUnderbaseSwatchOptionsForAllGraphics(): void {
+  const individualGraphics = this.graphics.filter((g) => g.id !== 'all');
+  if (individualGraphics.length === 0) {
+   this.underbaseSwatchOptionsByGraphic = {};
+   this.cdr.detectChanges();
+   return;
+  }
+
   Promise.all([
-   this.controller.getSpotColorSwatches().catch(() => [] as string[]),
+   ...individualGraphics.map((g) =>
+    this.controller
+     .getGraphicsArtWhiteSwatches(g.name)
+     .catch(() => ({ success: false, swatches: [] as string[] }))
+   ),
    this.controller.loadGraphicsData().catch(() => ({} as any)),
    this.controller.getSeparationProfiles().catch(() => ({ profiles: [] }))
   ])
-   .then(([names, loaded, profilesResult]: [string[], any, any]) => {
-    const whiteSwatches = (names || [])
-     .map((n) => String(n || '').trim())
-     .filter((n) => n.length > 0 && /white/i.test(n));
+   .then((results) => {
+    const loaded = results[results.length - 2] as any;
+    const profilesResult = results[results.length - 1] as any;
+    const swatchResults = results.slice(0, individualGraphics.length) as Array<{
+     success: boolean;
+     swatches: string[];
+    }>;
 
-    const options: string[] = ['White UB'];
-    whiteSwatches.forEach((n) => {
-     if (options.indexOf(n) === -1) options.push(n);
-    });
-    this.underbaseSwatchOptions = options;
+    const graphicsDataMap: { [key: string]: any } = {};
+    if (loaded?.graphicsData && Array.isArray(loaded.graphicsData)) {
+     loaded.graphicsData.forEach((entry: any) => {
+      if (entry?.name) {
+       graphicsDataMap[entry.name] = entry;
+      }
+     });
+    }
+    const globalFallback =
+     typeof loaded?.underbase2Swatch === 'string' ? loaded.underbase2Swatch.trim() : '';
 
     const profiles = profilesResult?.profiles || profilesResult?.data || profilesResult || [];
     this.requiredUnderbasePassCount = Math.max(2, this.computeMaxUnderbasePassFromProfiles(profiles));
 
-    const defaultWhite = options.find((n) => n !== 'White UB') || 'White UB';
-    this.underbase234Swatch = this.pickSavedUnderbaseSwatch(
-     loaded?.underbase2Swatch,
-     options,
-     defaultWhite
-    );
+    const optionsByGraphic: { [graphicName: string]: string[] } = {};
+    individualGraphics.forEach((graphic, index) => {
+     const artWhites = (swatchResults[index]?.success && Array.isArray(swatchResults[index].swatches)
+      ? swatchResults[index].swatches
+      : []
+     )
+      .map((n) => String(n || '').trim())
+      .filter((n) => n.length > 0);
 
+     const options = artWhites.length > 0 ? artWhites : ['White UB'];
+     optionsByGraphic[graphic.name] = options;
+
+     const savedData = graphicsDataMap[graphic.name];
+     const savedSwatch =
+      savedData?.underbase234Swatch ||
+      savedData?.underbase2Swatch ||
+      globalFallback;
+     const defaultWhite = artWhites[0] || 'White UB';
+     graphic.underbase234Swatch = this.pickSavedUnderbaseSwatch(
+      savedSwatch,
+      options,
+      defaultWhite
+     );
+    });
+
+    this.underbaseSwatchOptionsByGraphic = optionsByGraphic;
+    this.graphics = this.graphics.map((g) => {
+     if (g.id === 'all') {
+      return g;
+     }
+     const individual = individualGraphics.find((ig) => ig.id === g.id);
+     return individual ? { ...g, underbase234Swatch: individual.underbase234Swatch } : g;
+    });
     this.cdr.detectChanges();
    })
    .catch(() => {
-    this.underbaseSwatchOptions = ['White UB'];
-    this.underbase234Swatch = 'White UB';
+    this.underbaseSwatchOptionsByGraphic = {};
     this.requiredUnderbasePassCount = 2;
     this.cdr.detectChanges();
    });
+ }
+
+ getUnderbaseSwatchOptions(graphicName: string): string[] {
+  return this.underbaseSwatchOptionsByGraphic[graphicName] || ['White UB'];
  }
 
  private toProfileFlagEnabled(value: unknown): boolean {
@@ -264,8 +310,11 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
   return fallback;
  }
 
- handleUnderbase234SwatchChange(value: string): void {
-  this.underbase234Swatch = value;
+ handleUnderbase234SwatchChange(graphicId: string, value: string): void {
+  this.graphics = this.graphics.map((g) =>
+   g.id === graphicId ? { ...g, underbase234Swatch: value } : g
+  );
+  this.saveToLocalStorage();
  }
 
  checkVersionDocument(): Promise<void> {
@@ -457,7 +506,12 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
         position: savedData.position || '',
         samePlates: savedData.samePlates || '',
         colors: colorsValue,
-        distress: savedData.distress !== undefined ? savedData.distress : false
+        distress: savedData.distress !== undefined ? savedData.distress : false,
+        underbase234Swatch:
+         savedData.underbase234Swatch ||
+         savedData.underbase2Swatch ||
+         g.underbase234Swatch ||
+         'White UB'
        };
       }
       return g;
@@ -534,6 +588,7 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
    })
    .finally(() => {
     this.isLoadingGraphics = false;
+    this.loadUnderbaseSwatchOptionsForAllGraphics();
     this.cdr.detectChanges();
    });
  }
@@ -767,17 +822,14 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
      position: g.position || '',
      samePlates: g.samePlates || '',
      colors: colorsArray,
-     distress: g.distress
+     distress: g.distress,
+     underbase234Swatch: g.underbase234Swatch || 'White UB'
     };
    });
 
   this.isSaving = true;
   this.controller
-   .saveGraphicsData(graphicsToSave, {
-    underbase2Swatch: this.underbase234Swatch,
-    underbase3Swatch: this.underbase234Swatch,
-    underbase4Swatch: this.underbase234Swatch
-   })
+   .saveGraphicsData(graphicsToSave)
    .then((result) => {
     if (result.success) {
      // Sync to shared service to notify other components/tabs

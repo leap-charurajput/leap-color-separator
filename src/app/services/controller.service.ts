@@ -84,6 +84,24 @@ export class ControllerService {
   });
  }
 
+ /** White spot swatches used as fills in a graphic's LIVE_ART GRAPHIC:* / SIZED_GRAPHICS art. */
+ getGraphicsArtWhiteSwatches(
+  graphicName?: string
+ ): Promise<{ success: boolean; swatches: string[]; error?: string }> {
+  this.log('getGraphicsArtWhiteSwatches called' + (graphicName ? ' for ' + graphicName : ''));
+
+  return this.ensureSession().then(() => {
+   const params = graphicName ? { graphicName } : {};
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleGetGraphicsArtWhiteSwatches', params)
+    .then((res: string) => JSON.parse(res))
+    .catch((err: any) => {
+     throw err;
+    });
+  });
+ }
+
  getSelectionCount(): Promise<number> {
   if ((window as any).__adobe_cep__) {
    return getHostSelectionCount().catch(() => 0);
@@ -1887,8 +1905,8 @@ function getExportVariableContext(doc) {
    setExportAlias(aliases, batchKey, batch[batchKey]);
   }
  }
- setExportAlias(aliases, "Team Code", findExportValueInObject(jsonData, "TeamCode") || teamCodeFromPath || findExportValueInObject(batch, "Team Code"));
- setExportAlias(aliases, "League", findExportValueInObject(jsonData, "League") || leagueFromPath);
+ setExportAlias(aliases, "Team Code", findExportValueInObject(jsonData, "TeamCode") || teamCodeFromPath || findExportValueInObject(batch, "Team Code") || findExportValueInObject(batch, "Lineup Org Code"));
+ setExportAlias(aliases, "League", findExportValueInObject(jsonData, "League") || leagueFromPath || findExportValueInObject(batch, "League_desc") || findExportValueInObject(batch, "League"));
  return {
   aliases: aliases,
   batch: batch,

@@ -107,6 +107,151 @@ function collectItemsByColor(item, colorGroups) {
  }
 }
 
+function isWhiteUbSeparationPlateName(name) {
+ return /^white\s*ub(\s+\d+)?$/i.test(String(name || ""));
+}
+
+function isWhiteInkSwatchName(name) {
+ var n = String(name || "").replace(/^\s+|\s+$/g, "");
+ if (!n || n.toLowerCase().indexOf("white") === -1) {
+  return false;
+ }
+ return !isWhiteUbSeparationPlateName(n);
+}
+
+function addSpotFillNameFromColor(color, nameLookup) {
+ if (!color || !nameLookup) {
+  return;
+ }
+ if (color.typename === CONSTANTS.COLOR_TYPES.SPOT && color.spot && color.spot.name) {
+  var spotName = String(color.spot.name).replace(/^\s+|\s+$/g, "");
+  if (spotName && isWhiteInkSwatchName(spotName)) {
+   nameLookup[spotName.toUpperCase()] = spotName;
+  }
+ }
+}
+
+function collectWhiteSpotNamesFromContainer(container, nameLookup) {
+ if (!container || !nameLookup) {
+  return;
+ }
+ try {
+  if (container.typename === "PathItem" && container.filled && container.fillColor) {
+   addSpotFillNameFromColor(container.fillColor, nameLookup);
+   return;
+  }
+  if (container.typename === "CompoundPathItem" && container.pathItems && container.pathItems.length > 0) {
+   var firstPath = container.pathItems[0];
+   if (firstPath && firstPath.filled && firstPath.fillColor) {
+    addSpotFillNameFromColor(firstPath.fillColor, nameLookup);
+   }
+   return;
+  }
+  if (container.pageItems && container.pageItems.length > 0) {
+   for (var i = 0; i < container.pageItems.length; i++) {
+    collectWhiteSpotNamesFromContainer(container.pageItems[i], nameLookup);
+   }
+  }
+  if (container.layers && container.layers.length > 0) {
+   for (var l = 0; l < container.layers.length; l++) {
+    collectWhiteSpotNamesFromLayer(container.layers[l], nameLookup);
+   }
+  }
+ } catch (e) { }
+}
+
+function collectWhiteSpotNamesFromLayer(layer, nameLookup) {
+ if (!layer || !nameLookup) {
+  return;
+ }
+ try {
+  if (layer.pageItems && layer.pageItems.length > 0) {
+   for (var i = 0; i < layer.pageItems.length; i++) {
+    collectWhiteSpotNamesFromContainer(layer.pageItems[i], nameLookup);
+   }
+  }
+  if (layer.layers && layer.layers.length > 0) {
+   for (var l = 0; l < layer.layers.length; l++) {
+    collectWhiteSpotNamesFromLayer(layer.layers[l], nameLookup);
+   }
+  }
+ } catch (e) { }
+}
+
+function scanLiveArtGraphicLayers(doc, nameLookup, graphicName) {
+ try {
+  var liveArt = doc.layers.getByName(CONSTANTS.LAYER_NAMES.LIVE_ART);
+  if (!liveArt || !liveArt.layers) {
+   return;
+  }
+  var targetLayerName = graphicName
+   ? CONSTANTS.GRAPHIC.PREFIX + String(graphicName).replace(/^\s+|\s+$/g, "")
+   : "";
+  for (var i = 0; i < liveArt.layers.length; i++) {
+   var layer = liveArt.layers[i];
+   if (!layer || !layer.name) {
+    continue;
+   }
+   if (String(layer.name).indexOf(CONSTANTS.GRAPHIC.PREFIX) !== 0) {
+    continue;
+   }
+   if (targetLayerName && String(layer.name) !== targetLayerName) {
+    continue;
+   }
+   collectWhiteSpotNamesFromLayer(layer, nameLookup);
+  }
+ } catch (e) { }
+}
+
+function scanSizedGraphicsLayer(doc, nameLookup, graphicName) {
+ try {
+  var sizedArt = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_ART);
+  if (!sizedArt) {
+   return;
+  }
+  var sizedGraphics = sizedArt.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_GRAPHICS);
+  if (!sizedGraphics) {
+   return;
+  }
+  if (graphicName) {
+   var trimmedName = String(graphicName).replace(/^\s+|\s+$/g, "");
+   if (trimmedName) {
+    try {
+     var graphicItem = sizedGraphics.pageItems.getByName(trimmedName);
+     if (graphicItem) {
+      collectWhiteSpotNamesFromContainer(graphicItem, nameLookup);
+     }
+    } catch (itemErr) { }
+   }
+   return;
+  }
+  collectWhiteSpotNamesFromLayer(sizedGraphics, nameLookup);
+ } catch (e) { }
+}
+
+/** White spot swatch names used as fills inside LIVE_ART GRAPHIC:* layers and SIZED_GRAPHICS art. */
+function getWhiteSpotNamesFromGraphicsArt(doc, graphicName) {
+ var nameLookup = {};
+ if (!doc) {
+  return [];
+ }
+ var filterName = graphicName != null ? String(graphicName).replace(/^\s+|\s+$/g, "") : "";
+ scanLiveArtGraphicLayers(doc, nameLookup, filterName || null);
+ scanSizedGraphicsLayer(doc, nameLookup, filterName || null);
+ var names = [];
+ for (var key in nameLookup) {
+  if (nameLookup.hasOwnProperty(key)) {
+   names.push(nameLookup[key]);
+  }
+ }
+ names.sort(function (a, b) {
+  return String(a).replace(/^\s+|\s+$/g, "").toUpperCase().localeCompare(
+   String(b).replace(/^\s+|\s+$/g, "").toUpperCase()
+  );
+ });
+ return names;
+}
+
 function duplicateItemToLayer(item, targetLayer, copiedItems) {
  var newItem = item.duplicate(targetLayer, ElementPlacement.PLACEATBEGINNING);
  if (copiedItems) {
@@ -468,6 +613,50 @@ function getUnderbaseSwatchFieldFromXmp(doc, fieldName) {
  return "";
 }
 
+function getGraphicsOrganizationDataFromDoc(doc) {
+ try {
+  if (!doc) return [];
+  var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
+  if (xmp.isXmpCreated && xmp.doesStructFieldExist("GraphicsOrganizationData")) {
+   var data = xmp.getStructField("GraphicsOrganizationData", true);
+   if (data && data instanceof Array) {
+    return data;
+   }
+  }
+ } catch (e) { }
+ return [];
+}
+
+function getGraphicOrganizationEntry(doc, graphicName) {
+ if (!graphicName) return null;
+ var name = String(graphicName).replace(/^\s+|\s+$/g, "");
+ if (!name) return null;
+ var data = getGraphicsOrganizationDataFromDoc(doc);
+ for (var i = 0; i < data.length; i++) {
+  if (data[i] && String(data[i].name || "").replace(/^\s+|\s+$/g, "") === name) {
+   return data[i];
+  }
+ }
+ return null;
+}
+
+function getGraphicUnderbase234SwatchFromOrgData(doc, graphicName) {
+ var entry = getGraphicOrganizationEntry(doc, graphicName);
+ if (!entry) return "";
+ var raw = entry.underbase234Swatch != null
+  ? String(entry.underbase234Swatch).replace(/^\s+|\s+$/g, "")
+  : "";
+ if (raw) return raw;
+ var metaFields = ["underbase2Swatch", "underbase3Swatch", "underbase4Swatch"];
+ for (var f = 0; f < metaFields.length; f++) {
+  if (entry[metaFields[f]] != null) {
+   raw = String(entry[metaFields[f]]).replace(/^\s+|\s+$/g, "");
+   if (raw) return raw;
+  }
+ }
+ return "";
+}
+
 function getGraphicsUnderbaseSwatchNameForIndex(profileMetadata, doc, ubIndex) {
  if (ubIndex <= 0) {
   return getProfileUnderbaseSwatchName(profileMetadata);
@@ -480,6 +669,9 @@ function getGraphicsUnderbaseSwatchNameForIndex(profileMetadata, doc, ubIndex) {
  if (profileMetadata && profileMetadata[metaFields[fieldIdx]] != null) {
   raw = String(profileMetadata[metaFields[fieldIdx]]).replace(/^\s+|\s+$/g, "");
  }
+ if (!raw && profileMetadata && profileMetadata.graphicName) {
+  raw = getGraphicUnderbase234SwatchFromOrgData(doc, profileMetadata.graphicName);
+ }
  if (!raw) raw = getUnderbaseSwatchFieldFromXmp(doc, xmpFields[fieldIdx]);
  if (!raw && fieldIdx > 0) return getGraphicsUnderbaseSwatchNameForIndex(profileMetadata, doc, idx - 1);
  if (!raw) raw = getUnderbaseSwatchFieldFromXmp(doc, "Underbase2Swatch");
@@ -489,6 +681,10 @@ function getGraphicsUnderbaseSwatchNameForIndex(profileMetadata, doc, ubIndex) {
 
 function enrichProfileMetadataWithGraphicsUnderbaseSwatches(profileMetadata, doc) {
  if (!profileMetadata) profileMetadata = {};
+ var graphicName = profileMetadata.graphicName != null
+  ? String(profileMetadata.graphicName).replace(/^\s+|\s+$/g, "")
+  : "";
+ var orgSwatch = graphicName ? getGraphicUnderbase234SwatchFromOrgData(doc, graphicName) : "";
  var pairs = [
   { meta: "underbase2Swatch", xmp: "Underbase2Swatch" },
   { meta: "underbase3Swatch", xmp: "Underbase3Swatch" },
@@ -497,6 +693,10 @@ function enrichProfileMetadataWithGraphicsUnderbaseSwatches(profileMetadata, doc
  for (var f = 0; f < pairs.length; f++) {
   var cur = profileMetadata[pairs[f].meta];
   if (cur != null && String(cur).replace(/^\s+|\s+$/g, "") !== "") continue;
+  if (orgSwatch) {
+   profileMetadata[pairs[f].meta] = orgSwatch;
+   continue;
+  }
   var fromXmp = getUnderbaseSwatchFieldFromXmp(doc, pairs[f].xmp);
   if (fromXmp) profileMetadata[pairs[f].meta] = fromXmp;
  }

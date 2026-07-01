@@ -1,24 +1,4 @@
 <div class="organize-graphics-container">
- <div
-  *ngIf="hasVersionDocument && !isSeparatedDoc && !isCheckingDocument && !isLoadingGraphics"
-  class="underbase-swatches-section"
- >
-  <div class="panelTitle mb-5 underbase-swatches-title">
-   <span>Underbase Swatches</span>
-  </div>
-  <div class="underbase-swatches-grid">
-   <div class="underbase-swatch-row">
-    <span class="underbase-swatch-label">Underbase 2, 3 and 4:</span>
-    <app-dropdown
-     [value]="underbase234Swatch"
-     [items]="underbaseSwatchOptions"
-     (onChange)="handleUnderbase234SwatchChange($event)"
-     placeholder="White UB"
-    ></app-dropdown>
-   </div>
-  </div>
- </div>
-
  <div class="panelTitle mb-5 d-flex align-center justify-between">
   <span>Organize Graphics</span>
   <div class="organize-graphics-actions">
@@ -117,68 +97,40 @@
     </div>
    </div>
    <div class="exportFieldTable">
-    <div
-     *ngFor="let graphic of graphics"
-     class="row organize-graphics-row"
-     [class.listed-graphic]="graphic.id !== 'all'"
-     [class.disabled-row]="graphic.id === 'all' && isSingleGraphic"
-    >
-     <div class="col graphic-name-col" style="width: 20%">
-      <span [class]="'graphic-name-label' + (graphic.id === 'all' ? ' all-graphics-label' : '')">
-       {{ graphic.name }}
-      </span>
-     </div>
-     <!-- Replace app-dropdown with app-combo-box for Position column only -->
-     <div class="col d-flex align-center" style="width: 25%">
-      <app-combo-box
-       [value]="graphic.position"
-       [items]="positionOptions"
-       (onChange)="handlePositionChange(graphic.id, $event)"
-       placeholder="Choose..."
-       [disabled]="(graphic.id === 'all' && isSingleGraphic) || isSinglePosition"
-      ></app-combo-box>
-     </div>
+    <ng-container *ngFor="let graphic of graphics">
+     <div
+      class="row organize-graphics-row"
+      [class.listed-graphic]="graphic.id !== 'all'"
+      [class.disabled-row]="graphic.id === 'all' && isSingleGraphic"
+     >
+      <div class="col graphic-name-col" style="width: 20%">
+       <span [class]="'graphic-name-label' + (graphic.id === 'all' ? ' all-graphics-label' : '')">
+        {{ graphic.name }}
+       </span>
+      </div>
+      <!-- Replace app-dropdown with app-combo-box for Position column only -->
+      <div class="col d-flex align-center" style="width: 25%">
+       <app-combo-box
+        [value]="graphic.position"
+        [items]="positionOptions"
+        (onChange)="handlePositionChange(graphic.id, $event)"
+        placeholder="Choose..."
+        [disabled]="(graphic.id === 'all' && isSingleGraphic) || isSinglePosition"
+       ></app-combo-box>
+      </div>
 
-     <div class="col d-flex align-center" style="width: 25%">
-      <app-dropdown
-       [value]="graphic.samePlates"
-       [items]="samePlatesOptions"
-       (onChange)="handleSamePlatesChange(graphic.id, $event)"
-       placeholder="Same as..."
-       [disabled]="isSingleGraphic"
-      ></app-dropdown>
-     </div>
-     <div class="col d-flex align-center justify-center" style="width: 15%">
-      <span
-       *ngIf="getColorsDisplayData(graphic).isAll"
-       [class]="'color-link' + (graphic.id === 'all' && isSingleGraphic ? ' disabled' : '')"
-       (click)="
-        !(graphic.id === 'all' && isSingleGraphic) && handleColorsClick(graphic.id, graphic.name)
-       "
-       [style.cursor]="graphic.id === 'all' && isSingleGraphic ? 'not-allowed' : 'pointer'"
-       [style.opacity]="graphic.id === 'all' && isSingleGraphic ? 0.5 : 1"
-      >
-       All
-      </span>
-      <span
-       *ngIf="!getColorsDisplayData(graphic).isAll && getColorsDisplayData(graphic).count === 0"
-       [class]="'color-link' + (graphic.id === 'all' && isSingleGraphic ? ' disabled' : '')"
-       (click)="
-        !(graphic.id === 'all' && isSingleGraphic) && handleColorsClick(graphic.id, graphic.name)
-       "
-       [style.cursor]="graphic.id === 'all' && isSingleGraphic ? 'not-allowed' : 'pointer'"
-       [style.opacity]="graphic.id === 'all' && isSingleGraphic ? 0.5 : 1"
-      >
-       0
-      </span>
-      <span
-       *ngIf="
-        !getColorsDisplayData(graphic).isAll &&
-        getColorsDisplayData(graphic).count !== null &&
-        getColorsDisplayData(graphic).count! > 0
-       "
-      >
+      <div class="col d-flex align-center" style="width: 25%">
+       <app-dropdown
+        [value]="graphic.samePlates"
+        [items]="samePlatesOptions"
+        (onChange)="handleSamePlatesChange(graphic.id, $event)"
+        placeholder="Same as..."
+        [disabled]="isSingleGraphic"
+       ></app-dropdown>
+      </div>
+      <div class="col d-flex align-center justify-center" style="width: 15%">
        <span
+        *ngIf="getColorsDisplayData(graphic).isAll"
         [class]="'color-link' + (graphic.id === 'all' && isSingleGraphic ? ' disabled' : '')"
         (click)="
          !(graphic.id === 'all' && isSingleGraphic) && handleColorsClick(graphic.id, graphic.name)
@@ -186,26 +138,64 @@
         [style.cursor]="graphic.id === 'all' && isSingleGraphic ? 'not-allowed' : 'pointer'"
         [style.opacity]="graphic.id === 'all' && isSingleGraphic ? 0.5 : 1"
        >
-        {{ getColorsDisplayData(graphic).count }}
+        All
        </span>
-       <span class="colors-text"> ({{ getColorsDisplayData(graphic).colorsText }})</span>
-      </span>
+       <span
+        *ngIf="!getColorsDisplayData(graphic).isAll && getColorsDisplayData(graphic).count === 0"
+        [class]="'color-link' + (graphic.id === 'all' && isSingleGraphic ? ' disabled' : '')"
+        (click)="
+         !(graphic.id === 'all' && isSingleGraphic) && handleColorsClick(graphic.id, graphic.name)
+        "
+        [style.cursor]="graphic.id === 'all' && isSingleGraphic ? 'not-allowed' : 'pointer'"
+        [style.opacity]="graphic.id === 'all' && isSingleGraphic ? 0.5 : 1"
+       >
+        0
+       </span>
+       <span
+        *ngIf="
+         !getColorsDisplayData(graphic).isAll &&
+         getColorsDisplayData(graphic).count !== null &&
+         getColorsDisplayData(graphic).count! > 0
+        "
+       >
+        <span
+         [class]="'color-link' + (graphic.id === 'all' && isSingleGraphic ? ' disabled' : '')"
+         (click)="
+          !(graphic.id === 'all' && isSingleGraphic) && handleColorsClick(graphic.id, graphic.name)
+         "
+         [style.cursor]="graphic.id === 'all' && isSingleGraphic ? 'not-allowed' : 'pointer'"
+         [style.opacity]="graphic.id === 'all' && isSingleGraphic ? 0.5 : 1"
+        >
+         {{ getColorsDisplayData(graphic).count }}
+        </span>
+        <span class="colors-text"> ({{ getColorsDisplayData(graphic).colorsText }})</span>
+       </span>
+      </div>
+      <div class="col d-flex align-center justify-center" style="width: 15%">
+       <app-checkbox
+        *ngIf="graphic.id === 'all'"
+        [checked]="getAllGraphicsDistressState().checked"
+        [indeterminate]="getAllGraphicsDistressState().indeterminate"
+        (change)="!(graphic.id === 'all' && isSingleGraphic) && handleDistressChange(graphic.id)"
+        [disabled]="graphic.id === 'all' && isSingleGraphic"
+       ></app-checkbox>
+       <app-checkbox
+        *ngIf="graphic.id !== 'all'"
+        [checked]="graphic.distress"
+        (change)="handleDistressChange(graphic.id)"
+       ></app-checkbox>
+      </div>
      </div>
-     <div class="col d-flex align-center justify-center" style="width: 15%">
-      <app-checkbox
-       *ngIf="graphic.id === 'all'"
-       [checked]="getAllGraphicsDistressState().checked"
-       [indeterminate]="getAllGraphicsDistressState().indeterminate"
-       (change)="!(graphic.id === 'all' && isSingleGraphic) && handleDistressChange(graphic.id)"
-       [disabled]="graphic.id === 'all' && isSingleGraphic"
-      ></app-checkbox>
-      <app-checkbox
-       *ngIf="graphic.id !== 'all'"
-       [checked]="graphic.distress"
-       (change)="handleDistressChange(graphic.id)"
-      ></app-checkbox>
+     <div *ngIf="graphic.id !== 'all'" class="graphic-underbase-row underbase-swatch-row">
+      <span class="underbase-swatch-label">Underbase 2, 3 and 4:</span>
+      <app-dropdown
+       [value]="graphic.underbase234Swatch || 'White UB'"
+       [items]="getUnderbaseSwatchOptions(graphic.name)"
+       (onChange)="handleUnderbase234SwatchChange(graphic.id, $event)"
+       placeholder="White UB"
+      ></app-dropdown>
      </div>
-    </div>
+    </ng-container>
    </div>
   </div>
 
