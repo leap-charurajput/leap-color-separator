@@ -1,4 +1,5 @@
-import { Component, Input, Output, EventEmitter, OnInit, OnChanges, SimpleChanges } from '@angular/core';
+import { Component, EventEmitter, Input, Output, OnInit, OnChanges, SimpleChanges } from '@angular/core';
+import { PostscriptReadinessIssue } from '../postscript-setup-alert/postscript-setup-alert.component';
 
 @Component({
 	selector: 'app-export-separations-modal',
@@ -7,11 +8,13 @@ import { Component, Input, Output, EventEmitter, OnInit, OnChanges, SimpleChange
 })
 export class ExportSeparationsModalComponent implements OnInit, OnChanges {
 	@Input() isOpen = false;
+	@Input() postscriptReady = true;
+	@Input() postscriptIssues: PostscriptReadinessIssue[] = [];
 	@Output() close = new EventEmitter<void>();
 	@Output() export = new EventEmitter<any>();
 
 	exportPrintGuide = true;
-	exportSeparationsPreview = true;
+	/** Export Postscript (.ps) and Separations Preview PDF (Distiller) together. */
 	exportPostscript = true;
 
 	ngOnInit(): void {
@@ -26,15 +29,13 @@ export class ExportSeparationsModalComponent implements OnInit, OnChanges {
 
 	private resetCheckboxes(): void {
 		this.exportPrintGuide = true;
-		this.exportSeparationsPreview = true;
-		this.exportPostscript = true;
+		this.exportPostscript = this.postscriptReady;
 	}
 
 	onExport(): void {
 		const exportOptions = {
 			exportPrintGuide: this.exportPrintGuide,
-			exportSeparationsPreview: this.exportSeparationsPreview,
-			exportPostscript: this.exportPostscript
+			exportPostscript: this.postscriptReady ? this.exportPostscript : false
 		};
 		this.export.emit(exportOptions);
 		this.close.emit();
@@ -50,10 +51,6 @@ export class ExportSeparationsModalComponent implements OnInit, OnChanges {
 
 	handlePrintGuideChange(event: Event): void {
 		this.exportPrintGuide = (event.target as HTMLInputElement).checked;
-	}
-
-	handleSeparationsPreviewChange(event: Event): void {
-		this.exportSeparationsPreview = (event.target as HTMLInputElement).checked;
 	}
 
 	handlePostscriptChange(event: Event): void {

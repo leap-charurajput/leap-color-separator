@@ -1,0 +1,302 @@
+/**
+ * LEAP Color Separator file logger → ~/Documents/LEAP Settings/Logs/leap_seps.log
+ * API: window.leapSepsWrite(level, category, message, detail?)
+ *       window.installLeapSepsFileLogger()
+ */
+(function (global) {
+ if (global.__LEAP_SEPS_FILE_LOGGER__) {
+  return;
+ }
+ global.__LEAP_SEPS_FILE_LOGGER__ = true;
+
+ var installed = false;
+ var installAttempts = 0;
+ var MAX_INSTALL_ATTEMPTS = 100;
+ var LOG_FILE_NAME = 'leap_seps.log';
+ var pendingLines = [];
+ var MAX_PENDING = 500;
+
+ function getFsPath() {
+  try {
+   if (!global.cep_node || !global.cep_node.require) return null;
+   var os = global.cep_node.require('os');
+   var path = global.cep_node.require('path');
+   var home = os.homedir();
+   var logDir = path.join(home, 'Documents', 'LEAP Settings', 'Logs');
+   var logPath = path.join(logDir, LOG_FILE_NAME);
+   return { fs: global.cep_node.require('fs'), path: path, logDir: logDir, logPath: logPath };
+  } catch (e) {
+   return null;
+  }
+ }
+
+ var MAX_DETAIL_CHARS = 280;
+ var OMIT_DETAIL_KEYS = {
+  bodyColorData: 1,
+  batchVariableSource: 1,
+  profileMetadata: 1,
+  graphicAssets: 1,
+  cadPlacementDebug: 1,
+  savePathsDebug: 1,
+  colorCodes: 1,
+  fields: 1,
+  cmyk: 1,
+  rgb: 1,
+  tried: 1,
+  cadPngTriedPaths: 1,
+  steps: 1,
+  inkExceptions: 1,
+  rows: 1,
+  data: 1,
+  excel: 1,
+  swatches: 1
+ };
+
+ function compactValue(value, depth) {
+  if (value === undefined || value === null) return value;
+  if (typeof value === 'string') {
+   if (value.length > MAX_DETAIL_CHARS) {
+    return value.slice(0, MAX_DETAIL_CHARS) + '…';
+   }
+   return value;
+  }
+  if (typeof value !== 'object') return value;
+  if (depth > 2) return '[…]';
+  if (Array.isArray(value)) {
+   if (value.length > 8) {
+    return value.slice(0, 8).map(function (v) {
+     return compactValue(v, depth + 1);
+    }).concat(['…+' + (value.length - 8)]);
+   }
+   return value.map(function (v) {
+    return compactValue(v, depth + 1);
+   });
+  }
+  var out = {};
+  var keys = Object.keys(value);
+  for (var k = 0; k < keys.length; k++) {
+   var key = keys[k];
+   if (OMIT_DETAIL_KEYS[key]) {
+    if (Array.isArray(value[key])) {
+     out[key] = '[' + value[key].length + ' items]';
+    } else if (value[key] && typeof value[key] === 'object') {
+     out[key] = '{…}';
+    } else {
+     out[key] = '…';
+    }
+    continue;
+   }
+   out[key] = compactValue(value[key], depth + 1);
+  }
+  return out;
+ }
+
+ function formatDetail(detail) {
+  if (detail === undefined || detail === null) return '';
+  if (typeof detail === 'string') {
+   if (detail.length > MAX_DETAIL_CHARS) {
+    if (detail.charAt(0) === '{' || detail.charAt(0) === '[') {
+     try {
+      return formatDetail(JSON.parse(detail));
+     } catch (parseErr) {
+      return detail.slice(0, MAX_DETAIL_CHARS) + '…';
+     }
+    }
+    return detail.slice(0, MAX_DETAIL_CHARS) + '…';
+  }
+  return detail;
+  }
+  try {
+   var compact = compactValue(detail, 0);
+   var text = JSON.stringify(compact);
+   if (text.length > MAX_DETAIL_CHARS) {
+    return text.slice(0, MAX_DETAIL_CHARS) + '…';
+   }
+   return text;
+  } catch (e) {
+   try {
+    return String(detail).slice(0, MAX_DETAIL_CHARS);
+   } catch (e2) {
+    return '[unserializable]';
+   }
+  }
+ }
+
+ function compactConsoleMessage(msg) {
+  if (!msg || msg.length < MAX_DETAIL_CHARS) return msg;
+  var jsonStart = msg.indexOf('{');
+  if (jsonStart === -1) {
+   return msg.slice(0, MAX_DETAIL_CHARS) + '…';
+  }
+  var prefix = msg.slice(0, jsonStart).trim();
+  var jsonPart = msg.slice(jsonStart);
+  try {
+   var parsed = JSON.parse(jsonPart);
+   return prefix + (prefix ? ' ' : '') + formatDetail(parsed);
+  } catch (e) {
+   return msg.slice(0, MAX_DETAIL_CHARS) + '…';
+  }
+ }
+
+ function writeLine(level, category, message, detail) {
+  var ctx = getFsPath();
+  if (!ctx) return false;
+  try {
+   if (!ctx.fs.existsSync(ctx.logDir)) {
+    ctx.fs.mkdirSync(ctx.logDir, { recursive: true });
+   }
+   var cat = category ? String(category) : 'App';
+   var msg = message != null ? String(message) : '';
+   var extra = formatDetail(detail);
+   var line =
+    '[' +
+    new Date().toISOString() +
+    '] [' +
+    level +
+    '] [' +
+    cat +
+    '] ' +
+    msg +
+    (extra ? ' | ' + extra : '') +
+    '\n';
+   ctx.fs.appendFileSync(ctx.logPath, line, 'utf8');
+   return true;
+  } catch (e) {
+   try {
+    if (global.console && global.console.error) {
+     global.console.error('[leap_seps] write failed:', e.message || e, message);
+    }
+   } catch (ignore) {}
+   return false;
+  }
+ }
+
+ function flushPending() {
+  while (pendingLines.length > 0) {
+   var item = pendingLines[0];
+   if (!writeLine(item.level, item.category, item.message, item.detail)) {
+    break;
+   }
+   pendingLines.shift();
+  }
+ }
+
+ function leapSepsWrite(level, category, message, detail) {
+  if (!installed) {
+   scheduleInstall();
+  }
+  if (!writeLine(level || 'LOG', category, message, detail)) {
+   pendingLines.push({
+    level: level || 'LOG',
+    category: category,
+    message: message,
+    detail: detail
+   });
+   if (pendingLines.length > MAX_PENDING) {
+    pendingLines.shift();
+   }
+  } else if (pendingLines.length > 0) {
+   flushPending();
+  }
+  return true;
+ }
+
+ function scheduleInstall() {
+  if (installed || installAttempts >= MAX_INSTALL_ATTEMPTS) return;
+  installAttempts++;
+  if (global.cep_node && global.cep_node.require) {
+   installLeapSepsFileLogger();
+   return;
+  }
+  setTimeout(scheduleInstall, 100);
+ }
+
+ function installLeapSepsFileLogger() {
+  if (installed || global.__LEAP_SEPS_FILE_LOGGER_INSTALLED__) return;
+  if (!global.cep_node || !global.cep_node.require) {
+   scheduleInstall();
+   return;
+  }
+  installed = true;
+  global.__LEAP_SEPS_FILE_LOGGER_INSTALLED__ = true;
+
+  var ctx = getFsPath();
+  var logPath = ctx ? ctx.logPath : '(unknown)';
+
+  try {
+   if (ctx && !ctx.fs.existsSync(ctx.logDir)) {
+    ctx.fs.mkdirSync(ctx.logDir, { recursive: true });
+   }
+   var banner =
+    '\n========== LEAP Color Separator session ' +
+    new Date().toISOString() +
+    ' ==========\n' +
+    'Log file: ' +
+    logPath +
+    '\n';
+   if (ctx) {
+    ctx.fs.appendFileSync(ctx.logPath, banner, 'utf8');
+   }
+  } catch (e) {}
+
+  var origLog = global.console.log;
+  var origWarn = global.console.warn;
+  var origError = global.console.error;
+  var origInfo = global.console.info;
+
+  function argsToMessage(args) {
+   var parts = [];
+   for (var i = 0; i < args.length; i++) {
+    parts.push(formatDetail(args[i]));
+   }
+   return compactConsoleMessage(parts.join(' '));
+  }
+
+  global.console.log = function () {
+   writeLine('LOG', 'Console', argsToMessage(arguments), null);
+   return origLog.apply(global.console, arguments);
+  };
+  global.console.warn = function () {
+   writeLine('WARN', 'Console', argsToMessage(arguments), null);
+   return origWarn.apply(global.console, arguments);
+  };
+  global.console.error = function () {
+   writeLine('ERROR', 'Console', argsToMessage(arguments), null);
+   return origError.apply(global.console, arguments);
+  };
+  if (origInfo) {
+   global.console.info = function () {
+    writeLine('INFO', 'Console', argsToMessage(arguments), null);
+    return origInfo.apply(global.console, arguments);
+   };
+  }
+
+  if (typeof global.addEventListener === 'function') {
+   global.addEventListener('error', function (ev) {
+    writeLine(
+     'ERROR',
+     'Window',
+     'Uncaught error: ' + (ev.message || 'unknown'),
+     ev.filename ? ev.filename + ':' + ev.lineno : null
+    );
+   });
+   global.addEventListener('unhandledrejection', function (ev) {
+    var reason = ev.reason;
+    writeLine(
+     'ERROR',
+     'Promise',
+     'Unhandled rejection',
+     reason && reason.message ? reason.message : reason
+    );
+   });
+  }
+
+  writeLine('LOG', 'Logger', 'File logger installed', logPath);
+  flushPending();
+ }
+
+ global.leapSepsWrite = leapSepsWrite;
+ global.installLeapSepsFileLogger = installLeapSepsFileLogger;
+
+ scheduleInstall();
+})(typeof window !== 'undefined' ? window : global);

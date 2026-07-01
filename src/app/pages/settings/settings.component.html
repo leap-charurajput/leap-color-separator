@@ -1,6 +1,6 @@
 <div class="settings-page">
   <div class="page-header">
-    <div class="page-title">Settings</div>
+    <div class="page-title">{{pageTitle}}</div>
   </div>
 
   <div *ngIf="isLoading" class="settings-panels">
@@ -8,14 +8,6 @@
   </div>
 
   <div *ngIf="!isLoading" class="settings-panels">
-    <!-- Section selector -->
-    <div class="settings-dropdown-wrapper">
-      <span class="material-icons" aria-hidden="true">settings</span>
-      <app-dropdown [value]="selectedSection" [items]="['Separation Profiles', 'General Settings']"
-        (onChange)="selectedSection = $event" placeholder="Select section..."></app-dropdown>
-    </div>
-
-
 
     <app-separation-profiles-panel *ngIf="selectedSection === 'Separation Profiles'" title="Separation Profiles"
       description="Template presets for separation runs" [profiles]="profiles" (addProfile)="handleAddProfile()"
@@ -24,12 +16,12 @@
 
     <div *ngIf="selectedSection === 'General Settings'" class="general-settings-content">
       <!-- Environment selector -->
-      <div class="settings-dropdown-wrapper">
+      <div class="settings-field settings-field-inline-input">
         <label class="settings-field-label">Version</label>
         <app-dropdown [value]="selectedEnvironmentKey" [items]="environmentKeys"
           (onChange)="onEnvironmentChange($event)" placeholder="Select environment..."></app-dropdown>
       </div>
-      <div class="settings-field">
+      <div class="settings-field settings-field-inline-input">
         <label class="settings-field-label">Default mesh</label>
         <input type="text" class="settings-field-input" [(ngModel)]="defaultMesh"
           (ngModelChange)="saveGeneralSettings()" />
@@ -40,16 +32,29 @@
           (change)="addUnderbase = $event.target.checked; saveGeneralSettings()"></app-checkbox>
       </div>
 
-      <div class="settings-field">
+      <div class="settings-field settings-field-inline-input">
         <label class="settings-field-label">Artist Name</label>
         <input type="text" class="settings-field-input" [(ngModel)]="artistName"
           (ngModelChange)="saveGeneralSettings()" placeholder="Artist name" />
       </div>
 
-      <div class="settings-field">
+      <div class="settings-field settings-field-inline-input">
         <label class="settings-field-label">Artist Initials</label>
         <input type="text" class="settings-field-input" [(ngModel)]="artistInitials"
           (ngModelChange)="saveGeneralSettings()" placeholder="e.g. JR" />
+      </div>
+
+      <div class="settings-field settings-field-inline-input">
+        <label class="settings-field-label">PPD Name</label>
+        <input type="text" class="settings-field-input" [(ngModel)]="ppdName"
+          (ngModelChange)="saveGeneralSettings()" placeholder="IBlock v2" />
+      </div>
+
+      <div class="settings-field settings-field-inline-input">
+        <label class="settings-field-label">Seps Template</label>
+        <app-dropdown [value]="sepsTemplateFileName" [items]="sepsTemplateFiles"
+          (onChange)="sepsTemplateFileName = $event; saveGeneralSettings()"
+          placeholder="Select template..."></app-dropdown>
       </div>
 
       <div class="settings-field">
@@ -61,9 +66,45 @@
           <button class="settings-action-link" (click)="onChooseLeapPath()">Choose...</button>
         </div>
       </div>
+
+      <div class="settings-field settings-field-inline-input">
+        <label class="settings-field-label" for="chokeStrokeSwatch">Choke stroke color swatch</label>
+        <input id="chokeStrokeSwatch" type="text" class="settings-field-input"
+          [(ngModel)]="chokeStrokeColorSwatch" (ngModelChange)="saveGeneralSettings()"
+          placeholder="Swatch name (e.g. GARMENT)" />
+      </div>
+
+      <div class="settings-field settings-field-inline-input settings-field-textarea-row">
+        <div class="settings-field-label-stack">
+          <label class="settings-field-label" for="koDarkColorNames">Default Black color names</label>
+          <span class="settings-field-sublabel">(Comma separated)</span>
+        </div>
+        <textarea id="koDarkColorNames" class="settings-field-textarea" rows="4"
+          [(ngModel)]="koDarkColorNames" (ngModelChange)="saveGeneralSettings()"
+          placeholder="Black, PANTONE PROCESS BLACK C"></textarea>
+      </div>
+
+      <div class="settings-field settings-field-inline-input">
+        <label class="settings-field-label" for="meshValues">Mesh values</label>
+        <input id="meshValues" type="text" class="settings-field-input" [(ngModel)]="meshValues"
+          (ngModelChange)="saveGeneralSettings()" />
+      </div>
     </div>
+
+    <app-export-settings-panel
+      *ngIf="selectedSection === 'Export Settings'"
+      [exportSettings]="exportSettings"
+      [excelColumns]="exportExcelColumns"
+      [graphicPositions]="exportGraphicPositions"
+      [profileCodes]="exportProfileCodes"
+      (exportSettingChange)="onExportSettingChange($event)"
+    ></app-export-settings-panel>
   </div>
 
-  <app-edit-separation-profile-modal [isOpen]="editModalOpen" [profile]="selectedProfile" (close)="handleModalClose()"
+  <app-edit-separation-profile-modal [isOpen]="editModalOpen"
+    [profile]="duplicateProfileDraft || selectedProfile"
+    [defaultBlackColorNames]="koDarkColorNames"
+    [meshValues]="meshValues"
+    (close)="handleModalClose()"
     (save)="handleModalSave($event)"></app-edit-separation-profile-modal>
 </div>

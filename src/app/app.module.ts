@@ -12,8 +12,12 @@ import { ConfirmDialogComponent } from './components/confirm-dialog/confirm-dial
 import { CompoundPlateModalComponent } from './components/compound-plate-modal/compound-plate-modal.component';
 import { DropdownComponent } from './components/dropdown/dropdown.component';
 import { EditSeparationModalComponent } from './components/edit-separation-modal/edit-separation-modal.component';
+import { SeparationProfileActionDialogComponent } from './components/separation-profile-action-dialog/separation-profile-action-dialog.component';
 import { EditSeparationProfileModalComponent } from './components/edit-separation-profile-modal/edit-separation-profile-modal.component';
 import { ExportSeparationsModalComponent } from './components/export-separations-modal/export-separations-modal.component';
+import { PostscriptSetupAlertComponent } from './components/postscript-setup-alert/postscript-setup-alert.component';
+import { PostscriptSetupDetailComponent } from './components/postscript-setup-detail/postscript-setup-detail.component';
+import { ExportSettingsPanelComponent } from './components/export-settings-panel/export-settings-panel.component';
 import { LayerStackVisualizationComponent } from './components/layer-stack-visualization/layer-stack-visualization.component';
 import { LinkColorsModalComponent } from './components/link-colors-modal/link-colors-modal.component';
 import { ProfilesTableComponent } from './components/profiles-table/profiles-table.component';
@@ -26,6 +30,9 @@ import { SeparationsComponent } from './pages/separations/separations.component'
 import { SettingsComponent } from './pages/settings/settings.component';
 
 import { ComboBoxComponent } from './components/combo-box/combo-box.component';
+import { RadioComponent } from './components/radio/radio.component';
+import { AddSeparationDialogComponent } from './components/add-separation-dialog/add-separation-dialog.component';
+import { CreateGraphicModalComponent } from './components/create-graphic-modal/create-graphic-modal.component';
 import { ControllerService } from './services/controller.service';
 
 @NgModule({
@@ -36,8 +43,12 @@ import { ControllerService } from './services/controller.service';
   ButtonComponent,
   ConfirmDialogComponent,
   ComboBoxComponent,
+  RadioComponent,
+  AddSeparationDialogComponent,
+  CreateGraphicModalComponent,
   DropdownComponent,
   EditSeparationModalComponent,
+  SeparationProfileActionDialogComponent,
   CompoundPlateModalComponent,
   LayerStackVisualizationComponent,
   CheckboxComponent,
@@ -46,6 +57,9 @@ import { ControllerService } from './services/controller.service';
   SeparationProfilesPanelComponent,
   EditSeparationProfileModalComponent,
   ExportSeparationsModalComponent,
+  PostscriptSetupAlertComponent,
+  PostscriptSetupDetailComponent,
+  ExportSettingsPanelComponent,
   SeparationColorsComponent,
   GraphicsComponent,
   SeparationsComponent,

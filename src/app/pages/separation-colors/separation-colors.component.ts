@@ -11,11 +11,14 @@ import {
  SimpleChanges
 } from '@angular/core';
 import { checkForJSXUpdates } from '../../../libs/helper';
+import { ConfirmDialogCheckboxOption } from '../../components/confirm-dialog/confirm-dialog.component';
 import { ControllerService } from '../../services/controller.service';
 
 interface ColorRow {
  id: number;
  colorName: string;
+ /** SEPARATED_ART sublayer / document swatch name when it differs from formal colorName (XMP swatchName). */
+ swatchName?: string;
  mesh: string;
  micron: string;
  type: 'separation' | 'compound';
@@ -51,17 +54,48 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  // draggedIndex removed as it is handled by CDK
 
  graphicMenuItems = ['Add separation color', 'Add compound plate', 'Revert', 'Refresh list'];
+ underbaseMenuItems = [
+  'Generate Underbase from Existing Inks',
+  'Delete UB, choke and blocker plates'
+ ];
 
  colorRows: ColorRow[] = [];
  nextId = 3;
  hasUIChanges = false;
  documentProfileMetadata: any = null;
+ /** Saved LEAPSeparationColorsData rows — merged into layer-based rows for mesh/flash metadata. */
+ private xmpColorDataForMerge: any[] | null = null;
  bodyColorFromDocument: string | null = null;
  bodyColorNameFromDocument: string = '';
 
  isSeparationModalOpen = false;
  isCompoundModalOpen = false;
  isExportModalOpen = false;
+ exportPostscriptReady = true;
+ exportPostscriptIssues: Array<{ id: string; message: string }> = [];
+ isAddSelectionInkConfirmOpen = false;
+ selectedInkForAdd: string | null = null;
+ isRemoveColorDialogOpen = false;
+ removeColorTargetRowId: number | null = null;
+ removeColorDialogInkLabel = '';
+ removeColorCheckboxOptions: ConfirmDialogCheckboxOption[] = [
+  { id: 'removeSublayer', label: 'Also remove sublayer' },
+  { id: 'removeSwatch', label: 'Also remove swatch' }
+ ];
+ showRegenerateUnderbaseConfirm = false;
+ showDeleteUbChokeBlockerConfirm = false;
+ regenerateUnderbaseCheckboxOptions: ConfirmDialogCheckboxOption[] = [
+  {
+   id: 'deleteUnpaintedPaths',
+   label: 'Delete unpainted paths after Merge',
+   checked: true
+  },
+  {
+   id: 'deleteLeftoverPaths',
+   label: 'Delete leftover paths after Add',
+   checked: true
+  }
+ ];
  editingRow: ColorRow | null = null;
 
  editingMeshRows = new Set<number>();
@@ -97,7 +131,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  ngOnChanges(changes: SimpleChanges): void {
   if (changes['documentRefreshKey'] && !changes['documentRefreshKey'].firstChange) {
    console.log('[SEPARATION] Refresh triggered by App (refreshKey changed)');
-   checkForJSXUpdates((window as any).location.href).then((res) => {
+   checkForJSXUpdates((window as any).location.origin).then((res) => {
     console.log('check update status ref', res);
    });
    // Reset state when document changes
@@ -340,67 +374,60 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
        this.graphicNameFromPath = data.graphicName || '';
       }
 
-      // Load color rows from XMP if available (priority 1)
-      if (
+      const separatedLayerNames = data.separatedLayerNames;
+      const hasSeparatedLayerNames =
+       separatedLayerNames &&
+       Array.isArray(separatedLayerNames) &&
+       separatedLayerNames.length > 0;
+      const xmpColorData =
        data.leapSeparationColorsData &&
        Array.isArray(data.leapSeparationColorsData) &&
        data.leapSeparationColorsData.length > 0
-      ) {
+        ? data.leapSeparationColorsData
+        : null;
+      this.xmpColorDataForMerge = xmpColorData;
+
+      // SeparatedLayerNames is authoritative for which plates exist (includes ink "… 2" second hits).
+      // LEAPSeparationColorsData may be stale template/SEP TABLE data and must not hide new layers.
+      if (hasSeparatedLayerNames) {
        console.log(
-        '[SEPARATION] Found LEAPSeparationColorsData in XMP:',
-        data.leapSeparationColorsData.length,
+        '[SEPARATION] Loading from SeparatedLayerNames (' +
+         separatedLayerNames.length +
+         ' layers)' +
+         (xmpColorData ? ', merging XMP row metadata' : '')
+       );
+       this.isLoadingSwatches = true;
+       this.loadColorRowsFromSeparatedLayerNames();
+      } else if (xmpColorData) {
+       console.log(
+        '[SEPARATION] Found LEAPSeparationColorsData in XMP (no SeparatedLayerNames):',
+        xmpColorData.length,
         'rows'
        );
        this.isLoadingSwatches = true;
-       // Clear existing rows before loading new data
        this.colorRows = [];
-       const colorRowsFromXMP = this.convertXMPDataToColorRows(data.leapSeparationColorsData);
+       const colorRowsFromXMP = this.convertXMPDataToColorRows(xmpColorData);
        if (colorRowsFromXMP && colorRowsFromXMP.length > 0) {
         this.colorRows = colorRowsFromXMP;
         this.nextId = colorRowsFromXMP.length + 1;
         this.hasUIChanges = false;
         this.isLoadingSwatches = false;
-        this.cdr.detectChanges(); // Force change detection after loading color rows
+        this.cdr.detectChanges();
         console.log(
          '[SEPARATION] Loaded color rows from XMP data on document check:',
          colorRowsFromXMP.length,
          'rows'
         );
-        console.log('[SEPARATION] Color rows array:', this.colorRows);
-        console.log('[SEPARATION] isLoadingSwatches:', this.isLoadingSwatches);
-        console.log('[SEPARATION] isSeparatedDoc:', this.isSeparatedDoc);
-        console.log('[SEPARATION] isLoadingGraphics:', this.isLoadingGraphics);
-        console.log('[SEPARATION] graphicOptions.length:', this.graphicOptions.length);
-        console.log(
-         '[SEPARATION] Should show table?',
-         !this.isLoadingSwatches &&
-         (this.isSeparatedDoc || (!this.isLoadingGraphics && this.graphicOptions.length > 0))
-        );
        } else {
-        console.log(
-         '[SEPARATION] Failed to convert XMP data, will use SeparatedLayerNames + Excel'
-        );
+        console.log('[SEPARATION] Failed to convert XMP color data');
         this.colorRows = [];
         this.isLoadingSwatches = false;
        }
       } else {
-       console.log(
-        '[SEPARATION] No LEAPSeparationColorsData found in XMP, will use SeparatedLayerNames + Excel'
-       );
-       const separatedLayerNames = data.separatedLayerNames;
-       if (
-        separatedLayerNames &&
-        Array.isArray(separatedLayerNames) &&
-        separatedLayerNames.length > 0
-       ) {
-        this.isLoadingSwatches = true;
-        this.loadColorRowsFromSeparatedLayerNames();
-       } else {
-        console.log('[SEPARATION] No SeparatedLayerNames found either, cannot load color data');
-        this.colorRows = [];
-        this.isLoadingSwatches = false;
-        this.cdr.detectChanges();
-       }
+       console.log('[SEPARATION] No SeparatedLayerNames or LEAPSeparationColorsData found');
+       this.colorRows = [];
+       this.isLoadingSwatches = false;
+       this.cdr.detectChanges();
       }
      } else {
       this.isSeparatedDoc = false;
@@ -421,6 +448,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   this.isSeparatedDoc = false;
   this.graphicNameFromPath = '';
   this.documentProfileMetadata = null;
+  this.xmpColorDataForMerge = null;
   this.bodyColorFromDocument = null;
   this.bodyColorNameFromDocument = '';
   this.colorRows = [];
@@ -464,9 +492,14 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
    const isWhiteUBColor = this.isWhiteUB(sepData.colorName);
    const isCompound = sepData.type === 'compound';
 
+   const sw =
+    sepData.swatchName && String(sepData.swatchName).trim() !== ''
+     ? String(sepData.swatchName).trim()
+     : undefined;
    const row: ColorRow = {
     id: currentId++,
     colorName: sepData.colorName,
+    swatchName: sw && sw !== sepData.colorName ? sw : undefined,
     mesh: sepData.mesh || '110',
     micron: sepData.micron || 'NA',
     type: sepData.type || 'separation',
@@ -494,17 +527,19 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
    this.selectedGraphic
   );
   this.isLoadingSwatches = true;
+  let allSwatchesFromDoc: any[] = [];
 
   this.controller
    .getGraphicSwatches(this.selectedGraphic)
    .then((result) => {
     if (result.success && result.swatches && Array.isArray(result.swatches)) {
+     allSwatchesFromDoc = result.swatches;
      console.log(
       '[SEPARATION] Fetched swatches from SeparatedLayerNames:',
-      result.swatches.map((s: any) => s.name)
+      allSwatchesFromDoc.map((s: any) => s.name)
      );
 
-     const validSwatches = this.filterValidSwatches(result.swatches);
+     const validSwatches = this.filterPlatesForUi(allSwatchesFromDoc);
      console.log(
       '[SEPARATION] Valid swatches (exist in document):',
       validSwatches.map((s: any) => s.name)
@@ -515,18 +550,23 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
      // Step 2: Get ink names for batch lookup (only from valid swatches)
      const inkNames = validSwatches.map((s: any) => s.name);
 
-     // Get profile name from document metadata if available
      const profileName = this.documentProfileMetadata
       ? this.documentProfileMetadata.profileName
       : null;
+     const profileCode = this.documentProfileMetadata
+      ? this.documentProfileMetadata.profileCode
+      : null;
 
-     // Step 3: Fetch ink information from Inks.xlsx (includes mesh, micron, profile info)
-     return this.controller.getInkInformationBatch(inkNames, profileName);
+     // Inks.xlsx + profile_ink_exceptions.json (hits/mesh overrides by profileCode)
+     return this.controller.getInkInformationBatch(inkNames, profileName, profileCode);
     } else {
      console.error(
       '[SEPARATION] Failed to load swatches from SeparatedLayerNames:',
       result.error || 'Invalid response'
      );
+     if (this.loadColorRowsFromXmpFallback('getGraphicSwatches failed')) {
+      return null;
+     }
      this.graphicSwatches = [];
      this.colorRows = [];
      this.isLoadingSwatches = false;
@@ -550,7 +590,14 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
      const profileCode =
       this.documentProfileMetadata.profileCode || this.documentProfileMetadata.profileName;
      if (profileCode) {
-      fallbackProfilePromise = this.controller.getProfileInformation(profileCode);
+      const meta: any = this.documentProfileMetadata;
+      const distressOpt =
+       meta.distress !== undefined && meta.distress !== null
+        ? meta.distress
+        : meta.profileDistress;
+      const profileOptions =
+       distressOpt !== undefined && distressOpt !== null ? { distress: distressOpt } : undefined;
+      fallbackProfilePromise = this.controller.getProfileInformation(profileCode, profileOptions);
      }
     }
 
@@ -565,7 +612,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 
      // Step 4: Convert swatches to color rows with mesh values and profile settings
      let currentId = 1;
-     const newColorRows: ColorRow[] = [];
+     let newColorRows: ColorRow[] = [];
 
      this.graphicSwatches.forEach((swatchData: any, index: number) => {
       const inkInfo = inkResult.inkInfoList[index] || { mesh: '110', twoHits: false, found: false };
@@ -577,9 +624,13 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
       );
       newColorRows.push(firstRow);
 
-      if (inkInfo.twoHits) {
-       const colorHex = swatchData.hex || this.getRandomColor();
-       const isWhiteUBColor = this.isWhiteUB(swatchData.name);
+      // Ink exceptions may flag twoHits, but performSeparation can already create "… 2" plates.
+      // Skip synthetic rows when this swatch is already a hit plate or the second hit exists.
+      if (
+       inkInfo.twoHits &&
+       !this.isInkHitPlateName(swatchData.name) &&
+       !this.secondHitLayerExists(swatchData.name, this.graphicSwatches)
+      ) {
        const secondRow: ColorRow = {
         ...firstRow,
         id: currentId++,
@@ -589,7 +640,16 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
       }
      });
 
-     const sortedColorRows = this.sortColorRowsWithWhiteUBAtBottom(newColorRows);
+     const withMissingHits = this.appendMissingSecondHitRowsFromLayers(
+      newColorRows,
+      allSwatchesFromDoc,
+      currentId
+     );
+     newColorRows = withMissingHits.rows;
+     currentId = withMissingHits.nextId;
+
+     const mergedColorRows = this.mergeXmpMetadataIntoColorRows(newColorRows);
+     const sortedColorRows = this.sortColorRowsWithWhiteUBAtBottom(mergedColorRows);
      console.log(
       '[SEPARATION] Color rows loaded from SeparatedLayerNames + Excel:',
       sortedColorRows.length,
@@ -615,23 +675,112 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
    })
    .catch((err) => {
     console.error('[SEPARATION] Error loading color rows from SeparatedLayerNames + Excel:', err);
-    this.graphicSwatches = [];
-    this.colorRows = [];
-    this.isLoadingSwatches = false;
-    this.cdr.detectChanges(); // Force change detection on error
+    if (!this.loadColorRowsFromXmpFallback('loadColorRowsFromSeparatedLayerNames error')) {
+     this.graphicSwatches = [];
+     this.colorRows = [];
+     this.isLoadingSwatches = false;
+     this.cdr.detectChanges(); // Force change detection on error
+    }
    });
+ }
+
+ /** Use LEAPSeparationColorsData from XMP when swatch resolution fails (e.g. doc moved off 09 SEPARATIONS). */
+ private loadColorRowsFromXmpFallback(reason: string): boolean {
+  const xmpData = this.xmpColorDataForMerge;
+  if (!xmpData || !xmpData.length) {
+   return false;
+  }
+
+  console.warn(
+   '[SEPARATION] Falling back to LEAPSeparationColorsData from XMP:',
+   reason
+  );
+  const colorRowsFromXMP = this.convertXMPDataToColorRows(xmpData);
+  if (!colorRowsFromXMP || colorRowsFromXMP.length === 0) {
+   return false;
+  }
+
+  this.colorRows = colorRowsFromXMP;
+  this.nextId = colorRowsFromXMP.length + 1;
+  this.hasUIChanges = false;
+  this.isLoadingSwatches = false;
+  this.cdr.detectChanges();
+  return true;
  }
 
  private filterValidSwatches(swatches: any[]): any[] {
   return swatches.filter((swatch) => {
+   const name = String(swatch?.name || '').trim();
    const hasValidColor = swatch.cmyk !== null || swatch.rgb !== null;
-   if (!hasValidColor) {
-    console.log(
-     `[SEPARATION] Filtering out swatch "${swatch.name}" - not found in document (no CMYK/RGB data)`
-    );
+   if (hasValidColor) {
+    return true;
    }
-   return hasValidColor;
+
+   // Ink second-hit layers (e.g. "PANTONE 125 C 2") must stay visible even when swatch color
+   // cannot be resolved yet — inherit display color from the base ink plate when possible.
+   if (name && this.isInkHitPlateName(name)) {
+    const baseName = name.replace(/\s+\d+$/, '').trim();
+    const baseSwatch = swatches.find(
+     (s) => (s?.name || '').trim().toLowerCase() === baseName.toLowerCase()
+    );
+    if (baseSwatch) {
+     if (baseSwatch.hex) swatch.hex = baseSwatch.hex;
+     if (baseSwatch.cmyk) swatch.cmyk = baseSwatch.cmyk;
+     if (baseSwatch.rgb) swatch.rgb = baseSwatch.rgb;
+    }
+    return true;
+   }
+
+   console.log(
+    `[SEPARATION] Filtering out swatch "${name}" - not found in document (no CMYK/RGB data)`
+   );
+   return false;
   });
+ }
+
+ private getUnderbase2SwatchNameFromMetadata(): string {
+  const meta = this.documentProfileMetadata || {};
+  if (meta.underbase2Swatch != null && String(meta.underbase2Swatch).trim() !== '') {
+   return String(meta.underbase2Swatch).trim();
+  }
+  return '';
+ }
+
+ private getWhiteUbPassNumber(colorName: string): number {
+  const match = String(colorName || '').trim().match(/^white\s*ub(?:\s+(\d+))?$/i);
+  if (!match) return 0;
+  return match[1] ? parseInt(match[1], 10) : 1;
+ }
+
+ private getProfileUnderbasePassCount(): number {
+  const meta = this.documentProfileMetadata || {};
+  const isEnabled = (value: any): boolean => {
+   if (value === true) return true;
+   if (typeof value === 'string') {
+    const v = value.trim().toUpperCase();
+    return v === 'Y' || v === 'YES' || v === 'TRUE' || v === '1';
+   }
+   return value === 1;
+  };
+  const enabled = Array.isArray(meta.underbaseEnabled) ? meta.underbaseEnabled : [];
+  if (enabled.length > 0) {
+   let count = enabled[0] !== false ? 1 : 0;
+   for (let i = 1; i < Math.min(4, enabled.length); i++) {
+    if (enabled[i] === true) count = i + 1;
+   }
+   return Math.max(1, Math.min(4, count));
+  }
+  const ub4 = isEnabled(meta.underbase4Enabled) || isEnabled(meta.ub4Enabled) || isEnabled(meta.underbase4) || isEnabled(meta['Underbase 4']);
+  const ub3 = isEnabled(meta.underbase3Enabled) || isEnabled(meta.ub3Enabled) || isEnabled(meta.underbase3) || isEnabled(meta['Underbase 3']);
+  const ub2 = isEnabled(meta.underbase2Enabled) || isEnabled(meta.ub2Enabled) || isEnabled(meta.underbase2) || isEnabled(meta['Underbase 2']);
+  if (ub4) return 4;
+  if (ub3) return 3;
+  if (ub2) return 2;
+  return 1;
+ }
+
+ private filterPlatesForUi(swatches: any[]): any[] {
+  return this.filterValidSwatches(swatches);
  }
 
  private createColorRowFromSwatch(
@@ -642,6 +791,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  ): ColorRow {
   const colorHex = swatchData.hex || this.getRandomColor();
   const isWhiteUBColor = this.isWhiteUB(swatchData.name);
+  const isBlockerColor = this.isBlocker(swatchData.name);
 
   // Determine which profile to use
   let profileInfo: any = {};
@@ -662,11 +812,24 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   const coolEnabled = hasProfile ? profileInfo.cool : false;
   const wbEnabled = hasProfile ? profileInfo.wb : true;
   const micron = hasProfile ? profileInfo.micron : 'NA';
+  const profileColorMesh = this.getProfileColorMesh(profileInfo);
+  const profileBlockerMesh = this.getProfileBlockerMesh(profileInfo);
+  const underbaseMeshes = this.getProfileUnderbaseMeshes();
+  let meshValue = inkInfo.mesh || '110';
+  if (isWhiteUBColor) {
+   const ubPass = this.getWhiteUbPassNumber(swatchData.name);
+   const meshFromProfile = ubPass > 0 ? underbaseMeshes[ubPass - 1] : '';
+   meshValue = meshFromProfile || inkInfo.mesh || '110';
+  } else if (isBlockerColor && profileBlockerMesh !== '') {
+   meshValue = profileBlockerMesh;
+  } else if (profileColorMesh !== '') {
+   meshValue = profileColorMesh;
+  }
 
   return {
    id: currentId,
    colorName: swatchData.name,
-   mesh: inkInfo.mesh || '110',
+   mesh: meshValue,
    micron: micron,
    type: 'separation',
    layerColor: colorHex,
@@ -678,13 +841,24 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  }
 
  private createColorRowsFromSwatchesWithDefaults(): void {
+  const profileColorMesh = this.getProfileColorMesh();
+  const profileBlockerMesh = this.getProfileBlockerMesh();
   const newColorRows: ColorRow[] = this.graphicSwatches.map((swatchData: any, index: number) => {
    const colorHex = swatchData.hex || this.getRandomColor();
    const isWhiteUBColor = this.isWhiteUB(swatchData.name);
+   const isBlockerColor = this.isBlocker(swatchData.name);
+   let meshValue = '110';
+   if (!isWhiteUBColor) {
+    if (isBlockerColor && profileBlockerMesh !== '') {
+     meshValue = profileBlockerMesh;
+    } else if (profileColorMesh !== '') {
+     meshValue = profileColorMesh;
+    }
+   }
    return {
     id: index + 1,
     colorName: swatchData.name,
-    mesh: '110',
+    mesh: meshValue,
     micron: 'NA',
     type: 'separation',
     layerColor: colorHex,
@@ -707,23 +881,205 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  }
 
  private sortColorRowsWithWhiteUBAtBottom(rows: ColorRow[]): ColorRow[] {
-  // Currently sorting is disabled as per request, but this function can be re-enabled if needed
   if (!rows || rows.length === 0) return rows;
 
-  const sorted = [...rows].sort((a, b) => {
-   const aIsWhiteUB = this.isWhiteUB(a.colorName);
-   const bIsWhiteUB = this.isWhiteUB(b.colorName);
-   if (aIsWhiteUB === bIsWhiteUB) return 0;
-   return aIsWhiteUB ? -1 : 1; // White UB at top (return -1 when a is White UB)
-  });
+  // Print order: Blocker first, then White UB rows (1, 2, 3…), then other inks. Stable within each group.
+  const rank = (row: ColorRow): number => {
+   if (this.isBlocker(row.colorName)) return 0;
+   if (this.isWhiteUB(row.colorName)) return 1;
+   return 2;
+  };
 
-  return rows;
+  return rows
+   .map((row, index) => ({ row, index }))
+   .sort((a, b) => {
+    const ra = rank(a.row);
+    const rb = rank(b.row);
+    if (ra !== rb) return ra - rb;
+    if (ra === 1) {
+     const pa = this.getWhiteUbPassIndex(a.row.colorName);
+     const pb = this.getWhiteUbPassIndex(b.row.colorName);
+     if (pa !== pb) return pa - pb;
+    }
+    return a.index - b.index;
+   })
+   .map((x) => x.row);
+ }
+
+ private getWhiteUbPassIndex(colorName: string): number {
+  if (!colorName) return 999;
+  const lower = String(colorName).trim().toLowerCase();
+  if (lower === 'white ub') return 1;
+  const match = lower.match(/^white ub\s+(\d+)$/);
+  return match ? parseInt(match[1], 10) : 999;
  }
 
  isWhiteUB(colorName: string): boolean {
   if (!colorName) return false;
   const lowerName = colorName.toLowerCase();
   return lowerName.includes('white ub') || lowerName.includes('whiteub');
+ }
+
+ private getSwatchHexByName(name: string): string | undefined {
+  const key = (name || '').trim().toLowerCase();
+  if (!key) {
+   return undefined;
+  }
+  const swatch = this.graphicSwatches.find(
+   (s: any) => (s?.name || '').trim().toLowerCase() === key
+  );
+  const hex = swatch?.hex;
+  return hex && String(hex).trim() !== '' ? String(hex).trim() : undefined;
+ }
+
+ isBlocker(colorName: string): boolean {
+  if (!colorName) return false;
+  const t = String(colorName).trim().toLowerCase();
+  return t === 'blocker' || /^blocker\s+\d+$/.test(t);
+ }
+
+ isUnderbaseRow(row: ColorRow): boolean {
+  return this.isBlocker(row.colorName) || this.isWhiteUB(row.colorName);
+ }
+
+ /** True on the last underbase row when the next row is an ink color. */
+ isUnderbaseInkDivider(index: number): boolean {
+  const rows = this.colorRows;
+  if (index < 0 || index >= rows.length - 1) {
+   return false;
+  }
+  return this.isUnderbaseRow(rows[index]) && !this.isUnderbaseRow(rows[index + 1]);
+ }
+
+ /** Illustrator SEPARATED_ART sublayer name (XMP swatchName when it differs from formal colorName). */
+ hostLayerName(row: ColorRow): string {
+  const s = row.swatchName && String(row.swatchName).trim();
+  return (s || row.colorName || '').trim();
+ }
+
+ /**
+  * Names to try when deleting SEPARATED_ART sublayer / swatch (exact match only in host).
+  * Table label first (e.g. second hit "LS 186 2"), then document swatch name if different — never fuzzy-map to another ink.
+  */
+ private inkDeletionTryNames(row: ColorRow): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const push = (raw: string) => {
+   const t = (raw || '').trim();
+   if (!t) return;
+   const k = t.toLowerCase();
+   if (seen.has(k)) return;
+   seen.add(k);
+   out.push(t);
+  };
+  push(row.colorName || '');
+  push(this.hostLayerName(row));
+  return out;
+ }
+
+private getProfileColorMesh(profileInfo?: any): string {
+ const profileValue =
+  profileInfo && profileInfo.colorMesh != null
+   ? profileInfo.colorMesh
+   : profileInfo && profileInfo['Color Mesh'] != null
+    ? profileInfo['Color Mesh']
+    : '';
+ if (profileValue != null && String(profileValue).trim() !== '') {
+  return String(profileValue).trim();
+ }
+
+ const meta = this.documentProfileMetadata || {};
+ const value =
+  meta.colorMesh != null
+   ? meta.colorMesh
+   : meta['Color Mesh'] != null
+    ? meta['Color Mesh']
+    : '';
+ return value == null ? '' : String(value).trim();
+}
+
+private getProfileBlockerMesh(profileInfo?: any): string {
+ const profileValue =
+  profileInfo && profileInfo.blockerMesh != null
+   ? profileInfo.blockerMesh
+   : profileInfo && profileInfo['Blocker Mesh'] != null
+    ? profileInfo['Blocker Mesh']
+    : '';
+ if (profileValue != null && String(profileValue).trim() !== '') {
+  return String(profileValue).trim();
+ }
+
+ const meta = this.documentProfileMetadata || {};
+ const value =
+  meta.blockerMesh != null
+   ? meta.blockerMesh
+   : meta['Blocker Mesh'] != null
+    ? meta['Blocker Mesh']
+    : '';
+ return value == null ? '' : String(value).trim();
+}
+
+ private getRequiredWhiteUbCountFromProfile(): number {
+  return this.getProfileUnderbasePassCount();
+ }
+
+ private getProfileUnderbaseMeshes(): string[] {
+  const meta = this.documentProfileMetadata || {};
+  if (Array.isArray(meta.underbaseMeshes)) {
+   return meta.underbaseMeshes.map((m: any) => (m == null ? '' : String(m).trim()));
+  }
+
+  return [
+   meta.ub1Mesh != null ? String(meta.ub1Mesh).trim() : '',
+   meta.ub2Mesh != null ? String(meta.ub2Mesh).trim() : '',
+   meta.ub3Mesh != null ? String(meta.ub3Mesh).trim() : ''
+  ];
+ }
+
+ private buildTableRowsWithRequiredWhiteUb(activeRows: ColorRow[]): ColorRow[] {
+  const whiteRows = activeRows.filter((row) => this.isWhiteUB(row.colorName));
+  if (whiteRows.length === 0) {
+   return activeRows;
+  }
+
+  const requiredWhiteCount = this.getRequiredWhiteUbCountFromProfile();
+  const underbaseMeshes = this.getProfileUnderbaseMeshes();
+  const expandedCount = Math.max(requiredWhiteCount, whiteRows.length);
+
+  const sortedWhiteRows = [...whiteRows].sort(
+   (a, b) => this.getWhiteUbPassIndex(a.colorName) - this.getWhiteUbPassIndex(b.colorName)
+  );
+  const whiteTemplate = sortedWhiteRows[0];
+  const baseWhiteName = (whiteTemplate.colorName || 'White UB').replace(/\s+\d+$/g, '').trim();
+
+  const expandedWhiteRows: ColorRow[] = [];
+  for (let i = 0; i < expandedCount; i++) {
+   const sourceRow = sortedWhiteRows[i] || whiteTemplate;
+   const meshFromProfile = underbaseMeshes[i] || '';
+   const rowColorName = i === 0 ? baseWhiteName : `${baseWhiteName} ${i + 1}`;
+   const hexFromDocument = this.getSwatchHexByName(rowColorName);
+   expandedWhiteRows.push({
+    ...sourceRow,
+    colorName: rowColorName,
+    mesh: meshFromProfile || sourceRow.mesh,
+    layerColor: hexFromDocument || sourceRow.layerColor
+   });
+  }
+
+  const mergedRows: ColorRow[] = [];
+  let hasInsertedWhiteRows = false;
+  for (const row of activeRows) {
+   if (this.isWhiteUB(row.colorName)) {
+    if (!hasInsertedWhiteRows) {
+     mergedRows.push(...expandedWhiteRows);
+     hasInsertedWhiteRows = true;
+    }
+    continue;
+   }
+   mergedRows.push(row);
+  }
+
+  return hasInsertedWhiteRows ? mergedRows : [...activeRows, ...expandedWhiteRows];
  }
 
  handleGraphicMenuClick(item: string): void {
@@ -746,9 +1102,20 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  }
 
  handleExportProcess(): void {
-  this.ngZone.run(() => {
-   this.isExportModalOpen = true;
-   this.cdr.detectChanges();
+  this.controller.checkPostscriptReadiness({ requireDocument: true }).then((result: any) => {
+   if (result?.success) {
+    this.exportPostscriptReady = !!result.ready;
+    this.exportPostscriptIssues = Array.isArray(result.issues) ? result.issues : [];
+   }
+   this.ngZone.run(() => {
+    this.isExportModalOpen = true;
+    this.cdr.detectChanges();
+   });
+  }).catch(() => {
+   this.ngZone.run(() => {
+    this.isExportModalOpen = true;
+    this.cdr.detectChanges();
+   });
   });
  }
 
@@ -786,79 +1153,47 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
    this.checkExportCompletion(exportOptions, exportResults, exportErrors);
   }
 
-  // Export Postscript
+  const postscriptDelay = exportOptions.exportPrintGuide ? 500 : 0;
+
+  // Postscript (.ps at postscriptFilePath) + Separations Preview PDF (Distiller → separationPreviewFilePath)
   if (exportOptions.exportPostscript) {
    const postscriptInks = this.getAvailableColors();
-   setTimeout(
-    () => {
-     this.controller
-      .exportPostscript(postscriptInks)
-      .then((result) => {
-       if (result && result.success) {
-        exportResults.push('PostScript');
+   setTimeout(() => {
+    this.controller
+     .exportPostscript(postscriptInks)
+     .then(async (psResult) => {
+      const label = 'Postscript and Seps Preview';
+      if (!psResult?.success || !psResult?.filePath) {
+       exportErrors.push(label + ': ' + (psResult?.error || 'PostScript export failed'));
+       this.checkExportCompletion(exportOptions, exportResults, exportErrors);
+       return;
+      }
+
+      try {
+       const distillResult = await this.controller.distillSeparationsPreviewPDF(psResult.filePath);
+       if (distillResult && distillResult.success) {
+        exportResults.push(label);
        } else {
-        exportErrors.push('PostScript: ' + (result?.error || 'Failed'));
+        exportErrors.push(label + ': ' + (distillResult?.error || 'Distiller failed'));
        }
-       return this.checkExportCompletion(exportOptions, exportResults, exportErrors);
-      })
-      .catch((err) => {
-       exportErrors.push('PostScript: ' + (err.message || err.reason || 'Unknown error'));
-       return this.checkExportCompletion(exportOptions, exportResults, exportErrors);
-      });
-    },
-    exportOptions.exportPrintGuide ? 500 : 0
-   );
+      } catch (err: any) {
+       exportErrors.push(label + ': ' + (err?.message || err?.reason || 'Unknown error'));
+      }
+
+      this.checkExportCompletion(exportOptions, exportResults, exportErrors);
+     })
+     .catch((err) => {
+      exportErrors.push(
+       'Postscript and Seps Preview: ' + (err.message || err.reason || 'Unknown error')
+      );
+      this.checkExportCompletion(exportOptions, exportResults, exportErrors);
+     });
+   }, postscriptDelay);
 
    this.ngZone.run(() => {
     this.isExportModalOpen = false;
     this.cdr.detectChanges();
    });
-  }
-
-  // Export Separations Preview PDF (requires PostScript to be exported first)
-  if (exportOptions.exportSeparationsPreview) {
-   setTimeout(
-    () => {
-     if (exportOptions.exportPostscript) {
-      setTimeout(() => {
-       this.controller
-        .exportSeparationsPreviewPDF()
-        .then((result) => {
-         if (result && result.success) {
-          exportResults.push('Separations Preview PDF');
-         } else {
-          exportErrors.push('Separations Preview PDF: ' + (result?.error || 'Failed'));
-         }
-         this.checkExportCompletion(exportOptions, exportResults, exportErrors);
-        })
-        .catch((err) => {
-         exportErrors.push(
-          'Separations Preview PDF: ' + (err.message || err.reason || 'Unknown error')
-         );
-         this.checkExportCompletion(exportOptions, exportResults, exportErrors);
-        });
-      }, 500);
-     } else {
-      this.controller
-       .exportSeparationsPreviewPDF()
-       .then((result) => {
-        if (result && result.success) {
-         exportResults.push('Separations Preview PDF');
-        } else {
-         exportErrors.push('Separations Preview PDF: ' + (result?.error || 'Failed'));
-        }
-        this.checkExportCompletion(exportOptions, exportResults, exportErrors);
-       })
-       .catch((err) => {
-        exportErrors.push(
-         'Separations Preview PDF: ' + (err.message || err.reason || 'Unknown error')
-        );
-        this.checkExportCompletion(exportOptions, exportResults, exportErrors);
-       });
-     }
-    },
-    exportOptions.exportPrintGuide ? 1000 : 0
-   );
   }
  }
 
@@ -868,9 +1203,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   exportErrors: string[]
  ): void {
   const totalExports =
-   (exportOptions.exportPrintGuide ? 1 : 0) +
-   (exportOptions.exportPostscript ? 1 : 0) +
-   (exportOptions.exportSeparationsPreview ? 1 : 0);
+   (exportOptions.exportPrintGuide ? 1 : 0) + (exportOptions.exportPostscript ? 1 : 0);
 
   if (exportResults.length + exportErrors.length >= totalExports) {
    if (exportErrors.length > 0 && exportResults.length === 0) {
@@ -889,6 +1222,233 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 
  handleAddUnderbase(): void {
   this.handleAddCompoundPlate();
+ }
+
+ handleUnderbaseMenuClick(item: string): void {
+  if (item === 'Generate Underbase from Existing Inks') {
+   this.handleGenerateUnderbaseFromExistingInks();
+  } else if (item === 'Delete UB, choke and blocker plates') {
+   this.handleDeleteUbChokeBlockerPlates();
+  }
+ }
+
+ handleGenerateUnderbaseFromExistingInks(): void {
+  if (this.isRunningInBrowser) return;
+  this.showRegenerateUnderbaseConfirm = true;
+  this.cdr.detectChanges();
+ }
+
+ cancelGenerateUnderbaseFromExistingInks(): void {
+  this.showRegenerateUnderbaseConfirm = false;
+  this.cdr.detectChanges();
+ }
+
+ confirmGenerateUnderbaseFromExistingInks(ev?: void | Record<string, boolean>): void {
+  this.showRegenerateUnderbaseConfirm = false;
+  this.cdr.detectChanges();
+
+  const evRec = ev && typeof ev === 'object' ? (ev as Record<string, boolean>) : null;
+  const cleanup = evRec
+   ? {
+     deleteUnpaintedPaths: !!evRec['deleteUnpaintedPaths'],
+     deleteLeftoverPaths: !!evRec['deleteLeftoverPaths']
+    }
+   : { deleteUnpaintedPaths: true, deleteLeftoverPaths: true };
+
+  this.controller
+   .regenerateUnderbaseFromExistingInks?.(cleanup)
+   ?.then((res) => {
+    if (res?.success) {
+     this.checkIfSeparatedDocument();
+    } else if (res?.error) {
+     alert(res.error);
+    }
+   })
+   ?.catch((err) => {
+    alert(err?.message || String(err));
+   });
+ }
+
+ handleDeleteUbChokeBlockerPlates(): void {
+  if (this.isRunningInBrowser) return;
+  this.showDeleteUbChokeBlockerConfirm = true;
+  this.cdr.detectChanges();
+ }
+
+ cancelDeleteUbChokeBlockerPlates(): void {
+  this.showDeleteUbChokeBlockerConfirm = false;
+  this.cdr.detectChanges();
+ }
+
+ confirmDeleteUbChokeBlockerPlates(): void {
+  this.showDeleteUbChokeBlockerConfirm = false;
+  this.cdr.detectChanges();
+  this.controller.deleteUbChokeBlockerArtInSeparationDoc?.()
+   ?.then((res) => {
+    if (res?.success) {
+     this.checkIfSeparatedDocument();
+    } else if (res?.error) {
+     alert(res.error);
+    }
+   })
+   ?.catch((err) => {
+    alert(err?.message || String(err));
+   });
+ }
+
+ handleAddSelectionToSeparation(): void {
+  this.controller
+   .inspectSelectionForSeparationInk()
+   .then((result) => {
+    this.ngZone.run(() => {
+     if (!result?.success) {
+      this.showAddInkAlert(result?.message || 'Unable to inspect selection');
+      return;
+     }
+
+     if (!result.canAdd) {
+      if (result.reason === 'mixed-spot-fill' || result.reason === 'no-spot-fill') {
+       this.showAddInkAlert('Select objects with same fill spot color to add to separation');
+       return;
+      }
+      if (result.reason === 'no-selection') {
+       this.showAddInkAlert('Select at least one object first');
+       return;
+      }
+      if (result.reason === 'already-exists') {
+       this.showAddInkAlert(result.message || 'Ink already exists in separation');
+       return;
+      }
+      this.showAddInkAlert(result.message || 'Cannot add selection to separation');
+      return;
+     }
+
+     this.selectedInkForAdd = result.swatchName || null;
+     if (!this.selectedInkForAdd) {
+      this.showAddInkAlert('Unable to determine fill swatch from selection');
+      return;
+     }
+     this.isAddSelectionInkConfirmOpen = true;
+     this.cdr.detectChanges();
+    });
+   })
+   .catch((err) => {
+    console.error('[SEPARATION] Failed to inspect selection for adding ink:', err);
+    this.showAddInkAlert('Failed to inspect selection');
+   });
+ }
+
+ handleCancelAddSelectionInk(): void {
+  this.isAddSelectionInkConfirmOpen = false;
+  this.selectedInkForAdd = null;
+  this.cdr.detectChanges();
+ }
+
+ handleConfirmAddSelectionInk(): void {
+  const inkName = (this.selectedInkForAdd || '').trim();
+  if (!inkName) {
+   this.handleCancelAddSelectionInk();
+   return;
+  }
+
+  // Close confirm modal immediately on user action.
+  this.isAddSelectionInkConfirmOpen = false;
+  this.cdr.detectChanges();
+
+  this.controller
+   .addSelectionToSeparationInk(inkName)
+   .then((result) => {
+    this.ngZone.run(() => {
+     if (!result?.success) {
+      this.selectedInkForAdd = null;
+      this.showAddInkAlert(result?.message || 'Failed to add ink to separation');
+      return;
+     }
+
+     this.addInkRowToPanel(inkName, result?.hex || null).finally(() => {
+      this.updateSepTableInDocument();
+      this.hasUIChanges = false;
+      this.selectedInkForAdd = null;
+      this.cdr.detectChanges();
+     });
+    });
+   })
+   .catch((err) => {
+    console.error('[SEPARATION] Failed to add selection to separation:', err);
+    this.selectedInkForAdd = null;
+    this.showAddInkAlert('Failed to add ink to separation');
+   });
+ }
+
+ private showAddInkAlert(message: string): void {
+  const finalMessage = (message || '').trim() || 'Something went wrong';
+  this.controller.showHostAlert('Add Ink to Separation', finalMessage).catch((err) => {
+   console.error('[SEPARATION] Failed to show host alert dialog:', err);
+  });
+ }
+
+ private addInkRowToPanel(inkName: string, swatchHexFromHost?: string | null): Promise<void> {
+  const normalizedInkName = inkName.trim().toLowerCase();
+  const alreadyInPanel = this.colorRows.some(
+   (row) => !row.removed && (row.colorName || '').trim().toLowerCase() === normalizedInkName
+  );
+  if (alreadyInPanel) {
+   return Promise.resolve();
+  }
+
+  const swatchFromGraphic = this.graphicSwatches.find(
+   (sw: any) => (sw?.name || '').trim().toLowerCase() === normalizedInkName
+  );
+  const colorHex =
+   (swatchHexFromHost && String(swatchHexFromHost).trim()) ||
+   (swatchFromGraphic && swatchFromGraphic.hex) ||
+   this.getRandomColor();
+  const profileName = this.documentProfileMetadata ? this.documentProfileMetadata.profileName : null;
+  const profileCode = this.documentProfileMetadata ? this.documentProfileMetadata.profileCode : null;
+
+  return this.controller
+   .getInkInformationBatch([inkName], profileName, profileCode)
+   .then((inkResult) => {
+    this.ngZone.run(() => {
+     const inkInfo =
+      inkResult && inkResult.success && Array.isArray(inkResult.inkInfoList)
+       ? inkResult.inkInfoList[0]
+       : null;
+     const rowFromInkData = this.createColorRowFromSwatch(
+      { name: inkName, hex: colorHex },
+      inkInfo || { mesh: '110', twoHits: false, found: false },
+      null,
+      this.nextId
+     );
+     const addInkRow = {
+      ...rowFromInkData,
+      flashEnabled: false,
+      wbEnabled: false
+     };
+     this.colorRows = [...this.colorRows, addInkRow];
+     this.nextId++;
+     this.cdr.detectChanges();
+    });
+   })
+   .catch((_err) => {
+    this.ngZone.run(() => {
+     const fallbackRow: ColorRow = {
+      id: this.nextId,
+      colorName: inkName,
+      mesh: '110',
+      micron: 'NA',
+      type: 'separation',
+      layerColor: colorHex,
+      flashEnabled: false,
+      coolEnabled: false,
+      wbEnabled: false,
+      removed: false
+     };
+     this.colorRows = [...this.colorRows, fallbackRow];
+     this.nextId++;
+     this.cdr.detectChanges();
+    });
+   });
  }
 
  handleRevert(): void {
@@ -1009,30 +1569,57 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   this.cdr.detectChanges();
  }
 
+ getColorRowMenuItems(row: ColorRow): string[] {
+  return ['Edit', `Add second hit of ${row.colorName}`, 'Remove color'];
+ }
+
  handleColorRowMenuClick(item: string, rowId: number): void {
   console.log('[SEPARATION] Color row menu clicked:', item, 'for row:', rowId);
 
   if (item === 'Remove color') {
-   this.handleRemoveColor(rowId);
+   this.openRemoveColorDialog(rowId);
   } else if (item === 'Edit') {
    this.handleEditSeparation(rowId);
-  } else if (item === 'Add second hit...') {
+  } else if (item.startsWith('Add second hit')) {
    console.log('[HIT THE DROPDOWN]', rowId);
-   this.handleAddSecondHit(rowId);
+   const menuColorName = this.extractSecondHitColorName(item);
+   this.handleAddSecondHit(rowId, menuColorName);
   }
  }
 
- handleAddSecondHit(rowId: number): void {
-  const originalRow = this.colorRows.find((row) => row.id === rowId);
+ private extractSecondHitColorName(menuItem: string): string | null {
+  const prefix = 'Add second hit of ';
+  if (!menuItem || menuItem.indexOf(prefix) !== 0) {
+   return null;
+  }
+  const extracted = menuItem.substring(prefix.length).trim();
+  return extracted || null;
+ }
+
+ handleAddSecondHit(rowId: number, colorNameFromMenu?: string | null): void {
+  let originalRow: ColorRow | undefined;
+  if (colorNameFromMenu) {
+   const normalizedMenuName = colorNameFromMenu.trim().toLowerCase();
+   originalRow = this.colorRows.find(
+    (row) =>
+     !row.removed &&
+     ((row.colorName || '').trim().toLowerCase() === normalizedMenuName ||
+      this.hostLayerName(row).toLowerCase() === normalizedMenuName)
+   );
+  }
+  if (!originalRow) {
+   originalRow = this.colorRows.find((row) => row.id === rowId);
+  }
   if (!originalRow) return;
 
   const duplicateName = this.getUniqueSecondHitName(originalRow.colorName);
 
-  const isWhiteUBColor = this.isWhiteUB(originalRow.colorName);
   const duplicateRow: ColorRow = {
    ...originalRow,
    id: this.nextId,
-   colorName: this.getUniqueSecondHitName(originalRow.colorName),
+   colorName: duplicateName,
+   /** Second hit is its own plate; do not inherit parent's XMP swatch name (would target wrong layer/swatch on remove). */
+   swatchName: undefined,
    removed: false
   };
 
@@ -1049,9 +1636,19 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 
   //   🔥 Call Illustrator script (fire-and-forget, UI-safe)
   this.controller
-   .generateUnderbaseLayer(originalRow.colorName, duplicateName)
+   .generateUnderbaseLayer(this.hostLayerName(originalRow), duplicateName)
    .then((res: string) => {
-    console.log('[SEPARATION] Second hit underbase created:', res);
+    console.log('[SEPARATION] Second hit request:', {
+     sourceColor: this.hostLayerName(originalRow!),
+     duplicateColor: duplicateName,
+     rowId: rowId
+    });
+    try {
+     const parsed = res ? JSON.parse(res) : null;
+     console.log('[SEPARATION] Second hit underbase response:', parsed || res);
+    } catch (_e) {
+     console.log('[SEPARATION] Second hit underbase created:', res);
+    }
    })
    .catch((err: any) => {
     console.error('[SEPARATION] Failed to create second hit underbase', err);
@@ -1062,15 +1659,24 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
    });
  }
 
+ /**
+  * Second-hit names: append " 2", " 3", … to the full ink name.
+  * Exception: a single trailing digit after whitespace (e.g. "White UB 2") is treated as an
+  * existing hit index and incremented ("White UB 3"). Multi-digit suffixes like "LS 123" stay
+  * part of the name so the next hit is "LS 123 2", not "LS 124".
+  */
  getUniqueSecondHitName(currentName: string): string {
   const trimmedName = (currentName || '').trim();
-  const match = trimmedName.match(/^(.+?)(?:\s*(\d+))$/);
+  const match = trimmedName.match(/^(.+)\s+(\d+)$/);
   let baseName = trimmedName;
   let nextNumber = 2;
 
   if (match && match[2]) {
-   baseName = match[1].trim();
-   nextNumber = parseInt(match[2], 10) + 1;
+   const trailingDigits = match[2];
+   if (trailingDigits.length === 1) {
+    baseName = match[1].trim();
+    nextNumber = parseInt(trailingDigits, 10) + 1;
+   }
   }
 
   const existingNames = new Set(
@@ -1104,12 +1710,84 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   }
  }
 
- handleRemoveColor(rowId: number): void {
-  const newColorRows = this.colorRows.map((row) => {
-   if (row.id === rowId) {
-    return { ...row, removed: true };
+ private openRemoveColorDialog(rowId: number): void {
+  const row = this.colorRows.find((r) => r.id === rowId);
+  if (!row || row.removed) {
+   return;
+  }
+  this.removeColorTargetRowId = rowId;
+  this.removeColorDialogInkLabel = (row.colorName || '').trim() || this.hostLayerName(row);
+  this.isRemoveColorDialogOpen = true;
+  this.cdr.detectChanges();
+ }
+
+ handleCancelRemoveColor(): void {
+  this.isRemoveColorDialogOpen = false;
+  this.removeColorTargetRowId = null;
+  this.removeColorDialogInkLabel = '';
+  this.cdr.detectChanges();
+ }
+
+ handleConfirmRemoveColor(payload?: void | Record<string, boolean>): void {
+  const rowId = this.removeColorTargetRowId;
+  if (rowId == null) {
+   this.handleCancelRemoveColor();
+   return;
+  }
+  const row = this.colorRows.find((r) => r.id === rowId);
+  this.isRemoveColorDialogOpen = false;
+  this.removeColorTargetRowId = null;
+  this.removeColorDialogInkLabel = '';
+  this.cdr.detectChanges();
+
+  const flags =
+   payload && typeof payload === 'object'
+    ? (payload as Record<string, boolean>)
+    : ({} as Record<string, boolean>);
+  const removeSublayer = !!flags['removeSublayer'];
+  const removeSwatch = !!flags['removeSwatch'];
+  const inkDeletionTryNames = row ? this.inkDeletionTryNames(row) : [];
+
+  const applyPanelRemove = (): void => {
+   this.applyRemoveColorToPanel(rowId);
+   this.updateSepTableInDocument();
+   this.hasUIChanges = false;
+   this.cdr.detectChanges();
+  };
+
+  if (!this.isRunningInBrowser && inkDeletionTryNames.length > 0 && (removeSublayer || removeSwatch)) {
+   this.controller
+    .removeSeparationInkArtifacts(inkDeletionTryNames, removeSublayer, removeSwatch)
+    .then((result) => {
+     this.ngZone.run(() => {
+      if (result && result.success === false && result.error) {
+       console.warn('[SEPARATION] removeSeparationInkArtifacts:', result.error);
+      } else {
+       if (removeSublayer && result && !result.removedLayer && result.layerMessage) {
+        console.warn('[SEPARATION] sublayer:', result.layerMessage);
+       }
+       if (removeSwatch && result && !result.removedSwatch && result.swatchMessage) {
+        console.warn('[SEPARATION] swatch:', result.swatchMessage);
+       }
+      }
+      applyPanelRemove();
+     });
+    })
+    .catch((err) => {
+     console.error('[SEPARATION] removeSeparationInkArtifacts failed', err);
+     this.ngZone.run(() => applyPanelRemove());
+    });
+  } else {
+   applyPanelRemove();
+  }
+ }
+
+ private applyRemoveColorToPanel(rowId: number): void {
+  const newColorRows = this.colorRows.map((r) => {
+   if (r.id === rowId) {
+    return { ...r, removed: true };
    }
-   return row;
+   return r;
   });
 
   const sortedRows = newColorRows.sort((a, b) => {
@@ -1191,6 +1869,32 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
    'to',
    event.currentIndex
   );
+
+  // In CEP, always ask Illustrator to reorder — do not gate on isSeparatedDoc (it can be false while
+  // the table still shows rows). ExtendScript returns a clear error if SEPARATED_ART is missing.
+  if (!this.isRunningInBrowser) {
+   const orderedNames = this.colorRows
+    .filter((row) => !row.removed)
+    .map((row) => this.hostLayerName(row));
+   this.controller
+    .reorderSeparatedArtLayers(orderedNames)
+    .then((result) => {
+     if (result && result.success) {
+      console.log('[SEPARATION] SEPARATED_ART layers reordered in document:', {
+       movedCount: result.movedCount,
+       isSeparatedDoc: this.isSeparatedDoc
+      });
+     } else {
+      console.error(
+       '[SEPARATION] Failed to reorder SEPARATED_ART sublayers:',
+       result && result.error
+      );
+     }
+    })
+    .catch((err) => {
+     console.error('[SEPARATION] reorderSeparatedArtLayers error:', err);
+    });
+  }
  }
 
  getSequenceNumber(index: number): string {
@@ -1202,7 +1906,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  getAvailableColors(): string[] {
   return this.colorRows
    .filter((row) => row.type === 'separation' && !/ub/i.test(row.colorName))
-   .map((row) => row.colorName);
+   .map((row) => this.hostLayerName(row));
  }
 
  isCompoundPlate(row: ColorRow): boolean {
@@ -1210,7 +1914,14 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  }
 
  getSeparationColor(row: ColorRow): string {
-  return row.layerColor || '#FF6B6B';
+  if (row.layerColor) {
+   return row.layerColor;
+  }
+  const fromDocument = this.getSwatchHexByName(row.colorName);
+  if (fromDocument) {
+   return fromDocument;
+  }
+  return '#FF6B6B';
  }
 
  // Mesh editing functionality
@@ -1365,6 +2076,127 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   return this.selectedMeshRows.has(rowId);
  }
 
+ /** True when the name ends with a single-digit hit index (e.g. "PANTONE 123 C 2", "White UB 3"). */
+ private isInkHitPlateName(name: string): boolean {
+  const trimmed = (name || '').trim();
+  const match = trimmed.match(/^(.+)\s+(\d+)$/);
+  return !!(match && match[2] && match[2].length === 1);
+ }
+
+ /** True when a "baseName 2" plate already exists in the document swatch list. */
+ private secondHitLayerExists(baseName: string, swatches: any[]): boolean {
+  const secondHitName = `${(baseName || '').trim()} 2`;
+  return swatches.some(
+   (s) => (s.name || '').trim().toLowerCase() === secondHitName.toLowerCase()
+  );
+ }
+
+ /** Merge mesh/flash/cool/wb from saved LEAPSeparationColorsData into layer-based rows. */
+ private mergeXmpMetadataIntoColorRows(rows: ColorRow[]): ColorRow[] {
+  const xmpData = this.xmpColorDataForMerge;
+  if (!xmpData || xmpData.length === 0) {
+   return rows;
+  }
+
+  const lookup = new Map<string, any>();
+  for (const entry of xmpData) {
+   if (!entry) continue;
+   const names = [entry.colorName, entry.swatchName].filter(
+    (n) => n != null && String(n).trim() !== ''
+   );
+   for (const n of names) {
+    lookup.set(String(n).trim().toLowerCase(), entry);
+   }
+  }
+
+  return rows.map((row) => {
+   const hostKey = this.hostLayerName(row).trim().toLowerCase();
+   const colorKey = (row.colorName || '').trim().toLowerCase();
+   const xmp = lookup.get(hostKey) || lookup.get(colorKey);
+   if (!xmp) {
+    return row;
+   }
+   const sw =
+    xmp.swatchName && String(xmp.swatchName).trim() !== '' &&
+    String(xmp.swatchName).trim().toLowerCase() !== colorKey
+     ? String(xmp.swatchName).trim()
+     : row.swatchName;
+   return {
+    ...row,
+    mesh: xmp.mesh != null ? String(xmp.mesh) : row.mesh,
+    micron: xmp.micron != null ? String(xmp.micron) : row.micron,
+    flashEnabled: xmp.flash !== undefined ? !!xmp.flash : row.flashEnabled,
+    coolEnabled: xmp.cool !== undefined ? !!xmp.cool : row.coolEnabled,
+    wbEnabled: xmp.wb !== undefined ? !!xmp.wb : row.wbEnabled,
+    layerColor: xmp.hex || row.layerColor,
+    swatchName: sw,
+    type: xmp.type === 'compound' ? 'compound' : row.type
+   };
+  });
+ }
+
+ /** Ensure ink "… 2" layers from the document appear even if earlier steps skipped them. */
+ private appendMissingSecondHitRowsFromLayers(
+  rows: ColorRow[],
+  allSwatches: any[],
+  startId: number
+ ): { rows: ColorRow[]; nextId: number } {
+  let nextId = startId;
+  const existing = new Set(rows.map((r) => (r.colorName || '').trim().toLowerCase()));
+  const merged = [...rows];
+
+  for (const swatch of allSwatches) {
+   const layerName = (swatch?.name || '').trim();
+   if (!layerName || !this.isInkHitPlateName(layerName)) {
+    continue;
+   }
+   const key = layerName.toLowerCase();
+   if (existing.has(key)) {
+    continue;
+   }
+
+   const baseName = layerName.replace(/\s+\d+$/, '').trim();
+   const baseRow = rows.find(
+    (r) => (r.colorName || '').trim().toLowerCase() === baseName.toLowerCase()
+   );
+   merged.push({
+    id: nextId++,
+    colorName: layerName,
+    mesh: baseRow?.mesh || '110',
+    micron: baseRow?.micron || 'NA',
+    type: 'separation',
+    layerColor: swatch.hex || baseRow?.layerColor || this.getRandomColor(),
+    flashEnabled: baseRow?.flashEnabled ?? true,
+    coolEnabled: baseRow?.coolEnabled ?? false,
+    wbEnabled: baseRow?.wbEnabled ?? true,
+    removed: false
+   });
+   existing.add(key);
+  }
+
+  return { rows: merged, nextId };
+ }
+
+ private resolveColorDisplayName(swatchName: string, format: string): string {
+  const trimmed = swatchName.trim();
+  if (!/^PANTONE\s/i.test(trimmed)) {
+   return swatchName;
+  }
+
+  let pantoneBase = trimmed;
+  let hitSuffix = '';
+  const hitMatch = trimmed.match(/^(.+?)\s+(\d+)$/);
+  if (hitMatch && hitMatch[2] && hitMatch[2].length === 1) {
+   pantoneBase = hitMatch[1].trim();
+   hitSuffix = ` ${hitMatch[2]}`;
+  }
+
+  const withoutPrefix = pantoneBase.replace(/^PANTONE\s+/i, '');
+  const tokenMatch = withoutPrefix.match(/^(.*?)\s+[A-Z]{1,3}P?$/);
+  const token = tokenMatch ? tokenMatch[1].trim() : withoutPrefix.trim();
+  return format.replace(/XXX/g, token) + hitSuffix;
+ }
+
  updateSepTableInDocument(): void {
   const activeRows = this.colorRows.filter((row) => !row.removed);
 
@@ -1373,17 +2205,44 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
    return;
   }
 
-  const separationData = activeRows.map((row, index) => ({
-   seq: index + 1,
-   colorName: row.colorName,
-   mesh: row.mesh,
-   micron: row.micron,
-   flash: row.flashEnabled,
-   cool: row.coolEnabled,
-   wb: row.wbEnabled,
-   hex: row.layerColor || null,
-   type: row.type || 'separation'
-  }));
+  const formatEnabled = !!(this.documentProfileMetadata?.formatInkNameLabel);
+  const colorNameFormat: string =
+   this.documentProfileMetadata?.colorNameLabelFormat &&
+   String(this.documentProfileMetadata.colorNameLabelFormat).trim() !== ''
+    ? String(this.documentProfileMetadata.colorNameLabelFormat)
+    : 'PANTONE XXX C';
+
+  const tableRows = this.buildTableRowsWithRequiredWhiteUb(activeRows);
+  const separationData = tableRows.map((row, index) => {
+   const host = this.hostLayerName(row).trim();
+   let colorNameOut = row.colorName;
+   let swatchNameOut = host;
+   let renameInkFrom: string | undefined = undefined;
+   if (formatEnabled) {
+    colorNameOut = this.resolveColorDisplayName(row.colorName, colorNameFormat);
+    swatchNameOut = String(colorNameOut || '').trim();
+    if (
+     host &&
+     swatchNameOut &&
+     host.toLowerCase() !== swatchNameOut.toLowerCase()
+    ) {
+     renameInkFrom = host;
+    }
+   }
+   return {
+    seq: index + 1,
+    colorName: colorNameOut,
+    swatchName: swatchNameOut,
+    renameInkFrom,
+    mesh: row.mesh,
+    micron: row.micron,
+    flash: row.flashEnabled,
+    cool: row.coolEnabled,
+    wb: row.wbEnabled,
+    hex: row.layerColor || null,
+    type: row.type || 'separation'
+   };
+  });
 
   console.log('[SEPARATION] Updating SEP TABLE with', separationData.length, 'rows');
 
@@ -1392,6 +2251,9 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
    .then((result) => {
     if (result.success) {
      console.log('[SEPARATION] SEP TABLE updated successfully:', result);
+     if (result.inkRenamesApplied > 0) {
+      this.checkIfSeparatedDocument();
+     }
     } else {
      console.error('[SEPARATION] Failed to update SEP TABLE:', result.error);
     }

@@ -1,5 +1,6 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, Input, OnChanges, OnInit, SimpleChanges } from '@angular/core';
 import { csInterface } from '../../../libs/helper';
+import { ExportSettings } from '../../components/export-settings-panel/export-settings-panel.component';
 import { ControllerService } from '../../services/controller.service';
 
 interface Profile {
@@ -7,8 +8,21 @@ interface Profile {
  name: string;
  code: string;
  colorMesh: string;
+ underbaseSwatch?: string;
  underbaseMeshes: string[];
+ underbaseEnabled: boolean[];
+ underbaseKnockoutBlack?: boolean[];
+ /** Per-UB swatch when K/O is on (optional; persisted on profile JSON). */
+ underbaseKnockoutSwatches?: string[];
+ blocker?: boolean;
+ blockerMesh?: string;
+ blockerKnockoutBlack?: boolean;
+ blockerKnockoutSwatch?: string;
+ blackInksKnockoutDisplay?: string;
  waterbaseInk: boolean;
+ overprintAllInks?: boolean;
+ formatInkNameLabel?: boolean;
+ colorNameLabelFormat?: string;
  distress?: string;
  _jsonData?: any;
 }
@@ -18,16 +32,32 @@ interface Profile {
  templateUrl: './settings.component.html',
  styleUrls: ['./settings.component.css']
 })
-export class SettingsComponent implements OnInit {
+export class SettingsComponent implements OnInit, OnChanges {
+ @Input() selectedSectionFromMenu: 'Separation Profiles' | 'General Settings' | 'Export Settings' = 'Separation Profiles';
  profiles: Profile[] = [];
  isLoading = true;
  editModalOpen = false;
  selectedProfile: Profile | null = null;
+ /** Pre-filled profile when opening the modal from Duplicate (+); not persisted until Save. */
+ duplicateProfileDraft: Profile | null = null;
  defaultMesh = '110';
  addUnderbase = true;
  artistName = '';
  artistInitials = '';
+ ppdName = 'IBlock v2';
+ chokeStrokeColorSwatch = '';
+ koDarkColorNames = 'Black, PANTONE PROCESS BLACK C';
+ meshValues = '';
+ sepsTemplateFileName = 'SEP-GRID-TEMPLATE.ai';
+ sepsTemplateFiles: string[] = [];
  selectedSection = 'Separation Profiles';
+ exportSettings: ExportSettings = {
+  printGuideFilePath: '',
+  separationPreviewFilePath: '',
+  postscriptFilePath: ''
+ };
+ exportExcelColumns: string[] = [];
+ exportGraphicPositions: string[] = [];
 
  // 🔑 Environment config
  environments = {
@@ -44,10 +74,26 @@ export class SettingsComponent implements OnInit {
 
  constructor(private controller: ControllerService) {}
 
+ get pageTitle(): string {
+  if (this.selectedSection === 'General Settings') return 'General Settings';
+  if (this.selectedSection === 'Export Settings') return 'Export Settings';
+  return 'Manage Profiles';
+ }
+
+ ngOnChanges(changes: SimpleChanges): void {
+  if (changes['selectedSectionFromMenu']?.currentValue) {
+   this.selectedSection = changes['selectedSectionFromMenu'].currentValue;
+  }
+ }
+
  async ngOnInit(): Promise<void> {
+  this.selectedSection = this.selectedSectionFromMenu || 'Separation Profiles';
   this.loadProfiles();
   this.loadLeapServerPath();
   this.loadGeneralSettings();
+  this.loadExportSettings();
+  this.loadExportTokenData();
+  this.loadSepsTemplateFiles();
 
   try {
    const result = await this.controller.getAppVersion();
@@ -93,6 +139,18 @@ export class SettingsComponent implements OnInit {
     this.addUnderbase = result.data.addUnderbase !== undefined ? result.data.addUnderbase : true;
     this.artistName = result.data.artistName != null ? String(result.data.artistName) : '';
     this.artistInitials = result.data.artistInitials != null ? String(result.data.artistInitials) : '';
+    this.ppdName = result.data.ppdName != null ? String(result.data.ppdName) : 'IBlock v2';
+    this.chokeStrokeColorSwatch =
+     result.data.chokeStrokeColorSwatch != null ? String(result.data.chokeStrokeColorSwatch) : '';
+    this.koDarkColorNames =
+     result.data.koDarkColorNames !== undefined && result.data.koDarkColorNames !== null
+      ? String(result.data.koDarkColorNames)
+      : 'Black, PANTONE PROCESS BLACK C';
+    this.meshValues = result.data.meshValues != null ? String(result.data.meshValues) : '';
+    this.sepsTemplateFileName =
+     result.data.sepsTemplateFileName != null && String(result.data.sepsTemplateFileName).trim() !== ''
+      ? String(result.data.sepsTemplateFileName).trim()
+      : 'SEP-GRID-TEMPLATE.ai';
    }
   });
  }
@@ -102,7 +160,12 @@ export class SettingsComponent implements OnInit {
    defaultMesh: this.defaultMesh,
    addUnderbase: this.addUnderbase,
    artistName: this.artistName,
-   artistInitials: this.artistInitials
+   artistInitials: this.artistInitials,
+   ppdName: this.ppdName,
+   chokeStrokeColorSwatch: this.chokeStrokeColorSwatch,
+   koDarkColorNames: this.koDarkColorNames,
+   meshValues: this.meshValues,
+   sepsTemplateFileName: this.sepsTemplateFileName
   };
   this.controller.saveGeneralSettings(settings).then((result) => {
    if (!result.success) {
@@ -111,9 +174,69 @@ export class SettingsComponent implements OnInit {
   });
  }
 
+ loadExportSettings(): void {
+  this.controller.loadExportSettings().then((result) => {
+   if (result.success && result.data) {
+    this.exportSettings = this.normalizeExportSettings(result.data);
+   }
+  });
+ }
+
+ saveExportSettings(): void {
+  this.controller.saveExportSettings(this.exportSettings).then((result) => {
+   if (!result.success) {
+    console.error('Failed to save export settings:', result.error);
+   }
+  });
+ }
+
+ onExportSettingChange(update: { field: keyof ExportSettings; value: string }): void {
+  this.exportSettings = {
+   ...this.exportSettings,
+   [update.field]: update.value
+  };
+  this.saveExportSettings();
+ }
+
+ loadExportTokenData(): void {
+  this.controller
+   .getExportSettingsTokenData()
+   .then((result) => {
+    if (result?.success) {
+     this.exportExcelColumns = Array.isArray(result.excelColumns) ? result.excelColumns : [];
+     this.exportGraphicPositions = Array.isArray(result.graphicPositions) ? result.graphicPositions : [];
+    }
+   })
+   .catch(() => {
+    this.exportExcelColumns = [];
+    this.exportGraphicPositions = [];
+   });
+ }
+
+ get exportProfileCodes(): string[] {
+  const seen = new Set<string>();
+  return (Array.isArray(this.profiles) ? this.profiles : [])
+   .map((profile) => String(profile?.code || '').trim())
+   .filter((code) => {
+    if (!code || seen.has(code)) return false;
+    seen.add(code);
+    return true;
+   });
+ }
+
+ private normalizeExportSettings(settings: any): ExportSettings {
+  return {
+   printGuideFilePath: settings?.printGuideFilePath != null ? String(settings.printGuideFilePath) : '',
+   separationPreviewFilePath:
+    settings?.separationPreviewFilePath != null ? String(settings.separationPreviewFilePath) : '',
+   postscriptFilePath: settings?.postscriptFilePath != null ? String(settings.postscriptFilePath) : ''
+  };
+ }
+
  loadLeapServerPath(): void {
   this.controller.getLeapServerDataPath().then((path) => {
    this.leapServerPath = path;
+   this.loadSepsTemplateFiles();
   });
  }
 
@@ -121,8 +244,26 @@ export class SettingsComponent implements OnInit {
   this.controller.selectAndSaveLeapSettings().then((result) => {
    if (result.success && result.path) {
     this.leapServerPath = result.path;
+    this.loadSepsTemplateFiles();
    } else if (!result.cancelled) {
     // console.error('Error updating LEAP Data path', result.error);
+   }
+  });
+ }
+
+ loadSepsTemplateFiles(): void {
+  this.controller.getSepsTemplateFiles().then((result) => {
+   if (result.success && Array.isArray(result.files)) {
+    this.sepsTemplateFiles = result.files;
+    if (this.sepsTemplateFiles.length > 0) {
+     const hasSavedSelection = this.sepsTemplateFiles.indexOf(this.sepsTemplateFileName) >= 0;
+     if (!hasSavedSelection) {
+      this.sepsTemplateFileName = this.sepsTemplateFiles[0];
+      this.saveGeneralSettings();
+     }
+    }
+   } else {
+    this.sepsTemplateFiles = [];
    }
   });
  }
@@ -159,25 +300,97 @@ export class SettingsComponent implements OnInit {
 
   const profileName = jsonProfile['Profile Name'] || '';
   const distress = jsonProfile['Distress'] || 'N';
+  const toEnabled = (value: any) => {
+   if (value === true || value === 1) return true;
+   if (typeof value === 'string') {
+    const v = value.trim().toUpperCase();
+    return v === 'Y' || v === 'YES' || v === 'TRUE' || v === '1';
+   }
+   return false;
+  };
+  const ubMeshes = [
+   meshToString(jsonProfile['UB 1 Mesh']),
+   meshToString(jsonProfile['UB 2 Mesh']),
+   meshToString(jsonProfile['UB 3 Mesh']),
+   meshToString(jsonProfile['UB 4 Mesh'])
+  ];
+  const savedEnabled = Array.isArray(jsonProfile.underbaseEnabled) ? jsonProfile.underbaseEnabled : null;
+  const savedKnockout = Array.isArray(jsonProfile.underbaseKnockoutBlack)
+   ? jsonProfile.underbaseKnockoutBlack
+   : null;
+  const underbaseEnabled = [
+   true,
+   savedEnabled ? !!savedEnabled[1] : toEnabled(jsonProfile['Underbase 2']) || ubMeshes[1] !== '',
+   savedEnabled ? !!savedEnabled[2] : toEnabled(jsonProfile['Underbase 3']) || ubMeshes[2] !== '',
+   savedEnabled ? !!savedEnabled[3] : toEnabled(jsonProfile['Underbase 4']) || ubMeshes[3] !== ''
+  ];
+  const underbaseKnockoutBlack = [
+   savedKnockout ? !!savedKnockout[0] : false,
+   savedKnockout ? !!savedKnockout[1] : false,
+   savedKnockout ? !!savedKnockout[2] : false,
+   savedKnockout ? !!savedKnockout[3] : false
+  ];
+  const defaultSw = ['White UB', 'White UB', 'White UB', 'White UB'];
+  const savedSwatches = Array.isArray(jsonProfile.underbaseKnockoutSwatches)
+   ? jsonProfile.underbaseKnockoutSwatches
+   : null;
+  const underbaseKnockoutSwatches = [
+   savedSwatches && savedSwatches[0] != null && String(savedSwatches[0]).trim() !== ''
+    ? String(savedSwatches[0])
+    : defaultSw[0],
+   savedSwatches && savedSwatches[1] != null && String(savedSwatches[1]).trim() !== ''
+    ? String(savedSwatches[1])
+    : defaultSw[1],
+   savedSwatches && savedSwatches[2] != null && String(savedSwatches[2]).trim() !== ''
+    ? String(savedSwatches[2])
+    : defaultSw[2],
+   savedSwatches && savedSwatches[3] != null && String(savedSwatches[3]).trim() !== ''
+    ? String(savedSwatches[3])
+    : defaultSw[3]
+  ];
+
+  const jp = jsonProfile as any;
+  const blockerKnockoutSwatchRaw = jp.blockerKnockoutSwatch != null ? String(jp.blockerKnockoutSwatch).trim() : '';
+  const blockerKnockoutSwatch =
+   blockerKnockoutSwatchRaw !== '' ? blockerKnockoutSwatchRaw : defaultSw[0];
+  const underbaseSwatchRaw =
+   jp.underbaseSwatch != null
+    ? String(jp.underbaseSwatch).trim()
+    : jsonProfile['Underbase Swatch'] != null
+     ? String(jsonProfile['Underbase Swatch']).trim()
+     : '';
+  const underbaseSwatch = underbaseSwatchRaw !== '' ? underbaseSwatchRaw : defaultSw[0];
 
   return {
    id: jsonProfile.id || this.generateId(profileName, distress),
    name: profileName,
    code: jsonProfile['Profile Code'] || '',
    colorMesh: meshToString(jsonProfile['Color Mesh']),
-   underbaseMeshes: [
-    meshToString(jsonProfile['UB 1 Mesh']),
-    meshToString(jsonProfile['UB 2 Mesh']),
-    meshToString(jsonProfile['UB 3 Mesh']),
-    meshToString(jsonProfile['UB 4 Mesh'])
-   ],
+   underbaseMeshes: ubMeshes,
+   underbaseEnabled: underbaseEnabled,
+   underbaseKnockoutBlack: underbaseKnockoutBlack,
+   underbaseKnockoutSwatches,
+   underbaseSwatch,
+   blocker: toEnabled(jp.blocker) || toEnabled(jsonProfile.Blocker),
+   blockerMesh:
+    jp.blockerMesh != null
+     ? String(jp.blockerMesh)
+     : (jsonProfile['Blocker Mesh'] != null ? String(jsonProfile['Blocker Mesh']) : ''),
+   blockerKnockoutBlack: !!jp.blockerKnockoutBlack,
+   blockerKnockoutSwatch,
+   blackInksKnockoutDisplay:
+    jsonProfile.blackInksKnockoutDisplay != null ? String(jsonProfile.blackInksKnockoutDisplay) : '',
    waterbaseInk: jsonProfile['WB'] === 'Y' || jsonProfile['WB'] === true,
+   overprintAllInks: jp.overprintAllInks !== undefined ? !!jp.overprintAllInks : true,
+   formatInkNameLabel: !!jp.formatInkNameLabel,
+   colorNameLabelFormat: jp.colorNameLabelFormat != null ? String(jp.colorNameLabelFormat) : '',
    distress: distress,
    _jsonData: jsonProfile
   };
  }
 
  reactToJsonProfile(reactProfile: Profile): any {
+  const rp = reactProfile as any;
   const stringToNumberOrEmpty = (str: string) => {
    if (!str || str.trim() === '' || str === ' ') {
     return '';
@@ -186,21 +399,77 @@ export class SettingsComponent implements OnInit {
    return isNaN(num) ? '' : num;
   };
 
+  const pickUbSwatchForJson = (i: number): string => {
+   const arr = rp.underbaseKnockoutSwatches;
+   if (!arr || !Array.isArray(arr) || i < 0 || i >= arr.length) return 'White UB';
+   const raw = arr[i];
+   if (raw == null) return 'White UB';
+   const t = String(raw).trim();
+   return t !== '' ? t : 'White UB';
+  };
+
   const jsonProfile: any = {
    'Profile Name': reactProfile.name || '',
    'Profile Code': reactProfile.code || '',
    'Color Mesh': stringToNumberOrEmpty(reactProfile.colorMesh),
+   'Underbase Swatch':
+    rp.underbaseSwatch != null && String(rp.underbaseSwatch).trim() !== ''
+     ? String(rp.underbaseSwatch).trim()
+     : 'White UB',
    'UB 1 Mesh': stringToNumberOrEmpty(reactProfile.underbaseMeshes[0]),
    'UB 2 Mesh': stringToNumberOrEmpty(reactProfile.underbaseMeshes[1]),
    'UB 3 Mesh': stringToNumberOrEmpty(reactProfile.underbaseMeshes[2]),
    'UB 4 Mesh': stringToNumberOrEmpty(reactProfile.underbaseMeshes[3]),
+   'Underbase 2': reactProfile.underbaseEnabled && reactProfile.underbaseEnabled[1] ? 'Y' : 'N',
+   'Underbase 3': reactProfile.underbaseEnabled && reactProfile.underbaseEnabled[2] ? 'Y' : 'N',
+   'Underbase 4': reactProfile.underbaseEnabled && reactProfile.underbaseEnabled[3] ? 'Y' : 'N',
+   underbaseEnabled: [
+    true,
+    !!(reactProfile.underbaseEnabled && reactProfile.underbaseEnabled[1]),
+    !!(reactProfile.underbaseEnabled && reactProfile.underbaseEnabled[2]),
+    !!(reactProfile.underbaseEnabled && reactProfile.underbaseEnabled[3])
+   ],
+   underbaseKnockoutBlack: [
+    !!(reactProfile.underbaseKnockoutBlack && reactProfile.underbaseKnockoutBlack[0]),
+    !!(reactProfile.underbaseKnockoutBlack && reactProfile.underbaseKnockoutBlack[1]),
+    !!(reactProfile.underbaseKnockoutBlack && reactProfile.underbaseKnockoutBlack[2]),
+    !!(reactProfile.underbaseKnockoutBlack && reactProfile.underbaseKnockoutBlack[3])
+   ],
+   underbaseKnockoutSwatches: [
+    pickUbSwatchForJson(0),
+    pickUbSwatchForJson(1),
+    pickUbSwatchForJson(2),
+    pickUbSwatchForJson(3)
+   ],
+   underbaseSwatch:
+    rp.underbaseSwatch != null && String(rp.underbaseSwatch).trim() !== ''
+     ? String(rp.underbaseSwatch).trim()
+     : 'White UB',
+   blockerKnockoutBlack: !!rp.blockerKnockoutBlack,
+   blockerKnockoutSwatch:
+    rp.blockerKnockoutSwatch != null && String(rp.blockerKnockoutSwatch).trim() !== ''
+     ? String(rp.blockerKnockoutSwatch).trim()
+     : 'White UB',
+   blockerMesh: rp.blockerMesh != null ? String(rp.blockerMesh) : '',
+   overprintAllInks: rp.overprintAllInks !== undefined ? !!rp.overprintAllInks : true,
+   formatInkNameLabel: !!rp.formatInkNameLabel,
+   colorNameLabelFormat: rp.colorNameLabelFormat != null ? String(rp.colorNameLabelFormat) : '',
+   blackInksKnockoutDisplay:
+    reactProfile.blackInksKnockoutDisplay != null
+     ? String(reactProfile.blackInksKnockoutDisplay)
+     : '',
    WB: reactProfile.waterbaseInk ? 'Y' : 'N'
   };
 
   if (reactProfile._jsonData) {
    jsonProfile.Distress = reactProfile._jsonData.Distress || 'N';
    jsonProfile['2 Hits'] = reactProfile._jsonData['2 Hits'] || 'N';
-   jsonProfile.Blocker = reactProfile._jsonData.Blocker || 'N';
+   jsonProfile.Blocker =
+    rp.blocker === true || rp.blocker === false
+     ? rp.blocker
+      ? 'Y'
+      : 'N'
+     : reactProfile._jsonData.Blocker || 'N';
    jsonProfile.Flash =
     reactProfile._jsonData.Flash &&
     reactProfile._jsonData.Flash !== null &&
@@ -217,7 +486,7 @@ export class SettingsComponent implements OnInit {
   } else {
    jsonProfile.Distress = 'N';
    jsonProfile['2 Hits'] = 'N';
-   jsonProfile.Blocker = 'N';
+   jsonProfile.Blocker = rp.blocker === true || rp.blocker === false ? (rp.blocker ? 'Y' : 'N') : 'N';
    jsonProfile.Flash = '';
    jsonProfile.Cool = '';
    jsonProfile.Micron = 'XXX';
@@ -250,25 +519,48 @@ export class SettingsComponent implements OnInit {
  }
 
  handleAddProfile(): void {
+  this.duplicateProfileDraft = null;
   this.selectedProfile = null;
   this.editModalOpen = true;
  }
 
  handleEditProfile(profile: Profile): void {
+  this.duplicateProfileDraft = null;
   this.selectedProfile = profile;
   this.editModalOpen = true;
  }
 
+ /**
+  * Opens the edit modal with a copy of the profile; name and code default to "-2".
+  * JSON is updated only if the user clicks Save.
+  */
  handleDuplicateProfile(profile: Profile): void {
-  const newProfile: Profile = {
+  this.selectedProfile = null;
+  this.duplicateProfileDraft = this.buildDuplicateProfileDraft(profile);
+  this.editModalOpen = true;
+ }
+
+ private buildDuplicateProfileDraft(profile: Profile): Profile {
+  const newName = `${profile.name}-2`;
+  const baseCode = profile.code || profile._jsonData?.['Profile Code'] || '';
+  const newCode = baseCode ? `${baseCode}-2` : '';
+  const distress = profile.distress || profile._jsonData?.Distress || 'N';
+
+  let newJsonData: any | undefined;
+  if (profile._jsonData) {
+   newJsonData = JSON.parse(JSON.stringify(profile._jsonData)) as any;
+   newJsonData['Profile Name'] = newName;
+   newJsonData['Profile Code'] = newCode;
+   newJsonData.id = this.generateId(newName, distress);
+  }
+
+  return {
    ...profile,
-   id: this.generateId(profile.name + ' Copy'),
-   name: profile.name + ' Copy',
-   code: profile.code + '_COPY'
+   id: this.generateId(newName, distress),
+   name: newName,
+   code: newCode,
+   _jsonData: newJsonData
   };
-  const updatedProfiles = [...this.profiles, newProfile];
-  this.profiles = updatedProfiles;
-  this.saveProfiles(updatedProfiles);
  }
 
  handleDeleteProfile(profile: Profile): void {
@@ -292,19 +584,47 @@ export class SettingsComponent implements OnInit {
  handleModalClose(): void {
   this.editModalOpen = false;
   this.selectedProfile = null;
+  this.duplicateProfileDraft = null;
  }
 
  handleModalSave(updatedProfile: Profile): void {
   let updatedProfiles: Profile[];
-  if (this.selectedProfile && this.selectedProfile.id) {
-   updatedProfiles = this.profiles.map((item) =>
-    item.id === this.selectedProfile!.id ? { ...item, ...updatedProfile } : item
-   );
+
+  if (this.duplicateProfileDraft) {
+   const distress =
+    updatedProfile.distress ??
+    this.duplicateProfileDraft.distress ??
+    this.duplicateProfileDraft._jsonData?.Distress ??
+    'N';
+   const name = (updatedProfile.name || this.duplicateProfileDraft.name || '').trim();
+   const merged: Profile = {
+    ...this.duplicateProfileDraft,
+    ...updatedProfile,
+    name,
+    id: this.generateId(name || 'new-profile', distress)
+   };
+   if (merged._jsonData) {
+    const jd = JSON.parse(JSON.stringify(merged._jsonData)) as any;
+    jd['Profile Name'] = merged.name;
+    jd['Profile Code'] = merged.code ?? '';
+    jd.id = merged.id;
+    merged._jsonData = jd;
+   }
+   (merged as any)._jsonData = this.reactToJsonProfile(merged);
+   updatedProfiles = [...this.profiles, merged];
+  } else if (this.selectedProfile && this.selectedProfile.id) {
+   updatedProfiles = this.profiles.map((item) => {
+    if (item.id !== this.selectedProfile!.id) return item;
+    const merged = { ...item, ...updatedProfile } as Profile;
+    (merged as any)._jsonData = this.reactToJsonProfile(merged);
+    return merged;
+   });
   } else {
    const newProfile: Profile = {
     ...updatedProfile,
     id: updatedProfile.id || this.generateId(updatedProfile.name || 'new-profile')
    };
+   (newProfile as any)._jsonData = this.reactToJsonProfile(newProfile);
    updatedProfiles = [...this.profiles, newProfile];
   }
 

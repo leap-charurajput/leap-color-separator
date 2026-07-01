@@ -1,0 +1,14 @@
+<label [class]="'radio-component ' + className + (disabled ? ' disabled' : '')">
+	<input
+		type="radio"
+		[checked]="checked"
+		[disabled]="disabled"
+		[id]="id"
+		[name]="name"
+		class="radio-input"
+		(change)="onRadioChange($event)"
+	/>
+	<span class="radio-icon"></span>
+	<span *ngIf="label" class="radio-label-text">{{ label }}</span>
+</label>
+

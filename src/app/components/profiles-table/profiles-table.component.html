@@ -6,6 +6,13 @@
 		</div>
 		<div class="row-actions ml-auto d-flex align-center">
 			<button
+				class="row-action-button border-1"
+				(click)="onRowAction('duplicate', profile)"
+				title="Duplicate profile"
+			>
+				<span class="material-icons" aria-hidden="true">add</span>
+			</button>
+			<button
 				class="row-action-button"
 				(click)="onRowAction('edit', profile)"
 				title="Edit profile"
@@ -22,3 +29,14 @@
 		</div>
 	</div>
 </div>
+
+<app-confirm-dialog
+	[isOpen]="isDeleteDialogOpen"
+	title="Confirm"
+	message="Are you sure you want to delete this profile?"
+	confirmText="Delete"
+	cancelText="Cancel"
+	confirmVariant="danger"
+	(confirm)="onConfirmDelete()"
+	(cancel)="onCancelDelete()"
+></app-confirm-dialog>

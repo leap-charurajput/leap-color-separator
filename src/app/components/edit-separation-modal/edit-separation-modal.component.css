@@ -61,6 +61,29 @@
 	font-family: 'Adobe Clean', sans-serif;
 }
 
+.form-group-inline {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.form-group-inline .form-label {
+	display: inline;
+	margin-bottom: 0;
+	flex-shrink: 0;
+}
+
+.form-value {
+	font-size: 11px;
+	color: #ffffff;
+	font-family: 'Adobe Clean', sans-serif;
+}
+
+.form-group-inline .form-value {
+	flex: 1;
+	min-width: 0;
+}
+
 .form-input {
 	width: 100%;
 	padding: 4px 8px;

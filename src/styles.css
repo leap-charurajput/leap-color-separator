@@ -1006,6 +1006,8 @@ input[type=text].smallerInput {
 	margin: 0;
 	padding: 0;
 	display: flex;
+	flex-shrink: 0;
+	overflow: visible;
 }
 
 .settingsTabs>li {
@@ -1126,6 +1128,36 @@ input[type=text].smallerInput {
 	color: #d6d6d6;
 }
 
+.settingsTabs>li.settingsMenuTrigger {
+	margin-left: auto;
+	min-width: auto;
+	flex-shrink: 0;
+	overflow: visible;
+	padding-left: 4px;
+	padding-right: 10px;
+	border-radius: 0;
+	z-index: 2;
+	gap: 2px;
+	display: flex;
+	align-items: center;
+}
+
+.settingsTabs>li.settingsMenuTrigger.settings-menu-active {
+	background-color: #323232;
+}
+
+.settingsTabs>li.settingsMenuTrigger .submenuOpener {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 2px;
+}
+
+.settingsTabs>li.settingsMenuTrigger .settings-menu-icon {
+	font-size: 18px;
+	color: #d6d6d6;
+}
+
 .submenuOpener {
 	position: relative;
 	cursor: pointer;
@@ -1208,6 +1240,10 @@ input[type=text].smallerInput {
 	text-decoration: underline;
 }
 
+.overlay-submenu.underbase-actions-submenu {
+	width: 240px;
+}
+
 .exportFieldTable .overlay-submenu {
 	width: 111px;
 }
@@ -1263,6 +1299,10 @@ input[type=text].smallerInput {
 
 .dropDownWrap.opened .selectedValue>span.icon-POPUP-ARROW {
 	transform: rotate(180deg);
+}
+
+.settings-field.settings-field-inline-input app-dropdown .dropDownWrap {
+	width: 260px;
 }
 
 /* Styles for dropdown when used in CDK Overlay */

@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output } from '@angular/core';
+import { Component, EventEmitter, Input, Output, OnChanges, SimpleChanges } from '@angular/core';
 import { GraphicsComponent } from '../../pages/graphics/graphics.component';
 import { SeparationColorsComponent } from '../../pages/separation-colors/separation-colors.component';
 import { SeparationsComponent } from '../../pages/separations/separations.component';
@@ -17,13 +17,16 @@ interface Tab {
  templateUrl: './tab-navigator.component.html',
  styleUrls: ['./tab-navigator.component.css']
 })
-export class TabNavigatorComponent {
+export class TabNavigatorComponent implements OnChanges {
  @Input() activeTab: number | null = 0;
  @Input() selectedMenuOption: string | null = null;
  @Input() documentRefreshKey = 0;
+ @Input() postscriptIssues: Array<{ id: string; message: string }> = [];
  @Output() onTabChange = new EventEmitter<number>();
  @Output() onMenuOptionClick = new EventEmitter<string>();
  @Output() onRemoveSeparationData = new EventEmitter<void>();
+
+ postscriptDetailOpen = false;
 
  constructor(private controller: ControllerService) {}
 
@@ -33,7 +36,11 @@ export class TabNavigatorComponent {
   { title: 'Plates', icon: 'icon-ColorVar', component: SeparationColorsComponent }
  ];
 
- menuOptions = [{ title: 'Settings', component: SettingsComponent }];
+ menuOptions = [
+  { title: 'General Settings', component: SettingsComponent },
+  { title: 'Manage Profiles', component: SettingsComponent },
+  { title: 'Export Settings', component: SettingsComponent }
+ ];
 
  //  get headerMenuItems(): string[] {
  //  const menuItems = [
@@ -55,6 +62,20 @@ export class TabNavigatorComponent {
 
  handleTabClick(index: number): void {
   this.onTabChange.emit(index);
+ }
+
+ handleSettingsMenuClick(item: string): void {
+  const menuOption = this.menuOptions.find((option) => option.title === item);
+  if (!menuOption) {
+   return;
+  }
+  this.onMenuOptionClick.emit(item);
+ }
+
+ getSettingsSection(selectedOption: string | null): string {
+  if (selectedOption === 'General Settings') return 'General Settings';
+  if (selectedOption === 'Export Settings') return 'Export Settings';
+  return 'Separation Profiles';
  }
 
  //  handleHeaderMenuClick(item: string): void {
@@ -83,5 +104,19 @@ export class TabNavigatorComponent {
 
  getTabId(title: string): string {
   return title.replace(/\s+/g, '');
+ }
+
+ onPostscriptDetailOpenChange(open: boolean): void {
+  this.postscriptDetailOpen = open;
+ }
+
+ closePostscriptDetail(): void {
+  this.postscriptDetailOpen = false;
+ }
+
+ ngOnChanges(changes: SimpleChanges): void {
+  if (changes['postscriptIssues'] && !this.postscriptIssues?.length) {
+   this.postscriptDetailOpen = false;
+  }
  }
 }

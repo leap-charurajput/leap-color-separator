@@ -1,0 +1,96 @@
+<div *ngIf="isOpen" class="add-separation-modal-overlay" (click)="cancelDialog()">
+	<div class="add-separation-modal" (click)="$event.stopPropagation()">
+		<div class="add-separation-modal-title">Add separation</div>
+
+		<div class="add-separation-modal-graphic">Graphic: <span>{{ graphicName }}</span></div>
+
+		<div class="add-separation-modal-field">
+			<div class="add-separation-modal-style-row">
+				<div class="add-separation-modal-radio-cell">
+					<app-radio
+						name="add-separation-selection-mode"
+						[checked]="selectionMode === 'style'"
+						(change)="onModeChange('style')"
+						label="Style Code"
+					></app-radio>
+				</div>
+				<div class="add-separation-modal-input-wrap">
+					<input
+						type="text"
+						[value]="selectionMode === 'style' ? (query || selectedStyleCode) : selectedStyleCode"
+						(input)="onStyleInput($event)"
+						(focus)="onStyleFocus()"
+						(blur)="onStyleBlur()"
+						placeholder="Type to search Styles.xlsx"
+						class="add-separation-modal-input"
+					/>
+					<div *ngIf="selectionMode === 'style' && showStyleList" class="add-separation-modal-list">
+						<div *ngIf="isLoading" class="add-separation-modal-empty">Loading styles...</div>
+						<div *ngIf="!isLoading && filteredStyles.length === 0" class="add-separation-modal-empty">
+							No matching styles
+						</div>
+						<button
+							*ngFor="let item of filteredStyles; let i = index"
+							type="button"
+							class="add-separation-modal-list-item"
+							[class.is-selected]="item.styleCode === selectedStyleCode"
+							(mousedown)="onStyleOptionMouseDown(item.styleCode, $event)"
+						>
+							<span class="style-code" [attr.title]="item.styleCode + ' (' + (item.profileName || 'Unknown Profile') + ')'">
+								{{ item.styleCode }} <span class="profile-inline">({{ item.profileName || 'Unknown Profile' }})</span>
+							</span>
+							<span class="profile-name" [attr.title]="item.styleDesc || ''">{{ item.styleDesc || '' }}</span>
+						</button>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<div class="add-separation-modal-field">
+			<div class="add-separation-modal-style-row">
+				<div class="add-separation-modal-radio-cell">
+					<app-radio
+						name="add-separation-selection-mode"
+						[checked]="selectionMode === 'profile'"
+						(change)="onModeChange('profile')"
+						label="Profile"
+					></app-radio>
+				</div>
+				<div class="add-separation-modal-input-wrap">
+					<input
+						type="text"
+						[value]="selectionMode === 'profile' ? (query || selectedProfileName) : selectedProfileName"
+						(input)="onProfileInput($event)"
+						(focus)="onProfileFocus()"
+						(blur)="onProfileBlur()"
+						placeholder="Type to search Profiles"
+						class="add-separation-modal-input"
+					/>
+					<div *ngIf="selectionMode === 'profile' && showProfileList" class="add-separation-modal-list">
+						<div *ngIf="isLoading" class="add-separation-modal-empty">Loading profiles...</div>
+						<div *ngIf="!isLoading && filteredProfiles.length === 0" class="add-separation-modal-empty">
+							No matching profiles
+						</div>
+						<button
+							*ngFor="let profileName of filteredProfiles; let i = index"
+							type="button"
+							class="add-separation-modal-list-item"
+							[class.is-selected]="profileName === selectedProfileName"
+							(mousedown)="onProfileOptionMouseDown(profileName, $event)"
+						>
+							<span class="style-code">{{ profileName }}</span>
+						</button>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<div class="add-separation-modal-footer">
+			<app-button variant="secondary" size="medium" (onClick)="cancelDialog()">Cancel</app-button>
+			<app-button variant="primary" size="medium" [disabled]="!canSubmit" (onClick)="confirmDialog()"
+				>Add Separation</app-button
+			>
+		</div>
+	</div>
+</div>
+

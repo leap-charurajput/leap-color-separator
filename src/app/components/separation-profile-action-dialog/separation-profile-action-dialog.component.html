@@ -1,0 +1,91 @@
+<div *ngIf="isOpen" class="modal-overlay" (click)="onOverlayClick()">
+ <div class="confirm-dialog modal-container sep-profile-dialog" (click)="$event.stopPropagation()">
+  <div class="modal-header">
+   <h3 class="modal-title">{{ dialogTitle }}</h3>
+  </div>
+
+  <div class="modal-body">
+   <div *ngIf="mode === 'edit-new'" class="form-block profile-static-row">
+    <span class="profile-static-label">Profile:</span>
+    <span class="profile-static-value">{{ selectedProfileName }}</span>
+   </div>
+
+   <div class="form-block">
+    <div class="field-label">{{ stylesLabel }}</div>
+    <div class="style-check-list">
+     <div
+      *ngFor="let code of styleCodeOptions"
+      class="style-row"
+      [class.style-row--locked-first]="isDuplicateLockedFirstStyle(code)"
+      [attr.title]="isDuplicateLockedFirstStyle(code) ? 'Primary style cannot be moved when duplicating.' : null"
+     >
+      <app-checkbox
+       [label]="code"
+       [checked]="isDuplicateLockedFirstStyle(code) ? false : !!styleChecked[code]"
+       [disabled]="isDuplicateLockedFirstStyle(code)"
+       (change)="onStyleToggle(code, $event)"
+      ></app-checkbox>
+     </div>
+    </div>
+   </div>
+
+   <ng-container *ngIf="mode === 'duplicate'">
+    <div class="form-block">
+     <div
+      class="dup-row"
+      [class.dup-row--no-file]="!hasSeparationFile"
+      [attr.title]="
+       !hasSeparationFile ? 'Available after a separation document has been created for this profile.' : null
+      "
+     >
+      <app-checkbox
+       label="Duplicate existing ai separation file"
+       [checked]="hasSeparationFile && duplicateAiFile"
+       [disabled]="!hasSeparationFile"
+       (change)="onDuplicateAiToggle($event)"
+      ></app-checkbox>
+     </div>
+     <div class="nested-scale" [class.disabled-block]="duplicateScaleDisabled">
+      <div class="dup-row scale-row scale-row-inline">
+       <app-checkbox
+        label="Scale graphic by"
+        [checked]="scaleEnabled"
+        [disabled]="duplicateScaleDisabled"
+        (change)="onScaleEnabledToggle($event)"
+       ></app-checkbox>
+       <input
+        type="text"
+        class="scale-input"
+        [value]="scalePercentStr"
+        [disabled]="duplicateScaleDisabled || !scaleEnabled"
+        (input)="onScalePercentInput($event)"
+       />
+       <span class="pct">%</span>
+      </div>
+     </div>
+    </div>
+   </ng-container>
+
+   <ng-container *ngIf="mode === 'edit-new'">
+    <div class="form-block">
+     <div class="dup-row scale-row scale-row-inline">
+      <app-checkbox label="Scale graphic by" [checked]="scaleEnabled" (change)="onScaleEnabledToggle($event)"></app-checkbox>
+      <input
+       type="text"
+       class="scale-input"
+       [value]="scalePercentStr"
+       [disabled]="!scaleEnabled"
+       (input)="onScalePercentInput($event)"
+      />
+      <span class="pct">%</span>
+     </div>
+    </div>
+   </ng-container>
+  </div>
+
+  <div class="modal-footer">
+   <app-button variant="secondary" (onClick)="onCancel()">Cancel</app-button>
+   <app-button variant="primary" (onClick)="onOk()" [disabled]="!canSubmit">OK</app-button>
+  </div>
+ </div>
+</div>

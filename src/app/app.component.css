@@ -1,0 +1,25 @@
+.app-shell {
+ position: relative;
+ height: 100%;
+ width: 100%;
+ box-sizing: border-box;
+ padding-bottom: 18px;
+}
+
+app-tab-navigator {
+ display: block;
+ height: 100%;
+}
+
+.panel-build-stamp {
+ position: absolute;
+ right: 10px;
+ bottom: 4px;
+ font-size: 10px;
+ color: #9b9b9b;
+ line-height: 1;
+ letter-spacing: 0.2px;
+ pointer-events: none;
+ user-select: none;
+ z-index: 2;
+}

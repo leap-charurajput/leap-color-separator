@@ -16,19 +16,18 @@
 				</div>
 				<div class="export-option-item">
 					<app-checkbox
-						id="export-separations-preview"
-						[checked]="exportSeparationsPreview"
-						[label]="'Export Separations Preview PDF'"
-						(change)="handleSeparationsPreviewChange($event)"
-					></app-checkbox>
-				</div>
-				<div class="export-option-item">
-					<app-checkbox
 						id="export-postscript"
-						[checked]="exportPostscript"
-						[label]="'Export Postscript'"
+						[checked]="postscriptReady && exportPostscript"
+						[disabled]="!postscriptReady"
+						[label]="'Export Postscript and Seps Preview'"
 						(change)="handlePostscriptChange($event)"
 					></app-checkbox>
+				</div>
+				<div *ngIf="!postscriptReady && postscriptIssues?.length" class="export-postscript-readiness-note">
+					<strong>PostScript export is unavailable:</strong>
+					<ul>
+						<li *ngFor="let issue of postscriptIssues">{{ issue.message }}</li>
+					</ul>
 				</div>
 			</div>
 		</div>

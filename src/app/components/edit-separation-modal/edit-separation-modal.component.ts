@@ -79,10 +79,6 @@ export class EditSeparationModalComponent implements OnInit, OnChanges {
  }
  }
 
- onNameInput(event: Event): void {
- this.name = (event.target as HTMLInputElement).value;
- }
-
  onMeshInput(event: Event): void {
  const value = (event.target as HTMLInputElement).value;
  if (value === '' || /^\d+$/.test(value)) {
