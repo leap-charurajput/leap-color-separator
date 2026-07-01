@@ -54,6 +54,10 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  // draggedIndex removed as it is handled by CDK
 
  graphicMenuItems = ['Add separation color', 'Add compound plate', 'Revert', 'Refresh list'];
+ underbaseMenuItems = [
+  'Generate Underbase from Existing Inks',
+  'Delete UB, choke and blocker plates'
+ ];
 
  colorRows: ColorRow[] = [];
  nextId = 3;
@@ -77,6 +81,20 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  removeColorCheckboxOptions: ConfirmDialogCheckboxOption[] = [
   { id: 'removeSublayer', label: 'Also remove sublayer' },
   { id: 'removeSwatch', label: 'Also remove swatch' }
+ ];
+ showRegenerateUnderbaseConfirm = false;
+ showDeleteUbChokeBlockerConfirm = false;
+ regenerateUnderbaseCheckboxOptions: ConfirmDialogCheckboxOption[] = [
+  {
+   id: 'deleteUnpaintedPaths',
+   label: 'Delete unpainted paths after Merge',
+   checked: true
+  },
+  {
+   id: 'deleteLeftoverPaths',
+   label: 'Delete leftover paths after Add',
+   checked: true
+  }
  ];
  editingRow: ColorRow | null = null;
 
@@ -546,6 +564,9 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
       '[SEPARATION] Failed to load swatches from SeparatedLayerNames:',
       result.error || 'Invalid response'
      );
+     if (this.loadColorRowsFromXmpFallback('getGraphicSwatches failed')) {
+      return null;
+     }
      this.graphicSwatches = [];
      this.colorRows = [];
      this.isLoadingSwatches = false;
@@ -654,11 +675,37 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
    })
    .catch((err) => {
     console.error('[SEPARATION] Error loading color rows from SeparatedLayerNames + Excel:', err);
-    this.graphicSwatches = [];
-    this.colorRows = [];
-    this.isLoadingSwatches = false;
-    this.cdr.detectChanges(); // Force change detection on error
+    if (!this.loadColorRowsFromXmpFallback('loadColorRowsFromSeparatedLayerNames error')) {
+     this.graphicSwatches = [];
+     this.colorRows = [];
+     this.isLoadingSwatches = false;
+     this.cdr.detectChanges(); // Force change detection on error
+    }
    });
+ }
+
+ /** Use LEAPSeparationColorsData from XMP when swatch resolution fails (e.g. doc moved off 09 SEPARATIONS). */
+ private loadColorRowsFromXmpFallback(reason: string): boolean {
+  const xmpData = this.xmpColorDataForMerge;
+  if (!xmpData || !xmpData.length) {
+   return false;
+  }
+
+  console.warn(
+   '[SEPARATION] Falling back to LEAPSeparationColorsData from XMP:',
+   reason
+  );
+  const colorRowsFromXMP = this.convertXMPDataToColorRows(xmpData);
+  if (!colorRowsFromXMP || colorRowsFromXMP.length === 0) {
+   return false;
+  }
+
+  this.colorRows = colorRowsFromXMP;
+  this.nextId = colorRowsFromXMP.length + 1;
+  this.hasUIChanges = false;
+  this.isLoadingSwatches = false;
+  this.cdr.detectChanges();
+  return true;
  }
 
  private filterValidSwatches(swatches: any[]): any[] {
@@ -889,6 +936,19 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   if (!colorName) return false;
   const t = String(colorName).trim().toLowerCase();
   return t === 'blocker' || /^blocker\s+\d+$/.test(t);
+ }
+
+ isUnderbaseRow(row: ColorRow): boolean {
+  return this.isBlocker(row.colorName) || this.isWhiteUB(row.colorName);
+ }
+
+ /** True on the last underbase row when the next row is an ink color. */
+ isUnderbaseInkDivider(index: number): boolean {
+  const rows = this.colorRows;
+  if (index < 0 || index >= rows.length - 1) {
+   return false;
+  }
+  return this.isUnderbaseRow(rows[index]) && !this.isUnderbaseRow(rows[index + 1]);
  }
 
  /** Illustrator SEPARATED_ART sublayer name (XMP swatchName when it differs from formal colorName). */
@@ -1162,6 +1222,78 @@ private getProfileBlockerMesh(profileInfo?: any): string {
 
  handleAddUnderbase(): void {
   this.handleAddCompoundPlate();
+ }
+
+ handleUnderbaseMenuClick(item: string): void {
+  if (item === 'Generate Underbase from Existing Inks') {
+   this.handleGenerateUnderbaseFromExistingInks();
+  } else if (item === 'Delete UB, choke and blocker plates') {
+   this.handleDeleteUbChokeBlockerPlates();
+  }
+ }
+
+ handleGenerateUnderbaseFromExistingInks(): void {
+  if (this.isRunningInBrowser) return;
+  this.showRegenerateUnderbaseConfirm = true;
+  this.cdr.detectChanges();
+ }
+
+ cancelGenerateUnderbaseFromExistingInks(): void {
+  this.showRegenerateUnderbaseConfirm = false;
+  this.cdr.detectChanges();
+ }
+
+ confirmGenerateUnderbaseFromExistingInks(ev?: void | Record<string, boolean>): void {
+  this.showRegenerateUnderbaseConfirm = false;
+  this.cdr.detectChanges();
+
+  const evRec = ev && typeof ev === 'object' ? (ev as Record<string, boolean>) : null;
+  const cleanup = evRec
+   ? {
+     deleteUnpaintedPaths: !!evRec['deleteUnpaintedPaths'],
+     deleteLeftoverPaths: !!evRec['deleteLeftoverPaths']
+    }
+   : { deleteUnpaintedPaths: true, deleteLeftoverPaths: true };
+
+  this.controller
+   .regenerateUnderbaseFromExistingInks?.(cleanup)
+   ?.then((res) => {
+    if (res?.success) {
+     this.checkIfSeparatedDocument();
+    } else if (res?.error) {
+     alert(res.error);
+    }
+   })
+   ?.catch((err) => {
+    alert(err?.message || String(err));
+   });
+ }
+
+ handleDeleteUbChokeBlockerPlates(): void {
+  if (this.isRunningInBrowser) return;
+  this.showDeleteUbChokeBlockerConfirm = true;
+  this.cdr.detectChanges();
+ }
+
+ cancelDeleteUbChokeBlockerPlates(): void {
+  this.showDeleteUbChokeBlockerConfirm = false;
+  this.cdr.detectChanges();
+ }
+
+ confirmDeleteUbChokeBlockerPlates(): void {
+  this.showDeleteUbChokeBlockerConfirm = false;
+  this.cdr.detectChanges();
+  this.controller.deleteUbChokeBlockerArtInSeparationDoc?.()
+   ?.then((res) => {
+    if (res?.success) {
+     this.checkIfSeparatedDocument();
+    } else if (res?.error) {
+     alert(res.error);
+    }
+   })
+   ?.catch((err) => {
+    alert(err?.message || String(err));
+   });
  }
 
  handleAddSelectionToSeparation(): void {

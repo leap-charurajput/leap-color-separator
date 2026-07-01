@@ -114,11 +114,9 @@
 .underbase-swatch-row {
 	display: flex;
 	align-items: center;
-	gap: 4px;
+	gap: 8px;
 	margin-bottom: 0;
-	flex: 1 1 0;
-	min-width: 100px;
-	max-width: 100%;
+	width: 100%;
 }
 
 .underbase-swatch-label {

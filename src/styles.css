@@ -1240,6 +1240,10 @@ input[type=text].smallerInput {
 	text-decoration: underline;
 }
 
+.overlay-submenu.underbase-actions-submenu {
+	width: 240px;
+}
+
 .exportFieldTable .overlay-submenu {
 	width: 111px;
 }

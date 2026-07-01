@@ -1410,6 +1410,8 @@ export class ControllerService {
   let ub4 = '';
   if (typeof underbaseSwatches === 'string') {
    ub2 = underbaseSwatches;
+   ub3 = underbaseSwatches;
+   ub4 = underbaseSwatches;
   } else if (underbaseSwatches) {
    ub2 = underbaseSwatches.underbase2Swatch || '';
    ub3 = underbaseSwatches.underbase3Swatch || '';

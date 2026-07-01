@@ -24,6 +24,31 @@
     <span class="value">{{ selectedGraphic }}</span>
    </div>
    <div class="ml-auto separation-colors-actions">
+    <span
+     *ngIf="isSeparatedDoc && !isRunningInBrowser"
+     class="separation-action-btn underbase-menu-opener"
+     title="Underbase actions"
+    >
+     <app-sub-menu
+      [items]="underbaseMenuItems"
+      (onItemClick)="handleUnderbaseMenuClick($event)"
+      [useCustomOpener]="true"
+      overlayClass="underbase-actions-submenu"
+     >
+      <svg
+       submenu-opener
+       xmlns="http://www.w3.org/2000/svg"
+       viewBox="0 0 12.86 12.86"
+       width="20"
+       height="20"
+      >
+       <path
+        fill="currentColor"
+        d="M12.86,5.99h-2.22c-.21-1.99-1.78-3.56-3.77-3.77V0h-.88v2.22c-1.99.21-3.56,1.78-3.77,3.77H0v.88h2.22c.21,1.99,1.78,3.57,3.77,3.77v2.22h.88v-2.22c1.99-.21,3.57-1.78,3.77-3.77h2.22v-.88ZM9.76,5.99h-2.9v-2.89c1.51.2,2.7,1.39,2.9,2.89ZM5.99,3.1v2.89h-2.89c.2-1.51,1.39-2.69,2.89-2.89ZM3.1,6.87h2.89v2.9c-1.51-.2-2.69-1.39-2.89-2.9ZM6.87,9.76v-2.9h2.9c-.2,1.51-1.39,2.7-2.9,2.9Z"
+       />
+      </svg>
+     </app-sub-menu>
+    </span>
     <button
      class="separation-action-btn"
      (click)="handleAddSelectionToSeparation()"
@@ -184,6 +209,7 @@
       *ngFor="let row of colorRows; let i = index"
       class="row d-flex align-center"
       [class.removed-row]="row.removed"
+      [class.underbase-ink-divider]="isUnderbaseInkDivider(i)"
       cdkDrag
       [cdkDragDisabled]="row.removed"
       [style.cursor]="row.removed ? 'not-allowed' : 'move'"
@@ -358,6 +384,31 @@
    [checkboxOptions]="removeColorCheckboxOptions"
    (cancel)="handleCancelRemoveColor()"
    (confirm)="handleConfirmRemoveColor($event)"
+  >
+  </app-confirm-dialog>
+
+  <app-confirm-dialog
+   [isOpen]="showRegenerateUnderbaseConfirm"
+   title="Generate Underbase from Existing Inks"
+   message="Ink color plates will be kept. Choke, White UB, and Blocker layers will be removed and rebuilt from the current ink artwork."
+   [checkboxOptions]="regenerateUnderbaseCheckboxOptions"
+   confirmText="Generate"
+   cancelText="Cancel"
+   confirmVariant="primary"
+   (confirm)="confirmGenerateUnderbaseFromExistingInks($event)"
+   (cancel)="cancelGenerateUnderbaseFromExistingInks()"
+  >
+  </app-confirm-dialog>
+
+  <app-confirm-dialog
+   [isOpen]="showDeleteUbChokeBlockerConfirm"
+   title="Delete UB, choke and blocker plates"
+   message="Delete White UB, Choke, and Blocker plate sublayers from SEPARATED_ART? Swatches will not be deleted."
+   confirmText="Delete"
+   cancelText="Cancel"
+   confirmVariant="danger"
+   (confirm)="confirmDeleteUbChokeBlockerPlates()"
+   (cancel)="cancelDeleteUbChokeBlockerPlates()"
   >
   </app-confirm-dialog>
   <!-- End main UI -->

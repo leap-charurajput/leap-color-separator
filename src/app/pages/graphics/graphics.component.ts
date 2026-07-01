@@ -65,11 +65,9 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
  availableColors: string[] = [];
  positionOptions: string[] = [];
 
- // --- Underbase 2–4 swatches (UB1 lives in profile settings) ---
+ // --- Underbase 2–4 swatch (UB1 lives in profile settings) ---
  underbaseSwatchOptions: string[] = ['White UB'];
- underbase2Swatch = 'White UB';
- underbase3Swatch = 'White UB';
- underbase4Swatch = 'White UB';
+ underbase234Swatch = 'White UB';
  requiredUnderbasePassCount = 2;
 
  isSaving = false;
@@ -171,11 +169,9 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
  }
 
  /**
-  * Build the option list for both Underbase Swatch dropdowns:
+  * Build the option list for the Underbase 2–4 swatch dropdown:
   * "White UB" first, followed by every spot swatch in the document whose
-  * name contains "White" (case-insensitive). Defaults are then applied:
-  *  - 1st Underbase Swatch  -> always "White UB"
-  *  - Other Underbase Swatch -> first White-named swatch, else "White UB"
+  * name contains "White" (case-insensitive).
   */
  loadUnderbaseSwatchOptions(): void {
   Promise.all([
@@ -198,20 +194,17 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
     this.requiredUnderbasePassCount = Math.max(2, this.computeMaxUnderbasePassFromProfiles(profiles));
 
     const defaultWhite = options.find((n) => n !== 'White UB') || 'White UB';
-    const ub2 = this.pickSavedUnderbaseSwatch(loaded?.underbase2Swatch, options, defaultWhite);
-    const ub3 = this.pickSavedUnderbaseSwatch(loaded?.underbase3Swatch, options, ub2);
-    const ub4 = this.pickSavedUnderbaseSwatch(loaded?.underbase4Swatch, options, ub3);
-    this.underbase2Swatch = ub2;
-    this.underbase3Swatch = ub3;
-    this.underbase4Swatch = ub4;
+    this.underbase234Swatch = this.pickSavedUnderbaseSwatch(
+     loaded?.underbase2Swatch,
+     options,
+     defaultWhite
+    );
 
     this.cdr.detectChanges();
    })
    .catch(() => {
     this.underbaseSwatchOptions = ['White UB'];
-    this.underbase2Swatch = 'White UB';
-    this.underbase3Swatch = 'White UB';
-    this.underbase4Swatch = 'White UB';
+    this.underbase234Swatch = 'White UB';
     this.requiredUnderbasePassCount = 2;
     this.cdr.detectChanges();
    });
@@ -271,16 +264,8 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
   return fallback;
  }
 
- handleUnderbase2SwatchChange(value: string): void {
-  this.underbase2Swatch = value;
- }
-
- handleUnderbase3SwatchChange(value: string): void {
-  this.underbase3Swatch = value;
- }
-
- handleUnderbase4SwatchChange(value: string): void {
-  this.underbase4Swatch = value;
+ handleUnderbase234SwatchChange(value: string): void {
+  this.underbase234Swatch = value;
  }
 
  checkVersionDocument(): Promise<void> {
@@ -789,9 +774,9 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
   this.isSaving = true;
   this.controller
    .saveGraphicsData(graphicsToSave, {
-    underbase2Swatch: this.underbase2Swatch,
-    underbase3Swatch: this.underbase3Swatch,
-    underbase4Swatch: this.underbase4Swatch
+    underbase2Swatch: this.underbase234Swatch,
+    underbase3Swatch: this.underbase234Swatch,
+    underbase4Swatch: this.underbase234Swatch
    })
    .then((result) => {
     if (result.success) {

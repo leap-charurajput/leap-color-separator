@@ -3255,11 +3255,17 @@ function handleGetGraphicSwatches(params_string) {
   var isSeparatedDocument = docPath.indexOf("09 SEPARATIONS") !== -1;
   var layerNames = null;
 
-  // For separated documents, get layer names from XMP SeparatedLayerNames field
+  // For separated documents, get layer names from XMP (works even when file is moved outside 09 SEPARATIONS)
   var profileMetaForPlates = null;
-  if (isSeparatedDocument) {
-   try {
-    var sepXmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", activeDoc);
+  try {
+   var sepXmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", activeDoc);
+   if (sepXmp.isXmpCreated && sepXmp.doesStructFieldExist("DocumentType")) {
+    var documentType = sepXmp.getStructField("DocumentType");
+    if (documentType && documentType.toString().trim() === "Separation Document") {
+     isSeparatedDocument = true;
+    }
+   }
+   if (isSeparatedDocument) {
     if (sepXmp.isXmpCreated && sepXmp.doesStructFieldExist("SeparatedLayerNames")) {
      layerNames = sepXmp.getStructField("SeparatedLayerNames", true);
     }
@@ -3269,9 +3275,12 @@ function handleGetGraphicSwatches(params_string) {
       activeDoc
      );
     }
-   } catch (e) {
-    layerNames = null;
+    if (!layerNames || !layerNames.length) {
+     layerNames = getSeparatedArtLayerNames(activeDoc);
+    }
    }
+  } catch (e) {
+   layerNames = null;
   }
 
   // If SeparatedLayerNames found, use it (for separated documents)

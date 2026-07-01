@@ -266,6 +266,10 @@
  border-bottom: 1px solid #525252;
 }
 
+.exportFieldTable .row.underbase-ink-divider {
+ border-bottom: 2px solid rgba(255, 255, 255, 0.45);
+}
+
 .exportFieldTable .row .col {
  width: 9%;
  margin-right: 8px;
@@ -374,6 +378,35 @@ body.medium-light .separation-action-btn .add-underbase-icon .add-underbase-plus
 .separation-action-btn svg path[fill='#ffcb00'] {
  fill: #ffcb00 !important;
  /* Keep warning triangle yellow */
+}
+
+.separation-colors-actions .underbase-menu-opener {
+ display: inline-flex;
+ align-items: center;
+ justify-content: center;
+ width: 16px;
+ height: 16px;
+}
+
+.separation-colors-actions .underbase-menu-opener .submenuOpener {
+ display: flex;
+ align-items: center;
+ justify-content: center;
+ width: 16px;
+ height: 16px;
+}
+
+.separation-colors-actions .underbase-menu-opener [submenu-opener] {
+ display: block;
+ width: 16px;
+ height: 16px;
+}
+
+.separation-colors-actions .underbase-menu-opener svg {
+ width: 100%;
+ height: 100%;
+ display: block;
+ color: #ffffff;
 }
 
 /* Mesh cell editing styles */

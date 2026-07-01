@@ -10,6 +10,8 @@ export class SubMenuComponent implements AfterViewInit {
     @Input() items: string[] = [];
     @Input() iconClass = 'icon-ellipsis';
     @Input() iconText = '';
+    @Input() overlayClass = '';
+    @Input() useCustomOpener = false;
     @Output() onItemClick = new EventEmitter<string>();
 
     @ViewChild('openerRef', { read: ElementRef }) openerRef!: ElementRef;
