@@ -3350,14 +3350,7 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
         ? String(result.separatedDocumentPath).split('/').pop()
         : undefined
      });
-     return this.removeUnusedSwatches(result.separatedDocumentPath).then((swResult) => {
-      if (!swResult?.success) {
-       this.leapSepsLog.logWarn('performSeparation', 'removeUnusedSwatches failed', swResult?.error);
-      } else {
-       this.leapSepsLog.logProcess('removeUnusedSwatches complete', swResult.message);
-      }
-      return { ...result, removeUnusedSwatches: swResult };
-     });
+     return result;
     })
     .catch((err: any) => {
      this.leapSepsLog.logError('performSeparation', err);

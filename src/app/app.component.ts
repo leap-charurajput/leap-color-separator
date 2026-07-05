@@ -3,6 +3,8 @@ import { checkForJSXUpdates } from '../libs/helper';
 import { ControllerService } from './services/controller.service';
 import { GraphicsDataService } from './services/graphics-data.service';
 import { LeapSepsLogService } from './services/leap-seps-log.service';
+import { roiShipOnLaunch, roiPingLogin } from './services/roi';
+import { errInit } from './services/errlog';
 
 @Component({
  selector: 'app-root',
@@ -31,7 +33,7 @@ export class AppComponent implements OnInit, OnDestroy {
   private cdr: ChangeDetectorRef,
   private graphicsDataService: GraphicsDataService,
   private leapSepsLog: LeapSepsLogService
- ) {}
+ ) { }
 
  ngOnInit(): void {
   document.body.classList.add('dark');
@@ -39,10 +41,16 @@ export class AppComponent implements OnInit, OnDestroy {
    version: this.panelVersion,
    deployDate: this.panelDeployDate
   });
+  // ROI: ship completed days' event files + daily login ping (guarded; never throws).
+  // NOTE: restored 2026-07-02 — an earlier refactor dropped these calls.
+  roiShipOnLaunch();
+  roiPingLogin();
+  // Error capture: uncaught errors + offline retry (guarded; never throws)
+  errInit();
 
-    checkForJSXUpdates((window as any).location.origin).then((res) => {
-      console.log('check update status ref', res);
-    });
+  checkForJSXUpdates((window as any).location.origin).then((res) => {
+   console.log('check update status ref', res);
+  });
 
   this.waitForSession()
    .then(() => {
@@ -71,21 +79,21 @@ export class AppComponent implements OnInit, OnDestroy {
   const target = event.target as HTMLElement | null;
   if (!target) return;
   const interactive = target.closest(
-    'button, a, [role="button"], [role="tab"], input[type="button"], input[type="submit"], .profile-modal-tab, .current-sep-action-link'
+   'button, a, [role="button"], [role="tab"], input[type="button"], input[type="submit"], .profile-modal-tab, .current-sep-action-link'
   ) as HTMLElement | null;
   if (!interactive) return;
 
   const label =
-    interactive.getAttribute('aria-label') ||
-    interactive.getAttribute('title') ||
-    interactive.textContent?.trim().slice(0, 120) ||
-    interactive.className ||
-    interactive.tagName;
+   interactive.getAttribute('aria-label') ||
+   interactive.getAttribute('title') ||
+   interactive.textContent?.trim().slice(0, 120) ||
+   interactive.className ||
+   interactive.tagName;
 
   const section =
-    interactive.closest(
-      'app-separations, app-separation-colors, app-graphics, app-settings, app-edit-separation-profile-modal'
-    )?.tagName || 'app-root';
+   interactive.closest(
+    'app-separations, app-separation-colors, app-graphics, app-settings, app-edit-separation-profile-modal'
+   )?.tagName || 'app-root';
 
   this.leapSepsLog.logClick('Click: ' + label, {
    section,
@@ -155,7 +163,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.postscriptIssues = Array.isArray(result.issues) ? result.issues : [];
     this.cdr.detectChanges();
    }
-  }).catch(() => {});
+  }).catch(() => { });
  }
 
  private selectTabByName(tabName: string): void {

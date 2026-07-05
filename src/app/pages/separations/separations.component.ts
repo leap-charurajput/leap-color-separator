@@ -14,6 +14,7 @@ import { AddSeparationDialogResult, AddSeparationDialogStyleOption } from '../..
 import { ControllerService } from '../../services/controller.service';
 import { GraphicsDataService } from '../../services/graphics-data.service';
 import { LeapSepsLogService } from '../../services/leap-seps-log.service';
+import { roiLogEvent } from '../../services/roi';
 
 interface Separation {
  id: number;
@@ -1156,6 +1157,12 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
    console.log('[Separations] addSeparationProfileDataEntry response', saveResult);
    if (saveResult?.success) {
     upsertMany(styleCodes);
+    // ROI: one sepcreate event per separation created (see services/roi.ts; never throws)
+    roiLogEvent({
+      action: 'sepcreate',
+      doc: this.addSeparationDialogGraphicName || '',
+      elements: { StyleCodes: styleCodes.length }
+     });
     // Refresh XMP-derived groups to ensure reopen consistency.
     await this.loadSeparationPaths(true);
     console.log('[Separations] Add separation completed successfully', {

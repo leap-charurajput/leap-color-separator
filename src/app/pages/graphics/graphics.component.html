@@ -186,15 +186,6 @@
        ></app-checkbox>
       </div>
      </div>
-     <div *ngIf="graphic.id !== 'all'" class="graphic-underbase-row underbase-swatch-row">
-      <span class="underbase-swatch-label">Underbase 2, 3 and 4:</span>
-      <app-dropdown
-       [value]="graphic.underbase234Swatch || 'White UB'"
-       [items]="getUnderbaseSwatchOptions(graphic.name)"
-       (onChange)="handleUnderbase234SwatchChange(graphic.id, $event)"
-       placeholder="White UB"
-      ></app-dropdown>
-     </div>
     </ng-container>
    </div>
   </div>

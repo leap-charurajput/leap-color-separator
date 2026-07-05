@@ -13,6 +13,7 @@ import {
 import { checkForJSXUpdates } from '../../../libs/helper';
 import { ConfirmDialogCheckboxOption } from '../../components/confirm-dialog/confirm-dialog.component';
 import { ControllerService } from '../../services/controller.service';
+import { roiLogEvent } from '../../services/roi';
 
 interface ColorRow {
  id: number;
@@ -1173,6 +1174,13 @@ private getProfileBlockerMesh(profileInfo?: any): string {
        const distillResult = await this.controller.distillSeparationsPreviewPDF(psResult.filePath);
        if (distillResult && distillResult.success) {
         exportResults.push(label);
+        // ROI: one sepexport event per completed separation output (see services/roi.ts; never throws)
+        roiLogEvent({
+          action: 'sepexport',
+          doc: this.selectedGraphic || this.graphicNameFromPath || '',
+          artboards: postscriptInks.length,
+          elements: { SpotColors: postscriptInks.length, Separations: postscriptInks.length }
+         });
        } else {
         exportErrors.push(label + ': ' + (distillResult?.error || 'Distiller failed'));
        }

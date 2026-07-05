@@ -1160,6 +1160,9 @@ function renameSeparationInkInDocument(doc, fromName, toName) {
    result.error = "A swatch named \"" + to + "\" already exists.";
    return result;
   }
+ }else{
+  sourceSwatchForConflict.name = to;
+  result.renamedSwatch = true;
  }
 
  var sep = null;
@@ -1186,23 +1189,23 @@ function renameSeparationInkInDocument(doc, fromName, toName) {
   }
  }
 
- var sw = getSwatchByName(doc, from);
- if (result.success && sw && sw.color) {
-  try {
-   if (sw.color.typename === "SpotColor" && sw.color.spot) {
-    sw.color.spot.name = to;
-    result.renamedSwatch = true;
-   } else {
-    try {
-     sw.name = to;
-     result.renamedSwatch = true;
-    } catch (eNm) { }
-   }
-  } catch (eSw) {
-   result.success = false;
-   result.error = (result.error ? result.error + " " : "") + "Swatch rename: " + (eSw.message || eSw);
-  }
- }
+//  var sw = getSwatchByName(doc, from);
+//  if (result.success && sw && sw.color) {
+//   try {
+//    if (sw.color.typename === "SpotColor" && sw.color.spot) {
+//     sw.color.spot.name = to;
+//     result.renamedSwatch = true;
+//    } else {
+//     try {
+//      sw.name = to;
+//      result.renamedSwatch = true;
+//     } catch (eNm) { }
+//    }
+//   } catch (eSw) {
+//    result.success = false;
+//    result.error = (result.error ? result.error + " " : "") + "Swatch rename: " + (eSw.message || eSw);
+//   }
+//  }
 
  if (!result.success) {
   return result;

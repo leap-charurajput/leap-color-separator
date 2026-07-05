@@ -427,11 +427,12 @@ function resolveUnderbaseLayerAndSwatch(ubIndex, profileMetadata, doc) {
 		};
 	}
 	var layerName = getUnderbaseLayerNameForIndex(ubIndex);
-	var rawTarget = getGraphicsUnderbaseSwatchNameForIndex(profileMetadata, doc, ubIndex);
-	var swatchName = resolveDocumentSwatchName(doc, rawTarget);
+	// Each extra underbase pass gets its own dedicated white swatch named after the plate
+	// (e.g. "White UB 2"), separate from PANTONE White C. finalizeUnderbaseLayer creates it
+	// white from the "White UB" swatch when it does not exist yet.
 	return {
 		layerName: layerName,
-		swatchName: swatchName,
+		swatchName: layerName,
 		clearBeforeCopy: true
 	};
 }
@@ -504,6 +505,85 @@ function ensureSwatchExistsFromSource(sourceSwatchName, newSwatchName, fallbackC
 	}
 }
 
+/** Case-insensitive swatch lookup; returns the actual swatch name, or "" if none. */
+function getSwatchNameCaseInsensitive(doc, wanted) {
+	var target = String(wanted || "").replace(/^\s+|\s+$/g, "").toUpperCase();
+	if (!target) return "";
+	try {
+		for (var i = 0; i < doc.swatches.length; i++) {
+			var nm = doc.swatches[i].name;
+			if (nm && String(nm).replace(/^\s+|\s+$/g, "").toUpperCase() === target) return nm;
+		}
+	} catch (e) { }
+	return "";
+}
+
+/** Build a CMYK color object from a {c,m,y,k} literal (values clamped 0..100). */
+function makeCmykColor(cmyk) {
+	var color = new CMYKColor();
+	color.cyan = Math.max(0, Math.min(100, Number(cmyk.c) || 0));
+	color.magenta = Math.max(0, Math.min(100, Number(cmyk.m) || 0));
+	color.yellow = Math.max(0, Math.min(100, Number(cmyk.y) || 0));
+	color.black = Math.max(0, Math.min(100, Number(cmyk.k) || 0));
+	return color;
+}
+
+/** Base (non-spot) color of a swatch, resolving a spot to its alternate color. Null if none. */
+function getUnderbaseBaseColorFromSwatch(doc, swatchName) {
+	if (!swatchName) return null;
+	var sw = getSwatchByName(doc, swatchName);
+	if (!sw || !sw.color) return null;
+	if (sw.color.typename === "SpotColor" && sw.color.spot) return sw.color.spot.color;
+	return sw.color;
+}
+
+/**
+ * Ensure the swatch that fills an underbase plate exists, with the right display color.
+ * Colors are on-screen only — every underbase prints white. Each plate is created as its
+ * own SPOT so it separates independently.
+ *   White UB 2  -> copy "White", else "PANTONE White C", else tint C0 M20 Y20 K0
+ *   White UB 3  -> tint C20 M0 Y20 K0
+ *   White UB 4+ -> tint C20 M20 Y20 K0
+ *   White UB / Blocker / other -> copy the "White UB" swatch color
+ * No-op when the swatch already exists.
+ */
+function ensureUnderbaseSwatch(doc, swatchName) {
+	if (!doc || !swatchName) return;
+	if (getSwatchByName(doc, swatchName)) return;
+
+	var match = String(swatchName).match(/white\s*ub\s+(\d+)\s*$/i);
+	var ubNumber = match ? parseInt(match[1], 10) : 1;
+
+	// White UB (UB1), Blocker, and any non-numbered name: keep existing behavior.
+	if (ubNumber < 2) {
+		ensureSwatchExistsFromSource(CONSTANTS.SWATCH_NAMES.WHITE_UB, swatchName, { c: 0, m: 0, y: 0, k: 0 });
+		return;
+	}
+
+	// Resolve this pass's display color.
+	var color = null;
+	if (ubNumber === 2) {
+		var whiteName = getSwatchNameCaseInsensitive(doc, "White");
+		if (!whiteName) whiteName = getSwatchNameCaseInsensitive(doc, "PANTONE White C");
+		color = getUnderbaseBaseColorFromSwatch(doc, whiteName);
+	}
+	if (!color) {
+		var cmyk = ubNumber === 2
+			? { c: 0, m: 20, y: 20, k: 0 }
+			: (ubNumber === 3 ? { c: 20, m: 0, y: 20, k: 0 } : { c: 20, m: 20, y: 20, k: 0 });
+		color = makeCmykColor(cmyk);
+	}
+
+	// Every underbase plate is its own spot so it separates independently. A new spot
+	// defaults to process, so colorType must be set to SPOT explicitly.
+	try {
+		var spot = doc.spots.add();
+		spot.name = swatchName;
+		spot.colorType = ColorModel.SPOT;
+		spot.color = color;
+	} catch (e) { }
+}
+
 function isBlockerEnabled(profileMetadata) {
 	try {
 		var raw = profileMetadata ? profileMetadata.blocker : null;
@@ -548,6 +628,9 @@ function finalizeUnderbaseLayer(underbaseLayer, runLeftoverUb, swatchName) {
 				? String(swatchName)
 				: CONSTANTS.SWATCH_NAMES.WHITE_UB
 		);
+		// Ensure the underbase swatch exists so the plate can be filled and appears in the
+		// Swatches panel. UB2 copies White/PANTONE White C, UB3/UB4 get distinct tints.
+		ensureUnderbaseSwatch(doc, resolvedSwatch);
 		app.selection = null;
 		unlockLayerContentsForSelection(underbaseLayer);
 		doc.activeLayer = underbaseLayer;
@@ -772,9 +855,6 @@ function generateUnderbase(_graphicName, cleanupOpts, profileMetadata, genOption
 			var ubLayerName = resolved.layerName;
 			var ubLayer = getOrCreateSeparatedArtSubLayer(app.activeDocument, ubLayerName, _separatedArtLayer);
 			var ubSwatchName = resolved.swatchName;
-			if (!getSwatchByName(app.activeDocument, ubSwatchName)) {
-				appendLeapSepLog("UB" + (ubIndex + 1) + " warning: swatch '" + ubSwatchName + "' not found in document");
-			}
 			var existingCount = 0;
 			try { existingCount = ubLayer.pageItems ? ubLayer.pageItems.length : 0; } catch (ecErr) { }
 			if (resolved.clearBeforeCopy || forceClearUnderbases) {

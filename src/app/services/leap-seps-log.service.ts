@@ -1,4 +1,5 @@
 import { Injectable } from '@angular/core';
+import { errLog } from './errlog';
 
 export type LeapSepsLogLevel = 'LOG' | 'INFO' | 'WARN' | 'ERROR' | 'CLICK' | 'PROCESS';
 
@@ -27,6 +28,8 @@ export class LeapSepsLogService {
       ? String(error)
       : 'Unknown error';
   this.write('ERROR', where, msg, detail ?? (error instanceof Error ? error.stack : error));
+  // Also forward to the LEAP error dashboard (near-real-time; guarded, never throws)
+  try { errLog(where, error, detail ? { detail: String(detail).slice(0, 500) } : undefined); } catch (e) { /* */ }
  }
 
  logInfo(category: string, message: string, detail?: unknown): void {

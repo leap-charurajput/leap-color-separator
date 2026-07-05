@@ -255,8 +255,8 @@ function hideSizedGraphicsSublayer(doc) {
   try {
    var sizedGraphics = sizedArt.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_GRAPHICS);
    sizedGraphics.visible = false;
-  } catch (sgErr) {}
- } catch (e) {}
+  } catch (sgErr) { }
+ } catch (e) { }
 }
 
 function findPageItemByName(container, itemName) {
@@ -1578,7 +1578,7 @@ function copyAndPrepareSEPDocument(templateFile, destinationFolder, docName, jso
  updateVariablesInDocument(sepDoc, jsonData, styleCodes, profileMetadata);
  try {
   var sepXmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", sepDoc);
-   if (sepXmp.isXmpCreated) {
+  if (sepXmp.isXmpCreated) {
    sepXmp.setStructField("DocumentType", "Separation Document", false, false);
    if (profileMetadata) {
     sepXmp.setStructField("SeparationProfileMetadata", profileMetadata, true, false);
@@ -1666,6 +1666,95 @@ function copyAndPrepareSEPDocument(templateFile, destinationFolder, docName, jso
  sepDoc.save();
  return sepDoc;
 }
+/** True when the profile asks for formatted ink-name labels. */
+function isFormatInkNameLabelEnabled(profileMetadata) {
+ return !!(profileMetadata && profileMetadata.formatInkNameLabel);
+}
+
+/**
+ * Formatted display name for a Pantone ink using the profile format string, e.g.
+ * resolveFormattedInkName("PANTONE 1235 C", "PANTONE XXX") -> "PANTONE 1235".
+ * Non-Pantone names pass through unchanged; a trailing hit number ("… 2") is kept.
+ * Mirrors the panel's resolveColorDisplayName so both sides produce the same name.
+ */
+function resolveFormattedInkName(name, format) {
+ var trimmed = String(name || "").replace(/^\s+|\s+$/g, "");
+ if (!/^PANTONE\s/i.test(trimmed)) {
+  return trimmed;
+ }
+ var pantoneBase = trimmed;
+ var hitSuffix = "";
+ var hitMatch = trimmed.match(/^(.+?)\s+(\d+)$/);
+ if (hitMatch && String(hitMatch[2]).length === 1) {
+  pantoneBase = String(hitMatch[1]).replace(/^\s+|\s+$/g, "");
+  hitSuffix = " " + hitMatch[2];
+ }
+ var withoutPrefix = pantoneBase.replace(/^PANTONE\s+/i, "");
+ var tokenMatch = withoutPrefix.match(/^(.*?)\s+[A-Z]{1,3}P?$/);
+ var token = tokenMatch ? String(tokenMatch[1]).replace(/^\s+|\s+$/g, "") : withoutPrefix.replace(/^\s+|\s+$/g, "");
+ var fmt = String(format || "").replace(/^\s+|\s+$/g, "");
+ if (!fmt) {
+  fmt = "PANTONE XXX C";
+ }
+ return fmt.replace(/XXX/g, token) + hitSuffix;
+}
+
+/**
+ * Rename every Pantone ink to its formatted name from the profile format string.
+ * For each SEPARATED_ART sublayer it renames the matching swatch (which also renames the
+ * linked spot, so the name persists on save) and the sublayer itself. Needs no Excel
+ * data. No-op unless the profile enables formatInkNameLabel. Returns the count changed.
+ */
+function renameFormattedInks(doc, profileMetadata) {
+ if (!doc || !isFormatInkNameLabelEnabled(profileMetadata)) {
+  return 0;
+ }
+ var format = String(profileMetadata.colorNameLabelFormat || "").replace(/^\s+|\s+$/g, "");
+ if (!format) {
+  format = "PANTONE XXX C";
+ }
+
+ var sep = null;
+ try {
+  sep = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SEPARATED_ART);
+ } catch (eSep) { }
+ if (!sep) {
+  return 0;
+ }
+
+ var applied = 0;
+ for (var i = 0; i < sep.layers.length; i++) {
+  var layer = sep.layers[i];
+  var from = String(layer.name || "").replace(/^\s+|\s+$/g, "");
+  if (!/^PANTONE\s/i.test(from)) {
+   continue;
+  }
+  var to = resolveFormattedInkName(from, format);
+  if (to === from) {
+   continue;
+  }
+
+  // Rename through the swatch. Rename its underlying spot too (swatch.color.spot):
+  // that spot is what the artwork and the saved PlateNames reference. Renaming only
+  // swatch.name left the spot behind and produced duplicate "PANTONE X" / "PANTONE X C"
+  // plates.
+  var swatch = getSwatchByName(doc, from);
+  if (swatch && !getSwatchByName(doc, to)) {
+   if (swatch.color && swatch.color.typename === "SpotColor" && swatch.color.spot) {
+    try {
+     swatch.color.spot.name = to;
+    } catch (eSpotName) { }
+   }
+   swatch.name = to;
+  }
+
+  // Rename the SEPARATED_ART sublayer to match.
+  layer.name = to;
+  applied++;
+ }
+ return applied;
+}
+
 function handlePerformSeparation(params_string) {
  try {
   var params = JSON.parse(params_string);
@@ -1883,6 +1972,13 @@ function handlePerformSeparation(params_string) {
   setOverprintOnSeparatedArt(sepDoc, true);
   hideSizedGraphicsSublayer(sepDoc);
   unloadLEAPColorSepsActions();
+
+  // Apply formatted ink names (layer + swatch + spot) before collecting layer names,
+  // so the saved SEP doc and the SeparatedLayerNames XMP already carry the final names.
+  var formattedInkCount = renameFormattedInks(sepDoc, profileMetadata);
+  if (formattedInkCount > 0) {
+   appendLeapSepLog("formatted ink names applied: " + formattedInkCount);
+  }
 
   var layerNames = [];
   try {
@@ -2121,6 +2217,12 @@ function handleRecreatePlatesInActiveDocument(params_string) {
   setOverprintOnSeparatedArt(doc, true);
   hideSizedGraphicsSublayer(doc);
   unloadLEAPColorSepsActions();
+
+  // Apply formatted ink names (layer + swatch + spot) before collecting layer names.
+  var formattedInkCountRecreate = renameFormattedInks(doc, profileMetadata);
+  if (formattedInkCountRecreate > 0) {
+   appendLeapSepLog("recreate formatted ink names applied: " + formattedInkCountRecreate);
+  }
 
   var layerNames = [];
   try {
@@ -2781,7 +2883,7 @@ function handleReorderSeparatedArtLayers(params_string) {
     if (n === String(CONSTANTS.LAYER_NAMES.BLOCKER) || /^blocker(\s+\d+)?$/i.test(n)) return 100;
     return 50;
    }
-   tailLayers.sort(function(a, b) {
+   tailLayers.sort(function (a, b) {
     return tailRank(a) - tailRank(b);
    });
    return tailLayers;
@@ -2850,7 +2952,7 @@ function handleReorderSeparatedArtLayers(params_string) {
      sepXmp.commit();
     }
    }
-  } catch (eXmp) {}
+  } catch (eXmp) { }
 
   app.redraw();
   return JSON.stringify({
@@ -2979,7 +3081,7 @@ function handleRemoveSeparationInkArtifacts(params_string) {
         sepXmp.setStructField("SeparatedLayerNames", layerNames, true, false);
         sepXmp.commit();
        }
-      } catch (eXmp) {}
+      } catch (eXmp) { }
      } catch (eRem) {
       out.layerMessage = eRem && eRem.message ? eRem.message : String(eRem);
       out.success = false;
@@ -3018,7 +3120,7 @@ function handleRemoveSeparationInkArtifacts(params_string) {
   if (mutated) {
    try {
     doc.save();
-   } catch (eSave) {}
+   } catch (eSave) { }
   }
 
   return JSON.stringify(out);
