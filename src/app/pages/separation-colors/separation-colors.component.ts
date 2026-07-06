@@ -1158,7 +1158,7 @@ private getProfileBlockerMesh(profileInfo?: any): string {
 
   // Postscript (.ps at postscriptFilePath) + Separations Preview PDF (Distiller → separationPreviewFilePath)
   if (exportOptions.exportPostscript) {
-   const postscriptInks = this.getAvailableColors();
+   const postscriptInks = this.getPostscriptInks();
    setTimeout(() => {
     this.controller
      .exportPostscript(postscriptInks)
@@ -1911,9 +1911,17 @@ private getProfileBlockerMesh(profileInfo?: any): string {
   return row.removed ? '' : String(activeRowsBeforeThis + 1);
  }
 
+ // Compound-plate modal component list — excludes UB. Not for PostScript export.
  getAvailableColors(): string[] {
   return this.colorRows
    .filter((row) => row.type === 'separation' && !/ub/i.test(row.colorName))
+   .map((row) => this.hostLayerName(row));
+ }
+
+ // PostScript export ink list — includes White UB plates; excludes removed rows.
+ getPostscriptInks(): string[] {
+  return this.colorRows
+   .filter((row) => row.type === 'separation' && !row.removed)
    .map((row) => this.hostLayerName(row));
  }
 

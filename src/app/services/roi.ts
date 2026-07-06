@@ -27,6 +27,19 @@ function nodeReq(mod: string): any {
   try { return (window as any).cep_node?.require?.(mod) ?? null; } catch (e) { return null; }
 }
 
+// Machine id, minted by Exporter/Teamouts (errLogger.js) into the machine-local
+// ~/Documents/LEAP Settings/leap_machine.json. This panel only READS it. Cached.
+let _roiMid: string | undefined;
+function roiMachineId(): string {
+  if (_roiMid !== undefined) return _roiMid;
+  try {
+    const os = nodeReq('os'), fs = nodeReq('fs'), path = nodeReq('path');
+    const p = path.join(os.homedir(), 'Documents', 'LEAP Settings', 'leap_machine.json');
+    _roiMid = fs.existsSync(p) ? String(JSON.parse(fs.readFileSync(p, 'utf8'))?.id || '') : '';
+  } catch (e) { _roiMid = ''; }
+  return _roiMid;
+}
+
 function pad(n: number): string { return (n < 10 ? '0' : '') + n; }
 function isoUTC(d: Date): string {
   return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate()) +
@@ -80,6 +93,7 @@ export function roiLogEvent(info: {
     if (info.artboards !== undefined && info.artboards !== null) ev.n = info.artboards;
     if (info.elements) ev.el = info.elements;
     if (info.tmpl) ev.tmpl = info.tmpl;
+    const mid = roiMachineId(); if (mid) ev.m = mid;   // machine ref (see machines table)
     const file = path.join(dir, 'Events_' + dayLocal(now) + '_' + safeUser(u) + '.jsonl');
     fs.appendFileSync(file, JSON.stringify(ev) + '\n', 'utf8');
     return true;

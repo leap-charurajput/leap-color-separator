@@ -2257,6 +2257,20 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
     return String(s || "").replace(/^\\s+|\\s+$/g, "");
   }
 
+  // Prime the PPD/printer subsystem (read-only); empty on a cold launch until read.
+  var ppdCount = -1;
+  var printerCount = -1;
+  try { var _ppdList = app.PPDFileList; ppdCount = _ppdList ? _ppdList.length : -1; } catch (ppdErr) {}
+  try { var _prnList = app.printerList; printerCount = _prnList ? _prnList.length : -1; } catch (prnErr) {}
+  if (ppdCount <= 0 && printerCount <= 0) {
+    pushIssue(
+      "PPD_NOT_INITIALIZED",
+      "The PostScript print subsystem is not initialized yet. Open File > Print once " +
+      "(choose the Adobe PostScript File printer + IBlock PPD, then Cancel) to initialize " +
+      "it. This only needs to be done once per Illustrator session."
+    );
+  }
+
   var matchedPresetName = null;
   var presetListNames = [];
 
@@ -2316,7 +2330,9 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
   return JSON.stringify({
     success: true,
     ready: issues.length === 0,
-    issues: issues
+    issues: issues,
+    ppdCount: ppdCount,
+    printerCount: printerCount
   });
 })();
 `;
@@ -3110,19 +3126,22 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
       inksLookup[normalizeInkName(inks[i])] = true;
     }
 
-    var inkDebug = [];
-    var inkList = doc.inkList;
-    for (var i = 0; i < inkList.length; i++) {
-      var ink = inkList[i];
-      var normalizedName = normalizeInkName(ink.name);
-      var enabled = !!inksLookup[normalizedName];
-      inkDebug.push({ name: String(ink.name), normalized: normalizedName, enabled: enabled });
-      if (enabled) {
-        ink.inkInfo.printingStatus = InkPrintStatus.ENABLEINK;
-      } else {
-        ink.inkInfo.printingStatus = InkPrintStatus.DISABLEINK;
+    // Enable plates in the panel list; disable every other ink.
+    function applyInkStatuses(list) {
+      var report = [];
+      for (var i = 0; i < list.length; i++) {
+        var ink = list[i];
+        var normalizedName = normalizeInkName(ink.name);
+        var enabled = !!inksLookup[normalizedName];
+        try {
+          ink.inkInfo.printingStatus = enabled ? InkPrintStatus.ENABLEINK : InkPrintStatus.DISABLEINK;
+        } catch (statusErr) {}
+        report.push({ name: String(ink.name), normalized: normalizedName, enabled: enabled });
       }
+      return report;
     }
+    var inkList = doc.inkList;
+    var inkDebug = applyInkStatuses(inkList);
     colorSepOptions.inkList = inkList;
 
     var marksOptions = new PrintPageMarksOptions();
@@ -3155,17 +3174,131 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
     // printOptions.printerName = 'Adobe PostScript File';
     // printOptions.PPDName = ${ppdNameLiteral};
 
+    // Prime the PPD/printer subsystem (read-only) so a cold launch doesn't need a manual
+    // File > Print first. Empty on a fresh launch until these are read.
+    var ppdPrime = { ppdCount: -1, printerCount: -1 };
+    try { var _ppdList = app.PPDFileList; ppdPrime.ppdCount = _ppdList ? _ppdList.length : -1; } catch (ppdErr) {}
+    try { var _prnList = app.printerList; ppdPrime.printerCount = _prnList ? _prnList.length : -1; } catch (prnErr) {}
+    if (ppdPrime.ppdCount <= 0 && ppdPrime.printerCount <= 0) {
+      return JSON.stringify({
+        success: false,
+        error: "PostScript print subsystem is not initialized yet. Open File > Print once " +
+               "(choose the Adobe PostScript File printer + IBlock PPD, then Cancel) to " +
+               "initialize it, then run the export again.",
+        ppdPrime: ppdPrime
+      });
+    }
+
+    // Keep only plate-list spot inks; strip all other colors before print (DISABLEINK does
+    // not suppress process inks). Colors are restored in the finally block after print().
+    function colorIsPlateInk(color) {
+      if (!color) { return false; }
+      try {
+        var tn = color.typename;
+        if (tn === "NoColor") { return true; }
+        if (tn === "SpotColor") { return !!inksLookup[normalizeInkName(color.spot.name)]; }
+        if (tn === "GradientColor") {
+          var stops = color.gradient.gradientStops;
+          for (var g = 0; g < stops.length; g++) {
+            if (!colorIsPlateInk(stops[g].color)) { return false; }
+          }
+          return true;
+        }
+        return false;
+      } catch (ciErr) { return false; }
+    }
+    var hiddenRestore = [];
+    try {
+      var allPageItems = doc.pageItems;
+      for (var hpi = 0; hpi < allPageItems.length; hpi++) {
+        var pit = allPageItems[hpi];
+        try {
+          if (pit.typename === "TextFrame") {
+            // Text ink lives on the character runs.
+            var chars = pit.textRange.characters;
+            var savedChars = [];
+            for (var ci = 0; ci < chars.length; ci++) {
+              try {
+                var ca = chars[ci].characterAttributes;
+                var sc = { ca: ca };
+                var chg = false;
+                if (!colorIsPlateInk(ca.fillColor)) { sc.fill = ca.fillColor; ca.fillColor = new NoColor(); chg = true; }
+                if (!colorIsPlateInk(ca.strokeColor)) { sc.stroke = ca.strokeColor; ca.strokeColor = new NoColor(); chg = true; }
+                if (chg) { savedChars.push(sc); }
+              } catch (cErr) {}
+            }
+            if (savedChars.length) { hiddenRestore.push({ kind: "text", chars: savedChars }); }
+          } else if (pit.typename === "PathItem" || pit.typename === "CompoundPathItem") {
+            var entry = { kind: "path", item: pit };
+            var chg2 = false;
+            if (pit.filled === true && !colorIsPlateInk(pit.fillColor)) { entry.fill = pit.fillColor; pit.fillColor = new NoColor(); chg2 = true; }
+            if (pit.stroked === true && !colorIsPlateInk(pit.strokeColor)) { entry.stroke = pit.strokeColor; pit.strokeColor = new NoColor(); chg2 = true; }
+            if (chg2) { hiddenRestore.push(entry); }
+          }
+        } catch (hpErr) {}
+      }
+    } catch (scanErr) {}
+
     var previousActiveArtboardIndex = doc.artboards.getActiveArtboardIndex();
+    var finalInkReport = inkDebug;
     try {
       doc.artboards.setActiveArtboardIndex(gridArtboardIndex);
+      // Re-apply ink statuses on a fresh inkList right before print.
+      var freshInkList = doc.inkList;
+      finalInkReport = applyInkStatuses(freshInkList);
+      colorSepOptions.inkList = freshInkList;
+      printOptions.colorSeparationOptions = colorSepOptions;
       app.activeDocument.print(printOptions);
     } finally {
       doc.artboards.setActiveArtboardIndex(previousActiveArtboardIndex);
+      // Restore stripped colors exactly — document left unchanged.
+      for (var hri = 0; hri < hiddenRestore.length; hri++) {
+        try {
+          var rEntry = hiddenRestore[hri];
+          if (rEntry.kind === "text") {
+            for (var sci = 0; sci < rEntry.chars.length; sci++) {
+              try {
+                var scr = rEntry.chars[sci];
+                if (typeof scr.fill !== "undefined") { scr.ca.fillColor = scr.fill; }
+                if (typeof scr.stroke !== "undefined") { scr.ca.strokeColor = scr.stroke; }
+              } catch (tcErr) {}
+            }
+          } else {
+            if (typeof rEntry.fill !== "undefined") { rEntry.item.fillColor = rEntry.fill; }
+            if (typeof rEntry.stroke !== "undefined") { rEntry.item.strokeColor = rEntry.stroke; }
+          }
+        } catch (hrErr) {}
+      }
     }
+
+    // Per-ink report to a log file (console.table truncates).
+    try {
+      var logDir = new Folder(Folder.myDocuments.fsName + "/LEAP Settings/LEAP_Seps");
+      if (!logDir.exists) { logDir.create(); }
+      var logF = new File(logDir.fsName + "/postscript_inks.log");
+      logF.encoding = "UTF-8";
+      logF.open("a");
+      logF.writeln("===== PS export @ " + (new Date()).toString() + " =====");
+      logF.writeln("output: " + outputPath);
+      logF.writeln("requestedInks (" + inks.length + "): " + inks.join(", "));
+      logF.writeln("stripped non-plate-ink items: " + hiddenRestore.length);
+      logF.writeln("enumerated inks (" + finalInkReport.length + "):");
+      for (var li = 0; li < finalInkReport.length; li++) {
+        logF.writeln(
+          "  " + (finalInkReport[li].enabled ? "[ON ] " : "[off] ") +
+          finalInkReport[li].name + "  (norm: " + finalInkReport[li].normalized + ")"
+        );
+      }
+      logF.writeln("");
+      logF.close();
+    } catch (logErr) {}
 
     return JSON.stringify({
       success: true,
       message: "PostScript exported successfully",
+      ppdPrime: ppdPrime,
+      inkReport: finalInkReport,
+      strippedNonPlateItems: hiddenRestore.length,
       filePath: outputPath,
       artboardName: "GRID",
       artboardIndex: gridArtboardIndex,
