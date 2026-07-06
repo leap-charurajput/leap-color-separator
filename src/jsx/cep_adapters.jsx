@@ -555,6 +555,14 @@ function placeGraphicInDocument(doc, graphicPngPath, graphicAiPath) {
      placedItem.overprint = true;
     }
    } catch (opErr) { }
+
+   // Embed the placed graphic so its spot colors become native document art. Left as a link
+   // it keeps its own "PANTONE X C" spots inside the placed data, which resurface as
+   // duplicate swatches after the formatted-ink merge (the merge cannot reach colors inside
+   // a placed/linked item).
+   try {
+    placedItem.embed();
+   } catch (embedErr) { }
   }
 
   return true;
@@ -1734,10 +1742,9 @@ function renameFormattedInks(doc, profileMetadata) {
    continue;
   }
 
-  // Rename through the swatch. Rename its underlying spot too (swatch.color.spot):
-  // that spot is what the artwork and the saved PlateNames reference. Renaming only
-  // swatch.name left the spot behind and produced duplicate "PANTONE X" / "PANTONE X C"
-  // plates.
+  // Rename the swatch and its underlying spot (swatch.color.spot) to the formatted name.
+  // Now that the placed graphic is embedded as native document art, renaming the one
+  // document spot reassigns every use (plates + graphic), so no duplicate should remain.
   var swatch = getSwatchByName(doc, from);
   if (swatch && !getSwatchByName(doc, to)) {
    if (swatch.color && swatch.color.typename === "SpotColor" && swatch.color.spot) {

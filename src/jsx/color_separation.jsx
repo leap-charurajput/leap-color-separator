@@ -569,8 +569,8 @@ function ensureUnderbaseSwatch(doc, swatchName) {
 	}
 	if (!color) {
 		var cmyk = ubNumber === 2
-			? { c: 0, m: 20, y: 20, k: 0 }
-			: (ubNumber === 3 ? { c: 20, m: 0, y: 20, k: 0 } : { c: 20, m: 20, y: 20, k: 0 });
+			? { c: 5, m: 0, y: 0, k: 0 }
+			: (ubNumber === 3 ? { c: 10, m: 0, y: 0, k: 0 } : { c: 15, m: 0, y: 0, k: 0 });
 		color = makeCmykColor(cmyk);
 	}
 
@@ -984,7 +984,8 @@ function reorderGeneratedUnderbaseLayers(separatedArtLayer, profileMetadata) {
 		}
 
 		whiteUbLayers.sort(function(a, b) {
-			return getWhiteUbLayerNumber(a.name) - getWhiteUbLayerNumber(b.name);
+			// Descending so the stack is White UB 4, White UB 3, White UB 2, White UB (top -> bottom).
+			return getWhiteUbLayerNumber(b.name) - getWhiteUbLayerNumber(a.name);
 		});
 
 		var tailOrdered = [];
