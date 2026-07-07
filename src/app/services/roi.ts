@@ -27,6 +27,37 @@ function nodeReq(mod: string): any {
   try { return (window as any).cep_node?.require?.(mod) ?? null; } catch (e) { return null; }
 }
 
+// All server calls go through Node, NOT browser fetch: when a CEP panel is served from a
+// REMOTE origin (e.g. Color-Seps on the dev's web host), CEF blocks every cross-origin
+// browser request — even against CORS-perfect endpoints. Node networking has no such
+// restriction. Falls back to fetch when cep_node is unavailable (local file:// panels).
+function nodePost(urlStr: string, headers: Record<string, string>, body: string): Promise<{ ok: boolean; status: number }> {
+  return new Promise((resolve) => {
+    try {
+      const httpsMod = nodeReq('https'), httpMod = nodeReq('http');
+      if (!httpsMod) {
+        fetch(urlStr, { method: 'POST', headers, body })
+          .then((r) => resolve({ ok: r.ok, status: r.status }))
+          .catch(() => resolve({ ok: false, status: 0 }));
+        return;
+      }
+      const u = new URL(urlStr);
+      const mod = u.protocol === 'http:' ? httpMod : httpsMod;
+      const req = mod.request(
+        { hostname: u.hostname, port: u.port || undefined, path: u.pathname + u.search, method: 'POST', headers, timeout: 10000 },
+        (res: any) => {
+          res.resume();
+          res.on('end', () => resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode || 0 }));
+        },
+      );
+      req.on('error', () => resolve({ ok: false, status: 0 }));
+      req.on('timeout', () => { try { req.destroy(); } catch (e) { /* */ } resolve({ ok: false, status: 0 }); });
+      req.write(body);
+      req.end();
+    } catch (e) { resolve({ ok: false, status: 0 }); }
+  });
+}
+
 // Machine id, minted by Exporter/Teamouts (errLogger.js) into the machine-local
 // ~/Documents/LEAP Settings/leap_machine.json. This panel only READS it. Cached.
 let _roiMid: string | undefined;
@@ -168,11 +199,8 @@ export function roiPingLogin(): void {
       Panel_Version: PANEL.version,
       LEAP_Server_Folder_Path: base
     };
-    fetch(API_URL.replace('/roi-events', '/versioncheck'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    }).then((r) => { if (r.ok) { try { fs.writeFileSync(marker, new Date().toISOString()); } catch (e) { /* */ } } })
+    nodePost(API_URL.replace('/roi-events', '/versioncheck'), { 'Content-Type': 'application/json' }, JSON.stringify(payload))
+      .then((r) => { if (r.ok) { try { fs.writeFileSync(marker, new Date().toISOString()); } catch (e) { /* */ } } })
       .catch(() => { /* retry next launch */ });
   } catch (e) { /* never throw */ }
 }
@@ -206,11 +234,7 @@ async function shipFile(dir: string, fileName: string): Promise<void> {
     meta: { ...clientMeta(), source_file: fileName, event_count: events.length, skipped_lines: skipped, sent_at: new Date().toISOString() },
     events
   };
-  const r = await fetch(API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Secret': SECRET },
-    body: JSON.stringify(payload)
-  });
+  const r = await nodePost(API_URL, { 'Content-Type': 'application/json', 'X-Secret': SECRET }, JSON.stringify(payload));
   if (!r.ok) throw new Error('HTTP ' + r.status);
   try {
     const sd = path.join(dir, '_shipped');
@@ -261,11 +285,7 @@ async function shipTemplate(dir: string, fileName: string): Promise<void> {
   const full = path.join(dir, fileName);
   let rec: any = null;
   try { rec = JSON.parse(fs.readFileSync(full, 'utf8')); } catch (e) { return; }
-  const r = await fetch(API_URL.replace('/roi-events', '/roi-templates'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Secret': SECRET },
-    body: JSON.stringify({ meta: clientMeta(), template: rec })
-  });
+  const r = await nodePost(API_URL.replace('/roi-events', '/roi-templates'), { 'Content-Type': 'application/json', 'X-Secret': SECRET }, JSON.stringify({ meta: clientMeta(), template: rec }));
   if (!r.ok) throw new Error('HTTP ' + r.status);
   try {
     const sd = path.join(dir, '_shipped');

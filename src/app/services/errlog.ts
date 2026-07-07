@@ -118,12 +118,26 @@ const _errPending: any[] = [];
 
 function errPost(payload: any): void {
   try {
-    fetch(ERR_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Secret': ERR_SECRET },
-      body: JSON.stringify(payload),
-    }).then((r) => { if (!r.ok) throw new Error('http ' + r.status); })
-      .catch(() => { const list = payload.errors || [payload]; for (const e of list) if (_errPending.length < 100) _errPending.push(e); });
+    // Node transport, not browser fetch: remotely-hosted CEP panels (CEF web-security) block
+    // ALL cross-origin browser requests — even against CORS-perfect endpoints.
+    const queueBack = () => { const list = payload.errors || [payload]; for (const e of list) if (_errPending.length < 100) _errPending.push(e); };
+    const body = JSON.stringify(payload);
+    const httpsMod = errNodeReq('https');
+    if (!httpsMod) {
+      fetch(ERR_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Secret': ERR_SECRET }, body })
+        .then((r) => { if (!r.ok) throw new Error('http ' + r.status); })
+        .catch(queueBack);
+      return;
+    }
+    const u = new URL(ERR_URL);
+    const req = httpsMod.request(
+      { hostname: u.hostname, port: u.port || undefined, path: u.pathname, method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Secret': ERR_SECRET }, timeout: 10000 },
+      (res: any) => { res.resume(); res.on('end', () => { if (!(res.statusCode >= 200 && res.statusCode < 300)) queueBack(); }); },
+    );
+    req.on('error', queueBack);
+    req.on('timeout', () => { try { req.destroy(); } catch (e) { /* */ } queueBack(); });
+    req.write(body);
+    req.end();
   } catch (e) {
     const list = payload.errors || [payload];
     for (const el of list) if (_errPending.length < 100) _errPending.push(el);
