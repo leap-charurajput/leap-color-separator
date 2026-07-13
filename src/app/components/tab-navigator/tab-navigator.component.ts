@@ -28,6 +28,9 @@ export class TabNavigatorComponent implements OnChanges {
 
  postscriptDetailOpen = false;
 
+ /** Menu option key used to open the "Report a problem" pane. */
+ readonly reportMenuOption = 'Report a Problem';
+
  constructor(private controller: ControllerService) {}
 
  tabs: Tab[] = [
@@ -70,6 +73,10 @@ export class TabNavigatorComponent implements OnChanges {
    return;
   }
   this.onMenuOptionClick.emit(item);
+ }
+
+ handleReportClick(): void {
+  this.onMenuOptionClick.emit(this.reportMenuOption);
  }
 
  getSettingsSection(selectedOption: string | null): string {

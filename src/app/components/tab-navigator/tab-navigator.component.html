@@ -20,6 +20,10 @@
  <span class="tab-title">{{tab.title}}</span>
  <span class="hoverTitle">{{tab.title}}</span>
 </li>
+<li class="reportMenuTrigger" [class.report-menu-active]="selectedMenuOption === reportMenuOption" (click)="handleReportClick()">
+ <span class="material-icons report-menu-icon" title="Report a problem">headset_mic</span>
+ <span class="hoverTitle">Report a problem</span>
+</li>
 <li class="settingsMenuTrigger" [class.settings-menu-active]="selectedMenuOption === 'General Settings' || selectedMenuOption === 'Manage Profiles' || selectedMenuOption === 'Export Settings'">
  <app-postscript-setup-alert
   [issues]="postscriptIssues"
@@ -46,6 +50,9 @@
  <app-settings
   *ngIf="selectedMenuOption === 'General Settings' || selectedMenuOption === 'Manage Profiles' || selectedMenuOption === 'Export Settings'"
   [selectedSectionFromMenu]="getSettingsSection(selectedMenuOption)"></app-settings>
+</div>
+<div [class.innerTabContent]="true" [class.show]="selectedMenuOption === reportMenuOption">
+ <app-report-problem *ngIf="selectedMenuOption === reportMenuOption"></app-report-problem>
 </div>
 </div>
 </div>

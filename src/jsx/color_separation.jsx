@@ -427,6 +427,28 @@ function resolveUnderbaseLayerAndSwatch(ubIndex, profileMetadata, doc) {
 		};
 	}
 	var layerName = getUnderbaseLayerNameForIndex(ubIndex);
+
+	// UB2 (ubIndex === 1) ONLY: if a white plate swatch already exists in the document, fill the
+	// separate "White UB 2" underbase layer with THAT existing swatch instead of a dedicated
+	// "White UB 2" spot. Result: the UB2 underbase layer and the white color plate share one
+	// swatch (two separate SEPARATED_ART layers, same swatch). Preference order:
+	// "PANTONE White C" -> "PANTONE White" -> "White". If none exist, UB2 falls back to the
+	// dedicated "White UB 2" swatch (current behavior). UB3/UB4 are unchanged.
+	if (ubIndex === 1) {
+		var whiteSwatchName =
+			getSwatchNameCaseInsensitive(doc, "PANTONE White C") ||
+			getSwatchNameCaseInsensitive(doc, "PANTONE White") ||
+			getSwatchNameCaseInsensitive(doc, "White");
+		if (whiteSwatchName) {
+			return {
+				layerName: layerName,        // keep the separate "White UB 2" layer
+				swatchName: whiteSwatchName, // but fill it with the existing white plate swatch
+				clearBeforeCopy: true
+			};
+		}
+		// else: no white plate swatch found -> fall through to dedicated "White UB 2" swatch.
+	}
+
 	// Each extra underbase pass gets its own dedicated white swatch named after the plate
 	// (e.g. "White UB 2"), separate from PANTONE White C. finalizeUnderbaseLayer creates it
 	// white from the "White UB" swatch when it does not exist yet.

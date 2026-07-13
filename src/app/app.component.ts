@@ -5,6 +5,7 @@ import { GraphicsDataService } from './services/graphics-data.service';
 import { LeapSepsLogService } from './services/leap-seps-log.service';
 import { roiShipOnLaunch, roiPingLogin } from './services/roi';
 import { errInit } from './services/errlog';
+import { flareInit } from './services/flare';
 
 @Component({
  selector: 'app-root',
@@ -14,7 +15,7 @@ import { errInit } from './services/errlog';
 export class AppComponent implements OnInit, OnDestroy {
  private readonly panelVersion = '1.0.1';
  /** Bump this string when you ship a new build (same format as before: "Mon DD, YYYY"). */
- private readonly panelDeployDate = 'July 07, 2026';
+ private readonly panelDeployDate = 'July 13, 2026';
  activeTab: number | null = 0;
  selectedMenuOption: string | null = null;
  documentRefreshKey = 0;
@@ -47,6 +48,9 @@ export class AppComponent implements OnInit, OnDestroy {
   roiPingLogin();
   // Error capture: uncaught errors + offline retry (guarded; never throws)
   errInit();
+  // Flare "Report a problem": start the rolling ops trail + capture console.error/warn
+  // (guarded; never throws). Breadcrumbs are added via flareOp(...) at key operations.
+  flareInit();
 
   checkForJSXUpdates((window as any).location.origin).then((res) => {
    console.log('check update status ref', res);

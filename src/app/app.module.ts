@@ -17,6 +17,7 @@ import { EditSeparationProfileModalComponent } from './components/edit-separatio
 import { ExportSeparationsModalComponent } from './components/export-separations-modal/export-separations-modal.component';
 import { PostscriptSetupAlertComponent } from './components/postscript-setup-alert/postscript-setup-alert.component';
 import { PostscriptSetupDetailComponent } from './components/postscript-setup-detail/postscript-setup-detail.component';
+import { ReportProblemComponent } from './components/report-problem/report-problem.component';
 import { ExportSettingsPanelComponent } from './components/export-settings-panel/export-settings-panel.component';
 import { LayerStackVisualizationComponent } from './components/layer-stack-visualization/layer-stack-visualization.component';
 import { LinkColorsModalComponent } from './components/link-colors-modal/link-colors-modal.component';
@@ -59,6 +60,7 @@ import { ControllerService } from './services/controller.service';
   ExportSeparationsModalComponent,
   PostscriptSetupAlertComponent,
   PostscriptSetupDetailComponent,
+  ReportProblemComponent,
   ExportSettingsPanelComponent,
   SeparationColorsComponent,
   GraphicsComponent,

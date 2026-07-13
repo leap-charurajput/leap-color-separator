@@ -1,0 +1,106 @@
+.report-problem {
+ display: flex;
+ flex-direction: column;
+ height: 100%;
+ padding: 16px 18px;
+ box-sizing: border-box;
+ color: #d6d6d6;
+}
+
+.report-problem__header {
+ display: flex;
+ align-items: center;
+ justify-content: space-between;
+ margin-bottom: 18px;
+}
+
+.report-problem__title {
+ margin: 0;
+ font-size: 16px;
+ font-weight: 600;
+ color: #f0f0f0;
+}
+
+.report-problem__reset {
+ background: transparent;
+ border: none;
+ color: #b8b8b8;
+ cursor: pointer;
+ padding: 4px;
+ display: inline-flex;
+ align-items: center;
+ border-radius: 4px;
+}
+
+.report-problem__reset:hover {
+ color: #ffffff;
+ background: #3a3a3a;
+}
+
+.report-problem__reset .material-icons {
+ font-size: 18px;
+}
+
+.report-problem__body {
+ display: flex;
+ flex-direction: column;
+ flex: 1 1 auto;
+}
+
+.report-problem__label {
+ font-size: 13px;
+ font-weight: 600;
+ color: #e0e0e0;
+ margin-bottom: 8px;
+}
+
+.report-problem__textarea {
+ width: 100%;
+ box-sizing: border-box;
+ min-height: 140px;
+ resize: vertical;
+ background: #2b2b2b;
+ border: 1px solid #565656;
+ border-radius: 4px;
+ color: #f0f0f0;
+ font-size: 13px;
+ line-height: 1.4;
+ padding: 10px;
+ outline: none;
+}
+
+.report-problem__textarea:focus {
+ border-color: #8a8a8a;
+}
+
+.report-problem__textarea:disabled {
+ opacity: 0.6;
+ cursor: not-allowed;
+}
+
+.report-problem__checks {
+ display: flex;
+ flex-direction: column;
+ gap: 10px;
+ margin-top: 18px;
+}
+
+.report-problem__result {
+ margin: 16px 0 0;
+ font-size: 13px;
+ font-weight: 500;
+}
+
+.report-problem__result.is-ok {
+ color: #6fcf7f;
+}
+
+.report-problem__result.is-error {
+ color: #e6736f;
+}
+
+.report-problem__footer {
+ margin-top: 20px;
+ display: flex;
+ justify-content: center;
+}

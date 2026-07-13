@@ -63,6 +63,22 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  colorRows: ColorRow[] = [];
  nextId = 3;
  hasUIChanges = false;
+ /**
+  * True when Illustrator's swatch list changed externally (e.g. user merged/renamed/deleted
+  * a swatch in the Swatches panel) so the plate list may be out of sync. Drives the same
+  * warning triangle on the Refresh button as hasUIChanges. Cleared on the next refresh/reload.
+  */
+ swatchesOutOfSync = false;
+ /** Ignore SWATCH_LIST_CHANGED events fired by our own swatch operations until this timestamp (ms). */
+ private suppressSwatchWarnUntil = 0;
+ /** AIEventAdapter listener handle, removed on destroy. */
+ private swatchListChangedHandler: ((evt: any) => void) | null = null;
+ /** Event types the handler is registered for (SWATCH_LIST_CHANGED + …_INTERNALLY). */
+ private swatchListChangedEventTypes: string[] = [];
+ /** Resolved AIEventAdapter instance (global may be bare, not on window) — kept for removal. */
+ private swatchListAdapter: any = null;
+ /** Snapshot of per-plate grid values carried over across a refresh-triggered reload. */
+ private carryOverRowValues: { [normName: string]: Partial<ColorRow> } | null = null;
  documentProfileMetadata: any = null;
  /** Saved LEAPSeparationColorsData rows — merged into layer-based rows for mesh/flash metadata. */
  private xmpColorDataForMerge: any[] | null = null;
@@ -123,6 +139,142 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  ngOnInit(): void {
   this.checkIfSeparatedDocument();
   this.registerGlobalRefreshFunction();
+  this.registerSwatchListChangedListener();
+ }
+
+ /**
+  * Subscribe to Illustrator's "AI Swatch List Changed Notifier" via the CEP host adapter
+  * (AIEventAdapter, loaded globally from libs/cs_host_adapter-2.0.js). When the user changes
+  * swatches in the Swatches panel (merge, rename, delete, add), mark the plate list as out of
+  * sync so the Refresh button shows its warning triangle. We do NOT auto-rebuild — the user
+  * clicks Refresh to re-fetch. Events caused by our own swatch operations are suppressed via
+  * suppressSwatchWarnUntil so the warning doesn't light up spuriously.
+  */
+ private registerSwatchListChangedListener(): void {
+  if (this.isRunningInBrowser) {
+   return;
+  }
+  try {
+   // cs_host_adapter-2.0.js declares `AIEventAdapter` / `AIEvent` as plain top-level function
+   // declarations. Depending on how the scripts bundle is evaluated they may be reachable as a
+   // *bare global* rather than a `window` property, so resolve BOTH ways: window first, then an
+   // indirect-eval lookup that runs in true global scope (index.html CSP allows 'unsafe-eval').
+   const resolveGlobal = (name: string): any => {
+    const w = window as any;
+    if (w[name]) { return w[name]; }
+    try {
+     // eslint-disable-next-line no-new-func
+     const v = Function('try{return typeof ' + name + '!=="undefined"?' + name + ':undefined}catch(e){return undefined}')();
+     return v || undefined;
+    } catch (e) {
+     return undefined;
+    }
+   };
+   const AIEventAdapterRef = resolveGlobal('AIEventAdapter');
+   const AIEventRef = resolveGlobal('AIEvent');
+   if (!AIEventAdapterRef || !AIEventRef || typeof AIEventAdapterRef.getInstance !== 'function') {
+    console.warn('[SEPARATION] AIEventAdapter unavailable; swatch-change detection disabled');
+    return;
+   }
+   // Merges/edits in the Swatches panel fire the *Internally* variant, so subscribe to both.
+   const eventTypes = [AIEventRef.SWATCH_LIST_CHANGED, AIEventRef.SWATCH_LIST_CHANGED_INTERNALLY];
+   const handler = (_evt: any) => {
+    // Ignore events triggered by our own separation / refresh / table operations.
+    if (Date.now() < this.suppressSwatchWarnUntil || this.isLoadingSwatches) {
+     return;
+    }
+    // Only meaningful once a plate list is showing for a separated document.
+    if (!this.isSeparatedDoc || this.colorRows.length === 0) {
+     return;
+    }
+    this.ngZone.run(() => {
+     if (!this.swatchesOutOfSync) {
+      this.swatchesOutOfSync = true;
+      this.cdr.detectChanges();
+     }
+    });
+   };
+   const adapter = AIEventAdapterRef.getInstance();
+   for (const eventType of eventTypes) {
+    adapter.addEventListener(eventType, handler);
+   }
+   this.swatchListAdapter = adapter;
+   this.swatchListChangedHandler = handler;
+   this.swatchListChangedEventTypes = eventTypes;
+   console.log('[SEPARATION] Subscribed to swatch events:', eventTypes.join(', '));
+  } catch (err) {
+   console.warn('[SEPARATION] Failed to subscribe to swatch events:', err);
+  }
+ }
+
+ private unregisterSwatchListChangedListener(): void {
+  try {
+   const adapter = this.swatchListAdapter;
+   if (
+    adapter &&
+    this.swatchListChangedHandler &&
+    this.swatchListChangedEventTypes.length &&
+    typeof adapter.removeEventListener === 'function'
+   ) {
+    for (const eventType of this.swatchListChangedEventTypes) {
+     adapter.removeEventListener(eventType, this.swatchListChangedHandler);
+    }
+   }
+  } catch (err) {
+   /* no-op */
+  }
+  this.swatchListAdapter = null;
+  this.swatchListChangedHandler = null;
+  this.swatchListChangedEventTypes = [];
+ }
+
+ /** Suppress self-induced swatch-change warnings for a short window around our own ops. */
+ private beginInternalSwatchOp(windowMs = 2500): void {
+  this.suppressSwatchWarnUntil = Date.now() + windowMs;
+ }
+
+ /** Normalized key for matching a plate by name across a reload (case/space-insensitive). */
+ private normalizePlateKey(name: string): string {
+  return String(name || '').replace(/\s+/g, ' ').trim().toLowerCase();
+ }
+
+ /**
+  * Overlay carried-over per-plate grid values (captured before a refresh reload) onto the
+  * freshly rebuilt rows, matched by plate name. Surviving plates keep their panel-only grid
+  * values (mesh/micron/flash/cool/wb) and removed state; plates whose swatch was removed simply
+  * aren't in `rows`, so they drop. One-shot: the snapshot is consumed after use.
+  *
+  * NOTE: `layerColor` is deliberately NOT carried over. The plate color is owned by the
+  * document swatch (resolved fresh in `row.layerColor` via getGraphicSwatches on every reload),
+  * so carrying over the pre-refresh color would freeze it and hide a CMYK change the user just
+  * made to the swatch in Illustrator. Always take the freshly-resolved document color instead.
+  */
+ private applyCarryOverRowValues(rows: ColorRow[]): ColorRow[] {
+  const carry = this.carryOverRowValues;
+  this.carryOverRowValues = null;
+  if (!carry) {
+   return rows;
+  }
+  return rows.map((row) => {
+   const prev = carry[this.normalizePlateKey(row.colorName)];
+   if (!prev) {
+    return row;
+   }
+   return {
+    ...row,
+    mesh: prev.mesh != null ? prev.mesh : row.mesh,
+    micron: prev.micron != null ? prev.micron : row.micron,
+    flashEnabled: prev.flashEnabled != null ? prev.flashEnabled : row.flashEnabled,
+    coolEnabled: prev.coolEnabled != null ? prev.coolEnabled : row.coolEnabled,
+    wbEnabled: prev.wbEnabled != null ? prev.wbEnabled : row.wbEnabled,
+    /*
+     * layerColor intentionally omitted here so the freshly-resolved swatch color (row.layerColor)
+     * wins — this is what lets a CMYK edit in the Swatches panel show up after Refresh.
+     */
+    // Preserve removed state so a reload doesn't resurrect a plate the user removed.
+    removed: prev.removed != null ? prev.removed : row.removed
+   };
+  });
  }
 
  ngAfterViewInit(): void {
@@ -156,6 +308,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
    clearTimeout(this.refreshCheckTimeoutId);
    this.refreshCheckTimeoutId = null;
   }
+  this.unregisterSwatchListChangedListener();
   delete (window as any).__LEAP_SEPARATION_COLORS_REFRESH__;
  }
 
@@ -518,19 +671,21 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   return this.sortColorRowsWithWhiteUBAtBottom(newColorRows);
  }
 
- loadColorRowsFromSeparatedLayerNames(): void {
+ loadColorRowsFromSeparatedLayerNames(): Promise<void> {
   if (this.isRunningInBrowser || !this.selectedGraphic) {
-   return;
+   return Promise.resolve();
   }
 
   console.log(
    '[SEPARATION] Loading color rows using SeparatedLayerNames + Excel for graphic:',
    this.selectedGraphic
   );
+  // Re-reading swatches can itself perturb the swatch list; suppress self-induced warnings.
+  this.beginInternalSwatchOp();
   this.isLoadingSwatches = true;
   let allSwatchesFromDoc: any[] = [];
 
-  this.controller
+  return this.controller
    .getGraphicSwatches(this.selectedGraphic)
    .then((result) => {
     if (result.success && result.swatches && Array.isArray(result.swatches)) {
@@ -650,7 +805,11 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
      currentId = withMissingHits.nextId;
 
      const mergedColorRows = this.mergeXmpMetadataIntoColorRows(newColorRows);
-     const sortedColorRows = this.sortColorRowsWithWhiteUBAtBottom(mergedColorRows);
+     // On a refresh-triggered reload, keep each surviving plate's current grid values
+     // (mesh/micron/flash/cool/wb/color) so a swatch merge doesn't reset the plates that
+     // remain. Plates whose swatch was removed simply don't appear here, so they drop.
+     const carriedColorRows = this.applyCarryOverRowValues(mergedColorRows);
+     const sortedColorRows = this.sortColorRowsWithWhiteUBAtBottom(carriedColorRows);
      console.log(
       '[SEPARATION] Color rows loaded from SeparatedLayerNames + Excel:',
       sortedColorRows.length,
@@ -1098,8 +1257,54 @@ private getProfileBlockerMesh(profileInfo?: any): string {
  }
 
  handleRefreshList(): void {
+  // Refresh = re-fetch swatches∩layers, rebuild the plate list, then push PG Ink Data +
+  // GRID DATA. Surviving plates keep their current grid values (mesh/flags/color); plates
+  // whose swatch was removed/merged in the Swatches panel drop out; Choke stays out (no
+  // swatch). Clears both out-of-sync warnings (unsaved grid edits + external swatch change).
   this.hasUIChanges = false;
-  this.updateSepTableInDocument();
+  this.swatchesOutOfSync = false;
+  this.beginInternalSwatchOp();
+
+  if (this.isRunningInBrowser || !this.selectedGraphic) {
+   this.updateSepTableInDocument();
+   return;
+  }
+
+  // Snapshot current grid values so surviving plates keep them across the reload.
+  this.carryOverRowValues = this.snapshotRowValues();
+
+  this.loadColorRowsFromSeparatedLayerNames()
+   .then(() => {
+    this.updateSepTableInDocument();
+   })
+   .catch((err) => {
+    console.error('[SEPARATION] Refresh reload failed:', err);
+    this.updateSepTableInDocument();
+   });
+ }
+
+ /** Capture current per-plate grid values (incl. removed state) keyed by normalized name. */
+ private snapshotRowValues(): { [normName: string]: Partial<ColorRow> } {
+  const snap: { [normName: string]: Partial<ColorRow> } = {};
+  for (const row of this.colorRows) {
+   if (!row) {
+    continue;
+   }
+   /*
+    * layerColor is intentionally NOT snapshotted: the plate color is owned by the document
+    * swatch and re-resolved on every reload, so a CMYK change made in the Swatches panel is
+    * reflected after Refresh (see applyCarryOverRowValues).
+    */
+   snap[this.normalizePlateKey(row.colorName)] = {
+    mesh: row.mesh,
+    micron: row.micron,
+    flashEnabled: row.flashEnabled,
+    coolEnabled: row.coolEnabled,
+    wbEnabled: row.wbEnabled,
+    removed: row.removed
+   };
+  }
+  return snap;
  }
 
  handleExportProcess(): void {
@@ -2144,7 +2349,14 @@ private getProfileBlockerMesh(profileInfo?: any): string {
     flashEnabled: xmp.flash !== undefined ? !!xmp.flash : row.flashEnabled,
     coolEnabled: xmp.cool !== undefined ? !!xmp.cool : row.coolEnabled,
     wbEnabled: xmp.wb !== undefined ? !!xmp.wb : row.wbEnabled,
-    layerColor: xmp.hex || row.layerColor,
+    /*
+     * Prefer the freshly-resolved LIVE swatch color (row.layerColor) over the saved XMP hex, so a
+     * CMYK change made in the Swatches panel shows up after Refresh. The stored hex in
+     * LEAPSeparationColorsData is only a last-resort fallback for when the live color is
+     * unavailable. (Grid metadata like mesh/flash still comes from XMP above — only color is
+     * document-owned.)
+     */
+    layerColor: row.layerColor || xmp.hex,
     swatchName: sw,
     type: xmp.type === 'compound' ? 'compound' : row.type
    };
@@ -2214,6 +2426,8 @@ private getProfileBlockerMesh(profileInfo?: any): string {
  }
 
  updateSepTableInDocument(): void {
+  // Writing the SEP table can rename/create swatches; suppress self-induced warnings.
+  this.beginInternalSwatchOp();
   const activeRows = this.colorRows.filter((row) => !row.removed);
 
   if (activeRows.length === 0) {

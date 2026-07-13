@@ -2735,12 +2735,20 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
    placed.pdfPath
   );
 
+  // PDF is fully generated and placed at its final path — auto-open it in the default
+  // PDF viewer. Best-effort: a failure to open does not fail the export.
+  const opened = this.openFileInDefaultApp(placed.pdfPath as string);
+  if (!opened.success) {
+   console.warn('[distillSeparationsPreviewPDF] Could not auto-open PDF:', opened.error);
+  }
+
   return {
    success: true,
    filePath: placed.pdfPath,
    distillerPdfPath: placed.distillerPdfPath,
    sourcePostscriptPath: sourcePsPath,
    distiller,
+   opened: opened.success,
    message: 'Separations Preview PDF created via Distiller.',
    note: 'PDF moved to Separation Preview file path. PostScript (.ps) remains at Postscript file path only.'
   };
@@ -2869,6 +2877,53 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
     resolve({ success: false, error: msg });
    }
   });
+ }
+
+ /**
+  * Open a finished file in the OS default application (used to auto-open the Separations
+  * Preview PDF once Distiller has fully written it). Non-blocking / best-effort — never
+  * throws, so a failure to open does not fail the export.
+  */
+ private openFileInDefaultApp(filePath: string): { success: boolean; error?: string } {
+  try {
+   if (!filePath) { return { success: false, error: 'No file path provided' }; }
+   const win = window as any;
+   const req = win?.cep_node?.require;
+   if (!req) { return { success: false, error: 'CEP node runtime is unavailable' }; }
+   const cp = req('child_process');
+   const fs = req('fs');
+   const process = win?.cep_node?.process || req('process');
+
+   if (!fs.existsSync(filePath)) {
+    return { success: false, error: 'File not found: ' + filePath };
+   }
+
+   const platform = process?.platform || 'darwin';
+   let command: string;
+   let args: string[];
+   if (platform === 'win32') {
+    // "start" needs an empty title arg; run through cmd.
+    command = 'cmd';
+    args = ['/c', 'start', '', filePath];
+   } else if (platform === 'darwin') {
+    command = 'open';
+    args = [filePath];
+   } else {
+    command = 'xdg-open';
+    args = [filePath];
+   }
+
+   console.log('[openFileInDefaultApp] Opening:', command, args.join(' '));
+   const child = cp.spawn(command, args, { detached: true, stdio: 'ignore' });
+   child.on('error', (err: any) => {
+    console.error('[openFileInDefaultApp] Spawn failed:', err?.message || String(err));
+   });
+   if (child.pid) { child.unref(); }
+   return { success: true };
+  } catch (e: any) {
+   console.error('[openFileInDefaultApp] Exception:', e?.message || String(e));
+   return { success: false, error: e?.message || String(e) };
+  }
  }
 
  /** ExtendScript: remove unused swatches via Illustrator action (LEAP Variables / colorVariable.jsx). */
@@ -3191,12 +3246,27 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
 
     // Keep only plate-list spot inks; strip all other colors before print (DISABLEINK does
     // not suppress process inks). Colors are restored in the finally block after print().
+    // The Registration swatch is an exception: registration-colored artwork (e.g. info /
+    // labels / marks) is meant to print on EVERY separation, so it must always be kept even
+    // though "[Registration]" is never in the plate list.
+    function colorIsRegistration(sp) {
+      if (!sp) { return false; }
+      try { if (sp.colorType === ColorModel.REGISTRATION) { return true; } } catch (rcErr) {}
+      try {
+        var n = normalizeInkName(sp.name);
+        if (n === "[registration]" || n === "registration") { return true; }
+      } catch (rnErr) {}
+      return false;
+    }
     function colorIsPlateInk(color) {
       if (!color) { return false; }
       try {
         var tn = color.typename;
         if (tn === "NoColor") { return true; }
-        if (tn === "SpotColor") { return !!inksLookup[normalizeInkName(color.spot.name)]; }
+        if (tn === "SpotColor") {
+          if (colorIsRegistration(color.spot)) { return true; }
+          return !!inksLookup[normalizeInkName(color.spot.name)];
+        }
         if (tn === "GradientColor") {
           var stops = color.gradient.gradientStops;
           for (var g = 0; g < stops.length; g++) {

@@ -1158,6 +1158,35 @@ input[type=text].smallerInput {
 	color: #d6d6d6;
 }
 
+/* "Report a problem" trigger (headset icon). Sits just left of the settings gear; it takes the
+   auto margin so the report + settings pair is pushed to the right edge together. */
+.settingsTabs>li.reportMenuTrigger {
+	margin-left: auto;
+	min-width: auto;
+	flex-shrink: 0;
+	overflow: visible;
+	padding-left: 6px;
+	padding-right: 6px;
+	border-radius: 0;
+	z-index: 2;
+	display: flex;
+	align-items: center;
+	cursor: pointer;
+}
+
+.settingsTabs>li.reportMenuTrigger + li.settingsMenuTrigger {
+	margin-left: 0;
+}
+
+.settingsTabs>li.reportMenuTrigger.report-menu-active {
+	background-color: #323232;
+}
+
+.settingsTabs>li.reportMenuTrigger .report-menu-icon {
+	font-size: 18px;
+	color: #d6d6d6;
+}
+
 .submenuOpener {
 	position: relative;
 	cursor: pointer;

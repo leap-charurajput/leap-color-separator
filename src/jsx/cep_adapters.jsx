@@ -2536,6 +2536,29 @@ function getSeparatedArtVisibilityState(separatedArtLayer) {
  };
 }
 
+/** Normalized (trim + upper) name for case-insensitive comparison. */
+function normVisibilityName(n) {
+ return String(n == null ? "" : n).replace(/^\s+|\s+$/g, "").toUpperCase();
+}
+
+/**
+ * Group key for a SEPARATED_ART sublayer = the SPOT swatch its art is actually filled with, so
+ * layers that share a swatch resolve to the same key (e.g. the "PANTONE White" plate layer and
+ * the "White UB 2" underbase layer, both filled with the PANTONE White spot). Falls back to the
+ * layer's own name when no spot fill can be read (e.g. an empty layer), so name matches still work.
+ * This is Option A: visibility is grouped by what the art is actually painted with — no tracking,
+ * no XMP, no hardcoding, so it stays correct after merges/renames.
+ */
+function getSublayerFillSwatchKey(doc, subLayer) {
+ try {
+  var color = getFirstFillColorFromSeparatedArtSublayer(doc, subLayer.name);
+  if (color && color.typename === "SpotColor" && color.spot && color.spot.name) {
+   return normVisibilityName(color.spot.name);
+  }
+ } catch (e) {}
+ return normVisibilityName(subLayer.name);
+}
+
 /*********************************************************
  * Toggle ink visibility according to SEPARATED_ART rules
  *
@@ -2591,86 +2614,72 @@ function handleToggleInkVisibility(params_string) {
    });
   }
 
-  var state = getSeparatedArtVisibilityState(separatedArtLayer);
-  var targetLayer = null;
+  var subs = separatedArtLayer.layers;
+  var total = subs.length;
+  var targetKey = normVisibilityName(inkName);
 
-  for (var i = 0; i < separatedArtLayer.layers.length; i++) {
-   var subLayer = separatedArtLayer.layers[i];
-   if (subLayer.name === inkName) {
-    targetLayer = subLayer;
-    break;
+  // Build the target GROUP: every sublayer whose fill swatch (or name) matches the clicked
+  // swatch. A swatch can back multiple layers (e.g. "PANTONE White" fills both the
+  // "PANTONE White" plate and the "White UB 2" underbase), and the eye must act on all of them.
+  var targetLayers = [];
+  var visibleCount = 0;
+  var visibleGroupKeys = {};
+  for (var i = 0; i < total; i++) {
+   var sl = subs[i];
+   var key = getSublayerFillSwatchKey(doc, sl);
+   if (key === targetKey) { targetLayers.push(sl); }
+   if (sl.visible) {
+    visibleCount++;
+    visibleGroupKeys[key] = true;
    }
   }
 
-  if (!targetLayer) {
+  if (!targetLayers.length) {
    return JSON.stringify({
     success: true,
     layerFound: false,
-    mode: state.mode,
-    message: "Ink sublayer not found in SEPARATED_ART: " + inkName
+    mode: "other",
+    message: "No SEPARATED_ART layer uses swatch: " + inkName
    });
   }
 
-  if (state.mode === "allVisible") {
-   // Switch to Single Visible (Solo Mode)
-   for (var j = 0; j < separatedArtLayer.layers.length; j++) {
-    separatedArtLayer.layers[j].visible = false;
-   }
-   targetLayer.visible = true;
+  function setAllVisibility(vis) {
+   for (var a = 0; a < total; a++) { subs[a].visible = vis; }
+  }
+  function soloTargetGroup() {
+   setAllVisibility(false);
+   for (var t = 0; t < targetLayers.length; t++) { targetLayers[t].visible = true; }
+  }
 
-   // Force redraw
+  var allVisible = (total > 0 && visibleCount === total);
+
+  // Distinct group keys among currently-visible layers: tells "one plate soloed" from "mixed".
+  var distinctVisible = 0, singleVisibleKey = "";
+  for (var vk in visibleGroupKeys) {
+   if (visibleGroupKeys.hasOwnProperty(vk)) { distinctVisible++; singleVisibleKey = vk; }
+  }
+  var oneGroupVisible = (distinctVisible === 1);
+
+  if (allVisible) {
+   // All visible -> solo the clicked group.
+   soloTargetGroup();
    app.redraw();
-
-   return JSON.stringify({
-    success: true,
-    layerFound: true,
-    mode: "singleVisible",
-    activeInk: targetLayer.name
-   });
-  } else if (state.mode === "singleVisible") {
-   // Requirement 3: Exclusive switching logic
-
-   if (targetLayer.visible) {
-    // Clicked the active one -> Show All (Toggle off)
-    for (var k = 0; k < separatedArtLayer.layers.length; k++) {
-     separatedArtLayer.layers[k].visible = true;
-    }
-
-    app.redraw();
-    return JSON.stringify({
-     success: true,
-     layerFound: true,
-     mode: "allVisible"
-    });
-   } else {
-    // Clicked a different one -> Switch to that one (Exclusive)
-    // Hide all first (to ensure the old one is hidden)
-    for (var k = 0; k < separatedArtLayer.layers.length; k++) {
-     separatedArtLayer.layers[k].visible = false;
-    }
-    // Show the new one
-    targetLayer.visible = true;
-
-    app.redraw();
-    return JSON.stringify({
-     success: true,
-     layerFound: true,
-     mode: "singleVisible",
-     activeInk: targetLayer.name
-    });
-   }
+   return JSON.stringify({ success: true, layerFound: true, mode: "singleVisible", activeInk: inkName });
+  } else if (oneGroupVisible && singleVisibleKey === targetKey) {
+   // The clicked group is the one currently soloed -> show all (toggle off).
+   setAllVisibility(true);
+   app.redraw();
+   return JSON.stringify({ success: true, layerFound: true, mode: "allVisible" });
+  } else if (oneGroupVisible && singleVisibleKey !== targetKey) {
+   // A different single group is soloed -> switch solo to the clicked group.
+   soloTargetGroup();
+   app.redraw();
+   return JSON.stringify({ success: true, layerFound: true, mode: "singleVisible", activeInk: inkName });
   } else {
-   // Mixed state -> Default to Show All
-   for (var m = 0; m < separatedArtLayer.layers.length; m++) {
-    separatedArtLayer.layers[m].visible = true;
-   }
-
+   // Genuinely mixed state -> default to Show All (matches previous behavior).
+   setAllVisibility(true);
    app.redraw();
-   return JSON.stringify({
-    success: true,
-    layerFound: true,
-    mode: "allVisible"
-   });
+   return JSON.stringify({ success: true, layerFound: true, mode: "allVisible" });
   }
  } catch (e) {
   return JSON.stringify({
@@ -3455,17 +3464,115 @@ function handleGetGraphicSwatches(params_string) {
    league = leagueSepFolder.name;
    teamCode = teamCodeFolder.name;
 
-   // Use layer names from XMP SeparatedLayerNames
-   // These are the actual layer names from SEPARATED_ART layer (swatch names like "PANTONE 189 C", "White UB", etc.)
-   var swatchNames = filterPlateLayerNamesForUi(layerNames, profileMetaForPlates);
+   // Plate source = SPOT SWATCHES that also exist as a SEPARATED_ART layer.
+   //
+   // We iterate the LIVE SEPARATED_ART sublayers (ground truth for what plates exist in
+   // the document right now) in their stacking order, and keep a plate ONLY when a spot
+   // swatch with the same name still exists. This means:
+   //   - "Choke" has a layer but no swatch  -> dropped (as desired; no Choke swatch).
+   //   - A swatch merged/removed in the Swatches panel (e.g. "White UB 2" merged into
+   //     "PANTONE White C") drops its plate on the next fetch, because the layer remains
+   //     but the swatch is gone. The surviving swatch ("PANTONE White C") still shows.
+   //   - Blocker / White UB / White UB 2-4 / "… 2" second hits all keep real spot
+   //     swatches, so they remain.
+   // Reserved bracketed swatches like "[Registration]" / "[None]" are skipped (and have
+   // no layer anyway). Colors are read from the spot swatch via resolveLayerSwatchData.
+   var liveLayerNames = getSeparatedArtLayerNames(activeDoc);
+   if (!liveLayerNames || !liveLayerNames.length) {
+    // Fallback to the XMP-derived list only if the live layer read failed.
+    liveLayerNames = filterPlateLayerNamesForUi(layerNames, profileMetaForPlates);
+   }
+
+   // Build a case-insensitive lookup of existing SPOT swatches from the SWATCHES PANEL
+   // (activeDoc.swatches), NOT activeDoc.spots. When a swatch is merged in the Swatches panel,
+   // the panel entry (swatches) is removed immediately, but the underlying spot object can
+   // linger in activeDoc.spots until the document is saved/reopened. Keying off activeDoc.spots
+   // therefore kept a merged-away plate (e.g. "White UB 2") visible until reopen. The Swatches
+   // panel reflects the merge right away, so we intersect against it and require SpotColor type.
+   function normalizePlateName(n) {
+    return String(n == null ? "" : n).replace(/^\s+|\s+$/g, "").toUpperCase();
+   }
+   /*
+    * Structural SEPARATED_ART layers (Choke, Blocker/Blocker N, White UB / White UB N) are the
+    * underbase + trap stack, not user inks. They are EXCLUDED from rename-recovery below so the
+    * documented behavior is preserved: e.g. a "White UB 2" layer that shares the white plate's
+    * swatch must NOT surface as its own plate. Renamed user inks never carry these names, so this
+    * guard only blocks the structural layers, never a genuinely renamed ink plate.
+    */
+   function isStructuralPlateLayerName(n) {
+    var up = normalizePlateName(n);
+    if (up === normalizePlateName(CONSTANTS.LAYER_NAMES.CHOKE)) { return true; }
+    if (up.indexOf(normalizePlateName(CONSTANTS.LAYER_NAMES.BLOCKER)) === 0) { return true; }
+    if (up.indexOf(normalizePlateName(CONSTANTS.LAYER_NAMES.WHITE_UB)) === 0) { return true; }
+    return false;
+   }
+   var spotSwatchLookup = {};
+   try {
+    for (var si = 0; si < activeDoc.swatches.length; si++) {
+     var sw = activeDoc.swatches[si];
+     var swName = sw ? sw.name : null;
+     if (!swName) { continue; }
+     if (String(swName).charAt(0) === "[") { continue; } // skip [Registration], [None], etc.
+     var swColor = null;
+     try { swColor = sw.color; } catch (colErr) { swColor = null; }
+     if (!swColor || swColor.typename !== "SpotColor") { continue; } // spot swatches only
+     spotSwatchLookup[normalizePlateName(swName)] = true;
+    }
+   } catch (spotErr) {}
 
    var swatches = [];
+   /*
+    * De-dupe by the FINAL (resolved) plate name so a swatch merge, or a rename onto an already
+    * existing plate name, can never list the same plate twice. First match in stacking order wins.
+    */
+   var seenPlateKeys = {};
+   for (var i = 0; i < liveLayerNames.length; i++) {
+    var layerNm = liveLayerNames[i];
+    var plateName = null;
 
-   // For each swatch name from XMP SeparatedLayerNames, fetch CMYK/RGB from document swatches
-   // Example: If layer name is "PANTONE 189 C", search for that swatch in the document and get its CMYK values
-   for (var i = 0; i < swatchNames.length; i++) {
-    var swatchName = swatchNames[i];
-    swatches.push(resolveLayerSwatchData(activeDoc, swatchName));
+    if (spotSwatchLookup[normalizePlateName(layerNm)]) {
+     /*
+      * Primary path (unchanged): the layer name still matches a live spot swatch in the panel.
+      * This keeps delete / Choke / Blocker / White UB / second-hit ("... 2") behavior identical.
+      */
+     plateName = layerNm;
+    } else if (!isStructuralPlateLayerName(layerNm)) {
+     /*
+      * Rename recovery (identity match). An ink-plate layer whose name no longer matches any
+      * swatch may simply have had its swatch RENAMED in the Swatches panel (e.g. XYZ -> TEST):
+      * renaming a swatch does NOT rename the layer, so the name-only intersection above wrongly
+      * dropped it. Match by IDENTITY instead - read the spot the layer's art is actually filled
+      * with and, if that spot is still a live panel swatch, keep the plate under its CURRENT
+      * (renamed) name.
+      *
+      * This does NOT resurrect deleted swatches: deleting a swatch leaves the art with a non-spot
+      * (process) fill, and Choke's fill is [None]; both fail the SpotColor test and still drop.
+      * Bracketed reserved swatches ([Registration]/[None]) are skipped as everywhere else.
+      */
+     var fillColor = getFirstFillColorFromSeparatedArtSublayer(activeDoc, layerNm);
+     if (
+      fillColor &&
+      fillColor.typename === "SpotColor" &&
+      fillColor.spot &&
+      fillColor.spot.name &&
+      String(fillColor.spot.name).charAt(0) !== "[" &&
+      spotSwatchLookup[normalizePlateName(fillColor.spot.name)]
+     ) {
+      plateName = String(fillColor.spot.name);
+     }
+    }
+
+    if (!plateName) {
+     continue; // no live swatch backs this layer (deleted / Choke / empty) -> not a plate
+    }
+
+    var plateKey = normalizePlateName(plateName);
+    if (seenPlateKeys[plateKey]) {
+     continue; // already represented (e.g. two layers now share one merged/renamed swatch)
+    }
+    seenPlateKeys[plateKey] = true;
+
+    swatches.push(resolveLayerSwatchData(activeDoc, plateName));
    }
 
    return JSON.stringify({

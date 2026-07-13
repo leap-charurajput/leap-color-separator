@@ -1,0 +1,47 @@
+<div class="report-problem">
+ <div class="report-problem__header">
+  <h2 class="report-problem__title">Report a problem</h2>
+  <button
+   type="button"
+   class="report-problem__reset"
+   title="Clear form"
+   aria-label="Clear form"
+   (click)="reset()">
+   <span class="material-icons">refresh</span>
+  </button>
+ </div>
+
+ <div class="report-problem__body">
+  <label class="report-problem__label" for="reportDescription">Describe the issue</label>
+  <textarea
+   id="reportDescription"
+   class="report-problem__textarea"
+   [(ngModel)]="description"
+   [disabled]="submitting"
+   rows="6"
+   placeholder="What went wrong? Steps to reproduce, what you expected, what happened."></textarea>
+
+  <div class="report-problem__checks">
+   <app-checkbox [(ngModel)]="firstTime" label="First time issue"></app-checkbox>
+   <app-checkbox [(ngModel)]="otherMachine" label="Tested on another machine"></app-checkbox>
+   <app-checkbox [(ngModel)]="otherDoc" label="Tested on another document"></app-checkbox>
+  </div>
+
+  <p
+   *ngIf="resultMessage"
+   class="report-problem__result"
+   [class.is-ok]="resultOk === true"
+   [class.is-error]="resultOk === false">
+   {{ resultMessage }}
+  </p>
+ </div>
+
+ <div class="report-problem__footer">
+  <app-button
+   variant="primary"
+   [disabled]="!canSubmit"
+   (onClick)="submit()">
+   {{ submitting ? 'Submitting…' : 'Submit issue report' }}
+  </app-button>
+ </div>
+</div>
