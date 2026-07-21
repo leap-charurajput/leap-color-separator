@@ -258,7 +258,7 @@
 .profile-ub-table-header,
 .profile-ub-row {
  display: grid;
- grid-template-columns: minmax(108px, 1.2fr) 64px minmax(110px, 1fr);
+ grid-template-columns: minmax(92px, 1fr) minmax(88px, 1.1fr) 64px minmax(104px, 1fr);
  align-items: center;
  gap: 0;
  box-sizing: border-box;
@@ -295,6 +295,19 @@
 
 .profile-ub-cell-underbase {
  justify-self: start;
+}
+
+.profile-ub-cell-name {
+ justify-content: flex-start;
+ width: 100%;
+ padding-right: 8px;
+}
+
+.profile-ub-name-input {
+ width: 100%;
+ box-sizing: border-box;
+ text-align: left;
+ padding: 3px 5px;
 }
 
 .profile-ub-cell-mesh {
@@ -849,4 +862,108 @@ body.medium-light .profile-ink-pill--ub.is-matches-default:not(:disabled):not(.i
  border-top: 1px solid var(--profile-modal-divider);
  box-sizing: border-box;
  flex-shrink: 0;
+}
+
+/* Import + Add buttons live on their own row below the title/search */
+.profile-ink-actions-row {
+ display: flex;
+ align-items: center;
+ justify-content: flex-end;
+ gap: 8px;
+ width: 100%;
+ margin-top: 8px;
+ flex-shrink: 0;
+}
+
+/* Labeled (icon + text) variant of the pill button, e.g. Import */
+.profile-ink-btn-labeled {
+ width: auto;
+ padding: 0 10px;
+ gap: 4px;
+}
+
+.profile-ink-btn-labeled[disabled] {
+ opacity: 0.6;
+ cursor: default;
+}
+
+/* Import button label (sits inside the .profile-ink-btn-labeled pill) */
+.profile-ink-add-btn-label {
+ font-size: 11px;
+ font-weight: 600;
+}
+
+/* Import Ink Exceptions dialog */
+.ink-import-overlay {
+ position: fixed;
+ top: 0;
+ left: 0;
+ right: 0;
+ bottom: 0;
+ background-color: rgba(0, 0, 0, 0.6);
+ display: flex;
+ align-items: center;
+ justify-content: center;
+ z-index: 1100;
+}
+
+.ink-import-dialog {
+ background-color: #3a3a3a;
+ border: 1px solid #555555;
+ border-radius: 4px;
+ width: 360px;
+ max-width: calc(100vw - 24px);
+ box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+ color: #ffffff;
+ font-family: 'Adobe Clean', sans-serif;
+}
+
+.ink-import-header {
+ padding: 8px 12px;
+ border-bottom: 1px solid #555555;
+ font-size: 12px;
+ font-weight: 600;
+ text-align: center;
+}
+
+.ink-import-body {
+ padding: 14px 14px 6px;
+}
+
+.ink-import-summary {
+ margin: 0 0 8px;
+ font-size: 12px;
+}
+
+.ink-import-dupes {
+ margin: 0 0 10px;
+ padding: 6px 8px;
+ border-radius: 4px;
+ background: rgba(255, 203, 0, 0.12);
+ border: 1px solid rgba(255, 203, 0, 0.4);
+ font-size: 11px;
+ line-height: 1.4;
+}
+
+.ink-import-error {
+ margin: 0;
+ font-size: 12px;
+ color: #ffb3b3;
+}
+
+.ink-import-actions {
+ display: flex;
+ flex-wrap: wrap;
+ gap: 8px;
+ margin-top: 4px;
+}
+
+.ink-import-actions app-button {
+ font-size: 11px;
+}
+
+.ink-import-footer {
+ padding: 10px 14px 12px;
+ display: flex;
+ justify-content: flex-end;
 }

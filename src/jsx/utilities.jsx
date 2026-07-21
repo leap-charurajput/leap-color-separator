@@ -1444,6 +1444,19 @@ function inkExceptionNameMatchesName(exceptionInk, targetName) {
  if (!needle || !target) return false;
  if (target === needle) return true;
 
+ /*
+  * Ink names reformatted after separation (e.g. a custom "LS ####" label) drop the "PANTONE"
+  * prefix but keep the Pantone number. Match the exception's number as a standalone digit token so
+  * the exception still resolves against the current (formatted) layer name — this is what lets the
+  * localized underbase (e.g. White UB 2) rebuild on "Generate underbase from existing inks". Digit
+  * boundaries keep "123" from matching "1235".
+  */
+ var exceptionDigitRun = (needle.match(/\d{2,}/) || [])[0];
+ if (exceptionDigitRun) {
+  var digitTokenRe = new RegExp("(?:^|[^0-9])" + exceptionDigitRun + "(?:[^0-9]|$)");
+  if (digitTokenRe.test(target)) return true;
+ }
+
  var numericNeedle = needle.replace(/\s+/g, "");
  if (/^\d+[A-Z]?$/.test(numericNeedle)) {
   var pantoneRe = new RegExp(
@@ -1793,9 +1806,8 @@ function updateVariablesInDocument(doc, jsonData, styleCodes, profileMetadata) {
       value = String(meta.separationColorCount);
      }
     } else if (key === 'v#') {
-     if (meta.separationVersion != null && meta.separationVersion !== '') {
-      value = formatSeparationVersionLabel(meta.separationVersion);
-     }
+     /* [V#] is written only at export (with the control number) — leave the placeholder untouched here. */
+     value = null;
     } else {
      value = findValueInJSON(jsonData, variableName);
     }

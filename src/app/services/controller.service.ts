@@ -820,12 +820,21 @@ export class ControllerService {
   let underbaseCount = enabled && row?.underbaseCount != null ? parseInt(row.underbaseCount, 10) : 1;
   if (isNaN(underbaseCount) || underbaseCount < 1) underbaseCount = 1;
   if (underbaseCount > 4) underbaseCount = 4;
+  /* Prefer the row's own profileCode/Profile (carried from the imported Excel), else the passed defaults. */
+  const rowProfileCode =
+   row?.profileCode != null && String(row.profileCode).trim() !== ''
+    ? String(row.profileCode).trim()
+    : (profileCode != null ? String(profileCode).trim() : '');
+  const rowProfile =
+   row?.profile != null && String(row.profile).trim() !== ''
+    ? String(row.profile).trim()
+    : profileName;
   return {
    Color_Mesh: colorMesh,
    Ink_Color: inkColor,
    Print_Method: row?.printMethod != null ? String(row.printMethod).trim() : '',
-   Profile: profileName,
-   profileCode: profileCode != null ? String(profileCode).trim() : '',
+   Profile: rowProfile,
+   profileCode: rowProfileCode,
    Two_Hits: hitsCount >= 2 ? 'Y' : 'N',
    underbase_count: underbaseCount
   };
@@ -896,6 +905,215 @@ export class ControllerService {
      error: err?.message || String(err) || 'Failed to read profile_ink_exceptions.json'
     };
    }
+  });
+ }
+
+ /**
+  * Let the user pick an Excel/CSV from their own system and parse it into ink-exception rows.
+  * Columns are matched case-insensitively (Ink Name / Mesh / Underbase Count / Hits / Print Method).
+  * Returns { success, rows, filePath } or { canceled: true } when the picker is dismissed.
+  */
+ importInkExceptionsFromExcel(): Promise<{ success: boolean; rows?: any[]; filePath?: string; error?: string; canceled?: boolean }> {
+  return new Promise((resolve) => {
+   try {
+    const cep = (window as any).cep;
+    if (!cep || !cep.fs) {
+     resolve({ success: false, error: 'File system not available' });
+     return;
+    }
+    /* File picker (not a folder); filter to spreadsheet types where supported. */
+    const dialog = cep.fs.showOpenDialog(false, false, 'Select Ink Exceptions Excel', null, ['xlsx', 'xls', 'csv']);
+    if (!dialog || dialog.err !== 0) {
+     resolve({ success: false, error: 'Could not open file dialog (' + (dialog ? dialog.err : 'no response') + ')' });
+     return;
+    }
+    if (!dialog.data || dialog.data.length === 0) {
+     resolve({ success: false, canceled: true });
+     return;
+    }
+    let filePath = String(dialog.data[0] || '');
+    if (filePath.indexOf('file://') === 0) {
+     try { filePath = decodeURIComponent(filePath.replace('file://', '')); } catch (_) { filePath = filePath.replace('file://', ''); }
+    }
+    /*
+     * Read the Excel through the leap bundle (window.leap.readExcelRows). The `xlsx` module is
+     * webpacked into the bundle, so it is NOT resolvable via cep_node.require('xlsx') from here.
+     */
+    const leap = (window as any).leap;
+    if (!leap || typeof leap.readExcelRows !== 'function') {
+     resolve({ success: false, error: 'Excel reader unavailable — rebuild the LEAP bundle (npm run build-and-setup).' });
+     return;
+    }
+    Promise.all([
+     Promise.resolve(leap.readExcelRows(filePath)),
+     this.getSeparationProfiles().catch(() => null)
+    ])
+     .then(([read, profilesResult]: any[]) => {
+      if (!read || !read.success) {
+       resolve({ success: false, error: (read && read.error) || 'Failed to read the selected file' });
+       return;
+      }
+      let rows = this.mapInkExceptionExcelRows(Array.isArray(read.rows) ? read.rows : []);
+      /*
+       * The authoritative profileCode comes from Profiles.json, matched by the Excel's Profile NAME —
+       * so the Excel no longer needs a Profile Code column. This keeps imported exceptions keyed by the
+       * real code (e.g. FAN_PLST, JER_WB) that the app matches on.
+       */
+      rows = this.applyProfileCodesFromProfilesJson(rows, profilesResult);
+      if (rows.length === 0) {
+       resolve({ success: false, error: 'No ink rows found. Expected a header row with an "Ink Name" (or "Ink") column.' });
+       return;
+      }
+      resolve({ success: true, rows, filePath });
+     })
+     .catch((e: any) => resolve({ success: false, error: e?.message || String(e) }));
+   } catch (e: any) {
+    resolve({ success: false, error: e?.message || String(e) });
+   }
+  });
+ }
+
+ /* Map raw spreadsheet objects (keyed by header) to ink-exception rows with flexible header names. */
+ private mapInkExceptionExcelRows(raw: any[]): any[] {
+  const pick = (obj: any, keys: string[]): string => {
+   const lowerMap: any = {};
+   Object.keys(obj || {}).forEach((k) => {
+    lowerMap[String(k).trim().toLowerCase()] = obj[k];
+   });
+   for (const key of keys) {
+    const v = lowerMap[key];
+    if (v != null && String(v).trim() !== '') return String(v).trim();
+   }
+   return '';
+  };
+  /*
+   * Count filled "WUB Mesh 1".."WUB Mesh 4" columns (the underbase passes in the Inks.xlsx layout)
+   * so the underbase count is derived when there is no explicit numeric underbase column.
+   */
+  const countWubMeshColumns = (obj: any): number => {
+   const lowerMap: any = {};
+   Object.keys(obj || {}).forEach((k) => {
+    lowerMap[String(k).trim().toLowerCase()] = obj[k];
+   });
+   let n = 0;
+   for (let i = 1; i <= 4; i++) {
+    const v = lowerMap['wub mesh ' + i];
+    if (v != null && String(v).trim() !== '') n++;
+   }
+   return n;
+  };
+  const out: any[] = [];
+  for (const r of raw) {
+   if (!r || typeof r !== 'object') continue;
+   /* Ink identifier — supports the Inks.xlsx header ("Ink Color") and the raw source headers. */
+   const inkName = pick(r, [
+    'ink name', 'ink', 'ink_color', 'inkcolor', 'ink color', 'color', 'colour',
+    'pantone', 'pantone color', 'csi color'
+   ]);
+   if (!inkName) continue;
+   /* Mesh — includes the Inks.xlsx "Color Mesh" and the source "HSWB MESH". */
+   const mesh = pick(r, ['mesh', 'mesh count', 'mesh_count', 'color mesh', 'hswb mesh']);
+   const ubRaw = pick(r, ['underbase count', 'underbase', 'underbase_count', 'underbases', 'ub count']);
+   /* Hits — numeric column, or the Inks.xlsx "Two Hits" (Y/N) flag. */
+   const hitsRaw = pick(r, ['hits count', 'hits', 'hit', 'hits_count', 'no of hits', 'number of hits', 'two hits']);
+   const printMethod = pick(r, ['print method', 'method', 'print_method', 'printmethod']);
+   /* profileCode comes from the Excel and is kept on every JSON entry so exceptions load per profile. */
+   const profileCodeRaw = pick(r, ['profilecode', 'profile code', 'profile_code', 'code']);
+   const profileRaw = pick(r, ['profile', 'profile name', 'profile_name']);
+   /* Garment/substrate type (Cotton/Poly/Jersey) — used to build a profile code from Profile + Type. */
+   const typeRaw = pick(r, ['type', 'garment', 'garment type', 'substrate', 'material', 'fabric']);
+   /*
+    * Effective profile code: an explicit profileCode column wins; otherwise derive it from the
+    * ProfileName + Type combo (e.g. "Fanatics-Plastisol" + "Cotton" -> "Fanatics-Plastisol_Cotton").
+    */
+   const effectiveProfileCode =
+    profileCodeRaw !== ''
+     ? profileCodeRaw
+     : profileRaw !== ''
+      ? typeRaw !== ''
+       ? profileRaw + '_' + typeRaw
+       : profileRaw
+      : '';
+   const enabledRaw = pick(r, ['enabled', 'active']);
+
+   /* Underbase count: explicit numeric column first, otherwise the number of filled WUB Mesh columns. */
+   let underbaseCount = 1;
+   const ubNum = parseInt(ubRaw, 10);
+   if (!isNaN(ubNum)) {
+    underbaseCount = Math.max(1, Math.min(4, ubNum));
+   } else {
+    const wubCount = countWubMeshColumns(r);
+    if (wubCount > 0) underbaseCount = Math.max(1, Math.min(4, wubCount));
+   }
+
+   /* Hits count: a number (1/2), or a Y/N-style "Two Hits" value (Y/Yes/True → 2, else 1). */
+   let hitsCount = 1;
+   const hitsNum = parseInt(hitsRaw, 10);
+   if (!isNaN(hitsNum)) {
+    hitsCount = Math.max(1, Math.min(2, hitsNum));
+   } else if (/^(y|yes|true)$/i.test(String(hitsRaw).trim())) {
+    hitsCount = 2;
+   }
+
+   out.push({
+    inkName,
+    mesh,
+    underbaseCount,
+    hitsCount,
+    printMethod,
+    profileCode: effectiveProfileCode,
+    profile: profileRaw,
+    type: typeRaw,
+    enabled: enabledRaw === '' ? true : /^(y|yes|true|1|enabled|active|on)$/i.test(enabledRaw)
+   });
+  }
+  return out;
+ }
+
+ /*
+  * Overwrite each imported row's profileCode with the code from Profiles.json, matched by the Excel's
+  * Profile NAME (case-insensitive; unicode dashes and whitespace normalized the same way the app's
+  * profile lookup does). The Excel only needs a Profile name column — the authoritative code
+  * (e.g. FAN_PLST, JER_WB) lives in Profiles.json. Falls back to a code match, then to whatever the row
+  * already carried, so nothing breaks when a profile isn't found.
+  */
+ private applyProfileCodesFromProfilesJson(rows: any[], profilesResult: any): any[] {
+  const profiles =
+   profilesResult && profilesResult.success && Array.isArray(profilesResult.profiles)
+    ? profilesResult.profiles
+    : Array.isArray(profilesResult)
+     ? profilesResult
+     : [];
+  if (!Array.isArray(rows) || rows.length === 0 || profiles.length === 0) {
+   return rows;
+  }
+  const norm = (v: any) =>
+   String(v == null ? '' : v)
+    .replace(/[\u2010-\u2015]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
+  const codeByName = new Map<string, string>();
+  const codeByCode = new Map<string, string>();
+  for (const pf of profiles) {
+   if (!pf) continue;
+   const nameKey = norm(
+    pf['Profile Name'] != null ? pf['Profile Name'] : pf.profileName != null ? pf.profileName : pf.name
+   );
+   const codeRaw =
+    pf['Profile Code'] != null ? pf['Profile Code'] : pf.profileCode != null ? pf.profileCode : pf.code;
+   const code = codeRaw != null ? String(codeRaw).trim() : '';
+   if (code === '') continue;
+   if (nameKey) codeByName.set(nameKey, code);
+   codeByCode.set(norm(code), code);
+  }
+  return rows.map((r) => {
+   if (!r || typeof r !== 'object') return r;
+   const resolved =
+    codeByName.get(norm(r.profile)) ||
+    codeByCode.get(norm(r.profileCode)) ||
+    (r.profileCode != null ? String(r.profileCode) : '');
+   return { ...r, profileCode: resolved };
   });
  }
 
@@ -1347,6 +1565,12 @@ export class ControllerService {
  getGraphicPositionOptionsFromJson(): Promise<{
   success: boolean;
   placements: string[];
+  /*
+   * Full DESC/ABBV entries parsed from graphic_positions.json. Consumers that
+   * need the abbreviations (e.g. the export settings "Positions" chips) read
+   * this instead of `placements`, which only carries the descriptions.
+   */
+  entries?: Array<{ desc: string; abbv: string }>;
   error?: string;
  }> {
   return this.getLeapServerDataPath().then((basePath) => {
@@ -1391,7 +1615,7 @@ export class ControllerService {
      a.localeCompare(b, undefined, { sensitivity: 'base' })
     );
 
-    return { success: true, placements };
+    return { success: true, placements, entries };
    } catch (error: any) {
     this.graphicPositionLookup = [];
     return {
@@ -1814,6 +2038,73 @@ function getExportXmpMetadata(doc) {
  return null;
 }
 
+/*
+ * Read the configured LEAP server base path from the local settings file.
+ * Mirrors getServerBasePath() in cep_adapters.jsx so this resolver stays
+ * self-contained and independent of the JSX bundle's load order.
+ */
+function getExportServerBasePath() {
+ try {
+  var documentsFolder = Folder.myDocuments || new Folder("~/Documents");
+  var settingsFile = new File(documentsFolder.fsName + "/LEAP Settings/logobaseDataPathSettings.json");
+  if (!settingsFile.exists) return null;
+  if (!settingsFile.open("r")) return null;
+  var content = settingsFile.read();
+  settingsFile.close();
+  var parsed = parseExportJsonSafe(content);
+  if (parsed && parsed.basePath) return parsed.basePath;
+ } catch (e) {}
+ return null;
+}
+
+/*
+ * Load the DESC/ABBV graphic position lookup from
+ * <ServerBasePath>/SETTINGS/graphic_positions.json. Returns [] on any failure.
+ */
+function loadExportGraphicPositionLookup() {
+ try {
+  var basePath = getExportServerBasePath();
+  if (!basePath) return [];
+  var normalizedBasePath = String(basePath).replace(/\\/$/, "");
+  var lookupFile = new File(normalizedBasePath + "/SETTINGS/graphic_positions.json");
+  if (!lookupFile.exists) return [];
+  if (!lookupFile.open("r")) return [];
+  var content = lookupFile.read();
+  lookupFile.close();
+  var parsed = parseExportJsonSafe(content);
+  return (parsed && parsed instanceof Array) ? parsed : [];
+ } catch (e) {
+  return [];
+ }
+}
+
+/*
+ * Resolve a position DESC to its ABBV via graphic_positions.json — the same
+ * mapping used to fill the Illustrator document [POS] token. Falls back to the
+ * original description when no match is found so [POS] is never left blank.
+ */
+function getExportGraphicPositionAbbreviation(positionDesc) {
+ if (positionDesc == null) return "";
+ var original = trimExportString(positionDesc);
+ if (!original) return "";
+ try {
+  var target = original.toLowerCase();
+  var lookup = loadExportGraphicPositionLookup();
+  for (var i = 0; i < lookup.length; i++) {
+   var entry = lookup[i];
+   if (!entry) continue;
+   var desc = entry.DESC != null ? entry.DESC : (entry.desc != null ? entry.desc : "");
+   if (!desc) continue;
+   if (trimExportString(desc).toLowerCase() === target) {
+    var abbv = entry.ABBV != null ? entry.ABBV : (entry.abbv != null ? entry.abbv : "");
+    if (abbv != null && trimExportString(abbv) !== "") return trimExportString(abbv);
+    break;
+   }
+  }
+ } catch (e) {}
+ return original;
+}
+
 function getOriginalDocBaseName(docFile) {
  var fileName = docFile.name || "";
  var aiName = fileName.replace(/\\.ai$/i, "");
@@ -1884,6 +2175,16 @@ function getExportVariableContext(doc) {
  setExportAlias(aliases, "Profile Name", meta.profileName);
  setExportAlias(aliases, "Graphic Position", meta.position || meta.graphicPosition);
  setExportAlias(aliases, "Position", meta.position || meta.graphicPosition);
+ /*
+  * [POS] resolves to the graphic position ABBREVIATION (via graphic_positions.json),
+  * matching the value written into the Illustrator document [POS] token. Falls back
+  * to the raw position description when no abbreviation is found. Set after the
+  * raw-value aliases above so it wins for the "POS" key without altering [Position].
+  */
+ var posDescForToken = meta.position || meta.graphicPosition;
+ if (posDescForToken) {
+  setExportAlias(aliases, "POS", getExportGraphicPositionAbbreviation(posDescForToken));
+ }
  setExportAlias(aliases, "Art Code", meta.graphicName);
  setExportAlias(aliases, "Graphic Name", meta.graphicName);
  setExportAlias(aliases, "Color Code", meta.colorCodes);
@@ -2099,7 +2400,127 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
 `;
  }
 
- exportPrintGuidePDF(): Promise<any> {
+ /**
+  * Write the user-entered Control number and Version number into the active document before export,
+  * then SAVE. First export: the bracketed tokens [CONTROL] / [V#] are replaced in place. Repeat export:
+  * those tokens are already gone, so the dedicated text frames named CONTROL_NUMBER / VERSION_NUMBER
+  * are overwritten by name. Matching lowercases the frame name and loops every frame, so the names may
+  * be any case (CONTROL_NUMBER, Control_Number, …) and there may be more than one of each.
+  */
+ updateControlAndVersionNumbers(controlNumber: string, versionNumber: string): Promise<any> {
+  this.log('updateControlAndVersionNumbers called');
+  const controlLiteral = JSON.stringify(String(controlNumber == null ? '' : controlNumber));
+  /* Auto-prefix "V" only when the entered version doesn't already start with V/v (e.g. "3" -> "V3", "V3" -> "V3"). */
+  const versionRaw = String(versionNumber == null ? '' : versionNumber).trim();
+  const versionValue = versionRaw !== '' && !/^v/i.test(versionRaw) ? 'V' + versionRaw : versionRaw;
+  const versionLiteral = JSON.stringify(versionValue);
+  return this.ensureSession().then(() => {
+   const script = `
+(function() {
+  try {
+    if (!app.documents.length) {
+      return JSON.stringify({ success: false, error: "No active document found" });
+    }
+    var doc = app.activeDocument;
+    var control = ${controlLiteral};
+    var version = ${versionLiteral};
+    var replaced = 0;
+    if (doc.textFrames) {
+      for (var i = 0; i < doc.textFrames.length; i++) {
+        var tf = doc.textFrames[i];
+        var content = tf.contents;
+        if (content == null) { continue; }
+        var frameName = String(tf.name || "").toLowerCase().replace(/\\s+/g, "_");
+        var updated = String(content).replace(/\\[CONTROL\\]/gi, control).replace(/\\[V#\\]/gi, version);
+        if (frameName === "control_number" && control !== "") {
+          updated = control;
+        } else if (frameName === "version_number" && version !== "") {
+          updated = version;
+        }
+        if (updated !== content) {
+          tf.contents = updated;
+          replaced++;
+        }
+      }
+    }
+    // Save the file in place so the control/version numbers are baked in before PostScript export.
+    doc.save();
+    return JSON.stringify({ success: true, replaced: replaced });
+  } catch (e) {
+    return JSON.stringify({ success: false, error: "Error updating control number: " + (e.message || e.toString()) });
+  }
+})();
+`;
+   return evalScript(script)
+    .then((res: any) => {
+     const str = typeof res === 'string' ? res : '';
+     try {
+      return str ? JSON.parse(str) : { success: false, error: 'Empty response from host' };
+     } catch (e) {
+      return { success: false, error: 'Invalid JSON response from host', raw: str };
+     }
+    });
+  });
+ }
+
+/*
+  * Write the Plates-UI total color count into the sheet's [C#] tokens and any text frames named
+  * "TOTAL COLORS" (case-insensitive, one or more allowed). The count is supplied by the Plates UI
+  * (every non-removed plate: inks + White UB + Blocker) rather than derived from the raw
+  * SEPARATED_ART layers, and is pushed whenever the plates (re)load, regenerate, or a color is
+  * removed, so the number always matches what the user sees. First fill replaces the [C#] token;
+  * later updates overwrite the "TOTAL COLORS" frame(s) by name. Only saves when something changed.
+  */
+ updateTotalColors(count: number): Promise<any> {
+  this.log('updateTotalColors called');
+  const countLiteral = JSON.stringify(String(count == null ? '' : count));
+  return this.ensureSession().then(() => {
+   const script = `
+(function() {
+  try {
+    if (!app.documents.length) {
+      return JSON.stringify({ success: false, error: "No active document found" });
+    }
+    var doc = app.activeDocument;
+    var count = ${countLiteral};
+    var replaced = 0;
+    if (doc.textFrames) {
+      for (var i = 0; i < doc.textFrames.length; i++) {
+        var tf = doc.textFrames[i];
+        var content = tf.contents;
+        if (content == null) { continue; }
+        var frameName = String(tf.name || "").toLowerCase().replace(/\\s+/g, "_");
+        var updated = String(content).replace(/\\[C#\\]/gi, count);
+        if (frameName === "total_colors" && count !== "") {
+          updated = count;
+        }
+        if (updated !== content) {
+          tf.contents = updated;
+          replaced++;
+        }
+      }
+    }
+    // Persist only when a frame actually changed, to avoid marking the doc dirty on every reload.
+    if (replaced > 0) { try { doc.save(); } catch (saveErr) {} }
+    return JSON.stringify({ success: true, replaced: replaced });
+  } catch (e) {
+    return JSON.stringify({ success: false, error: "Error updating total colors: " + (e.message || e.toString()) });
+  }
+})();
+`;
+   return evalScript(script)
+    .then((res: any) => {
+     const str = typeof res === 'string' ? res : '';
+     try {
+      return str ? JSON.parse(str) : { success: false, error: 'Empty response from host' };
+     } catch (e) {
+      return { success: false, error: 'Invalid JSON response from host', raw: str };
+     }
+    });
+  });
+ }
+
+  exportPrintGuidePDF(): Promise<any> {
   this.log('exportPrintGuidePDF called');
 
   return this.ensureSession().then(() => {
@@ -2675,7 +3096,13 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
   }
  }
 
- /** Distill PostScript at postscript path; place PDF at separationPreviewFilePath only. */
+ /**
+  * Distill the PostScript into a PDF that lives BESIDE the .ps in the Postscript
+  * folder (same base name, .pdf extension) — so the Postscript file path folder
+  * holds both the .ps and the .pdf. This is exactly where Distiller writes the
+  * PDF, so no move is required. (The "Separation file path" is used for the
+  * separation .ai copy instead — see copySeparationFile.)
+  */
  async distillSeparationsPreviewPDF(sourcePsPath: string): Promise<any> {
   this.log('distillSeparationsPreviewPDF called for: ' + sourcePsPath);
   if (!sourcePsPath) {
@@ -2685,16 +3112,13 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
    };
   }
 
-  const resolved = await this.resolveSeparationsPreviewExportPath();
-  if (!resolved?.success || !resolved.filePath) {
-   return {
-    success: false,
-    error: resolved?.error || 'Could not resolve Separations Preview export path'
-   };
-  }
-  const targetPdfPath = resolved.filePath;
+  /*
+   * Target the companion PDF path (the .ps path with a .pdf extension) so the
+   * distilled PDF stays in the Postscript folder next to the .ps.
+   */
+  const targetPdfPath = this.companionPdfPathForPs(sourcePsPath);
   console.log('[distillSeparationsPreviewPDF] source PS:', sourcePsPath);
-  console.log('[distillSeparationsPreviewPDF] target Separation Preview PDF:', targetPdfPath);
+  console.log('[distillSeparationsPreviewPDF] target PDF (Postscript folder):', targetPdfPath);
 
   const distillerStartedAt = Date.now();
   const distiller = await this.launchDistiller(sourcePsPath);
@@ -2750,8 +3174,85 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
    distiller,
    opened: opened.success,
    message: 'Separations Preview PDF created via Distiller.',
-   note: 'PDF moved to Separation Preview file path. PostScript (.ps) remains at Postscript file path only.'
+   note: 'PDF written beside the .ps in the Postscript folder (Postscript file path holds both .ps and .pdf).'
   };
+ }
+
+ /**
+  * Copy the active separation .ai file to the resolved "Separation file path"
+  * (the separationPreviewFilePath export setting). The path template is token-aware
+  * (e.g. [POS], [Art Code], recursive folders) and the file is named accordingly
+  * with a .ai extension. Skips silently when the template is empty or when the
+  * resolved target is the source file itself. Returns { success, filePath, skipped }.
+  */
+ copySeparationFile(): Promise<{ success: boolean; filePath?: string; skipped?: boolean; error?: string }> {
+  this.log('copySeparationFile called');
+  return this.ensureSession().then(() => {
+   const exportPathResolverCode = this.buildExportPathResolverScript();
+   const script = `
+(function() {
+  ${exportPathResolverCode}
+  try {
+    if (!app.documents.length) {
+      return JSON.stringify({ success: false, error: "No active document found" });
+    }
+    var doc = app.activeDocument;
+    if (!doc.fullName) {
+      return JSON.stringify({ success: false, error: "Active document has not been saved to disk" });
+    }
+
+    /* Only copy when the user configured a Separation file path template. */
+    var settings = readExportSettings();
+    var template = (settings && settings.separationPreviewFilePath != null)
+      ? trimExportString(settings.separationPreviewFilePath)
+      : "";
+    if (!template) {
+      return JSON.stringify({ success: true, skipped: true });
+    }
+
+    var srcFile = new File(doc.fullName);
+    if (!srcFile.exists) {
+      return JSON.stringify({ success: false, error: "Separation .ai file not found on disk: " + srcFile.fsName });
+    }
+
+    var docFolder = srcFile.parent;
+    var docName = srcFile.name.replace(/\\.[^\\.]+$/, "");
+    var defaultAiFile = new File(docFolder.fsName + "/" + docName + ".ai");
+    var targetFile = resolveExportFilePath("separationPreviewFilePath", defaultAiFile, doc, "ai");
+    ensureExportFolder(targetFile.parent);
+
+    /* Never copy the file onto itself. */
+    if (targetFile.fsName === srcFile.fsName) {
+      return JSON.stringify({ success: true, skipped: true, filePath: targetFile.fsName });
+    }
+
+    /* File.copy does not overwrite an existing target, so clear it first. */
+    if (targetFile.exists) {
+      targetFile.remove();
+    }
+
+    var copied = srcFile.copy(targetFile.fsName);
+    if (!copied) {
+      return JSON.stringify({ success: false, error: "Failed to copy separation file to: " + targetFile.fsName });
+    }
+    return JSON.stringify({ success: true, filePath: targetFile.fsName });
+  } catch (e) {
+    return JSON.stringify({
+      success: false,
+      error: "Error copying separation file: " + (e.message || e.toString())
+    });
+  }
+})();
+`;
+   return evalScript(script).then((res: unknown) => {
+    const str = typeof res === 'string' ? res : '';
+    try {
+     return str ? JSON.parse(str) : { success: false, error: 'Empty response from host' };
+    } catch {
+     return { success: false, error: 'Invalid JSON response from host', raw: str };
+    }
+   });
+  });
  }
 
  private exportGridPostscript(
@@ -2922,6 +3423,56 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
    return { success: true };
   } catch (e: any) {
    console.error('[openFileInDefaultApp] Exception:', e?.message || String(e));
+   return { success: false, error: e?.message || String(e) };
+  }
+ }
+
+ /**
+  * Reveal a file in the OS file browser with the file selected (macOS "Reveal in
+  * Finder", Windows Explorer /select, Linux opens the containing folder). Used by
+  * the export-results modal links. Best-effort; never throws.
+  */
+ revealFileInFinder(filePath: string): { success: boolean; error?: string } {
+  try {
+   if (!filePath) { return { success: false, error: 'No file path provided' }; }
+   const win = window as any;
+   const req = win?.cep_node?.require;
+   if (!req) { return { success: false, error: 'CEP node runtime is unavailable' }; }
+   const cp = req('child_process');
+   const fs = req('fs');
+   const path = req('path');
+   const process = win?.cep_node?.process || req('process');
+
+   if (!fs.existsSync(filePath)) {
+    return { success: false, error: 'File not found: ' + filePath };
+   }
+
+   const platform = process?.platform || 'darwin';
+   let command: string;
+   let args: string[];
+   if (platform === 'win32') {
+    /* Explorer selects the file when passed /select,<path> as a single token. */
+    command = 'explorer';
+    args = ['/select,' + filePath];
+   } else if (platform === 'darwin') {
+    /* -R reveals (selects) the file in Finder instead of opening it. */
+    command = 'open';
+    args = ['-R', filePath];
+   } else {
+    /* No universal "reveal" on Linux — open the containing folder instead. */
+    command = 'xdg-open';
+    args = [path.dirname(filePath)];
+   }
+
+   console.log('[revealFileInFinder] Revealing:', command, args.join(' '));
+   const child = cp.spawn(command, args, { detached: true, stdio: 'ignore' });
+   child.on('error', (err: any) => {
+    console.error('[revealFileInFinder] Spawn failed:', err?.message || String(err));
+   });
+   if (child.pid) { child.unref(); }
+   return { success: true };
+  } catch (e: any) {
+   console.error('[revealFileInFinder] Exception:', e?.message || String(e));
    return { success: false, error: e?.message || String(e) };
   }
  }

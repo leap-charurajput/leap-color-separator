@@ -16,6 +16,10 @@ export class ExportSeparationsModalComponent implements OnInit, OnChanges {
 	exportPrintGuide = true;
 	/** Export Postscript (.ps) and Separations Preview PDF (Distiller) together. */
 	exportPostscript = true;
+	/** Control number entered by the user; written into the doc's [CONTROL] / Control_Number frame before export. */
+	controlNumber = '';
+	/** Version number entered by the user; written into the doc's [V#] / Version_Number frame before export. */
+	versionNumber = '';
 
 	ngOnInit(): void {
 		this.resetCheckboxes();
@@ -30,12 +34,32 @@ export class ExportSeparationsModalComponent implements OnInit, OnChanges {
 	private resetCheckboxes(): void {
 		this.exportPrintGuide = true;
 		this.exportPostscript = this.postscriptReady;
+		this.controlNumber = '';
+		this.versionNumber = '';
+	}
+
+	handleVersionNumberChange(event: Event): void {
+		this.versionNumber = (event.target as HTMLInputElement).value;
+	}
+
+	/** Export is allowed only when BOTH the control number and version number are provided. */
+	get canExport(): boolean {
+		return (this.controlNumber || '').trim() !== '' && (this.versionNumber || '').trim() !== '';
+	}
+
+	handleControlNumberChange(event: Event): void {
+		this.controlNumber = (event.target as HTMLInputElement).value;
 	}
 
 	onExport(): void {
+		if (!this.canExport) {
+			return;
+		}
 		const exportOptions = {
 			exportPrintGuide: this.exportPrintGuide,
-			exportPostscript: this.postscriptReady ? this.exportPostscript : false
+			exportPostscript: this.postscriptReady ? this.exportPostscript : false,
+			controlNumber: (this.controlNumber || '').trim(),
+			versionNumber: (this.versionNumber || '').trim()
 		};
 		this.export.emit(exportOptions);
 		this.close.emit();

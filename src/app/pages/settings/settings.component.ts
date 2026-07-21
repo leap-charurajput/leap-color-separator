@@ -1,6 +1,9 @@
 import { Component, Input, OnChanges, OnInit, SimpleChanges } from '@angular/core';
 import { csInterface } from '../../../libs/helper';
-import { ExportSettings } from '../../components/export-settings-panel/export-settings-panel.component';
+import {
+ ExportSettings,
+ GraphicPositionChip
+} from '../../components/export-settings-panel/export-settings-panel.component';
 import { ControllerService } from '../../services/controller.service';
 
 interface Profile {
@@ -14,6 +17,8 @@ interface Profile {
  underbaseKnockoutBlack?: boolean[];
  /** Per-UB swatch when K/O is on (optional; persisted on profile JSON). */
  underbaseKnockoutSwatches?: string[];
+ /** Optional custom name per UB pass (UB1-4); when set, used for the underbase swatch + layer name. */
+ underbaseNames?: string[];
  blocker?: boolean;
  blockerMesh?: string;
  blockerKnockoutBlack?: boolean;
@@ -57,7 +62,12 @@ export class SettingsComponent implements OnInit, OnChanges {
   postscriptFilePath: ''
  };
  exportExcelColumns: string[] = [];
- exportGraphicPositions: string[] = [];
+ /*
+  * Position chips shown under the export settings "Positions" section. Each chip's
+  * label is the ABBV and its tooltip the DESC, both sourced from
+  * SETTINGS/graphic_positions.json (see loadGraphicPositionChips).
+  */
+ exportGraphicPositions: GraphicPositionChip[] = [];
 
  // 🔑 Environment config
  environments = {
@@ -93,6 +103,7 @@ export class SettingsComponent implements OnInit, OnChanges {
   this.loadGeneralSettings();
   this.loadExportSettings();
   this.loadExportTokenData();
+  this.loadGraphicPositionChips();
   this.loadSepsTemplateFiles();
 
   try {
@@ -204,13 +215,48 @@ export class SettingsComponent implements OnInit, OnChanges {
    .then((result) => {
     if (result?.success) {
      this.exportExcelColumns = Array.isArray(result.excelColumns) ? result.excelColumns : [];
-     this.exportGraphicPositions = Array.isArray(result.graphicPositions) ? result.graphicPositions : [];
     }
    })
    .catch(() => {
     this.exportExcelColumns = [];
+   });
+ }
+
+ /*
+  * Load every graphic position from SETTINGS/graphic_positions.json and expose
+  * them to the export settings "Positions" section as chips. The chip label is
+  * the abbreviation (ABBV) — the same value that fills the document [POS] token —
+  * and the tooltip is the full description (DESC).
+  */
+ loadGraphicPositionChips(): void {
+  this.controller
+   .getGraphicPositionOptionsFromJson()
+   .then((result) => {
+    const entries = result?.success && Array.isArray(result.entries) ? result.entries : [];
+    this.exportGraphicPositions = this.buildPositionChips(entries);
+   })
+   .catch(() => {
     this.exportGraphicPositions = [];
    });
+ }
+
+ /*
+  * Map DESC/ABBV entries into chips keyed on the abbreviation. The abbreviation is
+  * both the visible label and the copied value; the description becomes the
+  * tooltip. Entries are de-duplicated by abbreviation so the same code is not
+  * shown twice.
+  */
+ private buildPositionChips(entries: Array<{ desc: string; abbv: string }>): GraphicPositionChip[] {
+  const seen = new Set<string>();
+  const chips: GraphicPositionChip[] = [];
+  (Array.isArray(entries) ? entries : []).forEach((entry) => {
+   const desc = String(entry?.desc || '').trim();
+   const abbv = String(entry?.abbv || '').trim() || desc;
+   if (!abbv || seen.has(abbv)) return;
+   seen.add(abbv);
+   chips.push({ label: abbv, value: abbv, title: desc || abbv });
+  });
+  return chips;
  }
 
  get exportProfileCodes(): string[] {
@@ -349,6 +395,11 @@ export class SettingsComponent implements OnInit, OnChanges {
     : defaultSw[3]
   ];
 
+  const savedUbNames = Array.isArray(jsonProfile.underbaseNames) ? jsonProfile.underbaseNames : null;
+  const underbaseNames = [0, 1, 2, 3].map((j) =>
+   savedUbNames && savedUbNames[j] != null ? String(savedUbNames[j]) : ''
+  );
+
   const jp = jsonProfile as any;
   const blockerKnockoutSwatchRaw = jp.blockerKnockoutSwatch != null ? String(jp.blockerKnockoutSwatch).trim() : '';
   const blockerKnockoutSwatch =
@@ -370,6 +421,7 @@ export class SettingsComponent implements OnInit, OnChanges {
    underbaseEnabled: underbaseEnabled,
    underbaseKnockoutBlack: underbaseKnockoutBlack,
    underbaseKnockoutSwatches,
+   underbaseNames,
    underbaseSwatch,
    blocker: toEnabled(jp.blocker) || toEnabled(jsonProfile.Blocker),
    blockerMesh:
@@ -441,6 +493,10 @@ export class SettingsComponent implements OnInit, OnChanges {
     pickUbSwatchForJson(2),
     pickUbSwatchForJson(3)
    ],
+   underbaseNames: [0, 1, 2, 3].map((i) => {
+    const arr = (rp.underbaseNames as string[]) || [];
+    return arr[i] != null ? String(arr[i]).trim() : '';
+   }),
    underbaseSwatch:
     rp.underbaseSwatch != null && String(rp.underbaseSwatch).trim() !== ''
      ? String(rp.underbaseSwatch).trim()

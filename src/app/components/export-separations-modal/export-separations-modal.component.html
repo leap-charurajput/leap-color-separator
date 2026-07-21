@@ -5,6 +5,32 @@
 		</div>
 
 		<div class="modal-body">
+			<div class="control-number-field">
+				<label for="control-number" class="control-number-label">Control number</label>
+				<input
+					id="control-number"
+					type="text"
+					class="control-number-input"
+					[value]="controlNumber"
+					(input)="handleControlNumberChange($event)"
+					placeholder="Enter control number"
+					autocomplete="off"
+				/>
+			</div>
+
+			<div class="control-number-field">
+				<label for="version-number" class="control-number-label">Version number</label>
+				<input
+					id="version-number"
+					type="text"
+					class="control-number-input"
+					[value]="versionNumber"
+					(input)="handleVersionNumberChange($event)"
+					placeholder="Enter version number"
+					autocomplete="off"
+				/>
+			</div>
+
 			<div class="export-options-list">
 				<div class="export-option-item">
 					<app-checkbox
@@ -34,7 +60,7 @@
 
 		<div class="modal-footer">
 			<app-button variant="secondary" (click)="onCancel()">Cancel</app-button>
-			<app-button variant="primary" (click)="onExport()">Export</app-button>
+			<app-button variant="primary" [disabled]="!canExport" (click)="onExport()">Export</app-button>
 		</div>
 	</div>
 </div>

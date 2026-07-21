@@ -41,6 +41,8 @@ interface ProfileFormState {
  underbaseMeshes: string[];
  underbaseKnockoutBlack: boolean[];
  underbaseKnockoutSwatches: string[];
+ /** Optional custom name per UB pass (UB1-4). When set, used for the underbase swatch + layer name. */
+ underbaseNames: string[];
  formatInkNameLabel: boolean;
  colorNameLabelFormat: string;
  blackInksKnockoutDisplay: string;
@@ -173,8 +175,9 @@ const buildDefaultProfile = (defaultBlackColorNames?: string): ProfileFormState 
  underbaseMeshes: ['110', '122', '', ''],
  underbaseKnockoutBlack: [false, false, false, false],
  underbaseKnockoutSwatches: ['White UB', 'White UB', 'White UB', 'White UB'],
+ underbaseNames: ['', '', '', ''],
  formatInkNameLabel: false,
- colorNameLabelFormat: 'PANTONE XXX C',
+ colorNameLabelFormat: 'PANTONE ### C',
  blackInksKnockoutDisplay: defaultBlackColorNames || 'Black, PANTONE Black C, PANTONE Black 6 C, BLACK 00A',
  inkExceptions: []
 });
@@ -204,6 +207,15 @@ export class EditSeparationProfileModalComponent implements OnInit, OnChanges {
  inkExceptionRemoveId: string | null = null;
  inkExceptionsLoading = false;
  inkExceptionsLoadError = '';
+
+ /* Import-from-Excel dialog state. */
+ inkImportDialogOpen = false;
+ inkImportBusy = false;
+ inkImportError = '';
+ private inkImportRows: any[] = [];
+ inkImportCount = 0;
+ inkImportDuplicateNames: string[] = [];
+ inkImportFileName = '';
 
  /** Fallback list used when no document is open or swatches fail to load. */
  private readonly fallbackSwatchOptions = ['White UB', 'SL White UB', 'GARMENT'];
@@ -294,6 +306,14 @@ export class EditSeparationProfileModalComponent implements OnInit, OnChanges {
    const ubSwatches = Array.isArray(ubSw)
     ? [0, 1, 2, 3].map((j) => (ubSw[j] != null && String(ubSw[j]).trim() !== '' ? String(ubSw[j]) : defaultProfile.underbaseKnockoutSwatches[j]))
     : [...defaultProfile.underbaseKnockoutSwatches];
+   /* Custom per-UB names (optional). Empty string means "use the default White UB N naming". */
+   const ubNamesRaw =
+    (this.profile as any).underbaseNames ??
+    (this.profile as any)._jsonData?.underbaseNames ??
+    defaultProfile.underbaseNames;
+   const ubNames = Array.isArray(ubNamesRaw)
+    ? [0, 1, 2, 3].map((j) => (ubNamesRaw[j] != null ? String(ubNamesRaw[j]) : ''))
+    : ['', '', '', ''];
    const formatInkNameLabel = this.profile.formatInkNameLabel ?? (this.profile as any).colorNameFormat ?? defaultProfile.formatInkNameLabel;
    this.formState = {
     ...defaultProfile,
@@ -303,6 +323,7 @@ export class EditSeparationProfileModalComponent implements OnInit, OnChanges {
     underbaseEnabled: ubEnabled,
     underbaseKnockoutBlack: Array.isArray(ubKo) ? [...ubKo] : [...defaultProfile.underbaseKnockoutBlack],
     underbaseKnockoutSwatches: ubSwatches,
+    underbaseNames: ubNames,
     blockerKnockoutBlack: !!(this.profile as any).blockerKnockoutBlack || !!(this.profile as any)._jsonData?.blockerKnockoutBlack,
     blockerKnockoutSwatch: String(
      (this.profile as any).blockerKnockoutSwatch ||
@@ -393,6 +414,13 @@ export class EditSeparationProfileModalComponent implements OnInit, OnChanges {
   const value = (event.target as HTMLInputElement).value;
   this.formState.underbaseMeshes = [...this.formState.underbaseMeshes];
   this.formState.underbaseMeshes[index] = value;
+ }
+
+ /* Custom name for a UB pass. Empty = default White UB N naming. Used for swatch + layer name. */
+ onUnderbaseNameChange(index: number, event: Event): void {
+  const value = (event.target as HTMLInputElement).value;
+  this.formState.underbaseNames = [...this.formState.underbaseNames];
+  this.formState.underbaseNames[index] = value;
  }
 
  onCheckboxChange(field: keyof ProfileFormState, event: Event): void {
@@ -616,6 +644,149 @@ export class EditSeparationProfileModalComponent implements OnInit, OnChanges {
   setTimeout(() => this.scrollInkExceptionsToTop(), 0);
  }
 
+ /*
+  * Import ink exceptions from a user-chosen Excel/CSV. Opens the file picker, parses the rows, then
+  * shows the import dialog so the user can choose Replace vs Merge (and, on duplicates, which wins).
+  */
+ handleInkExceptionImport(): void {
+  this.inkImportBusy = true;
+  this.inkImportError = '';
+  this.controller
+   .importInkExceptionsFromExcel()
+   .then((result: any) => {
+    this.inkImportBusy = false;
+    if (result?.canceled) {
+     return;
+    }
+    if (!result?.success || !Array.isArray(result.rows) || result.rows.length === 0) {
+     this.inkImportError = result?.error || 'No ink rows found in the selected file.';
+     this.inkImportDialogOpen = true;
+     this.cdr.detectChanges();
+     return;
+    }
+    this.inkImportRows = result.rows;
+    this.inkImportCount = result.rows.length;
+    this.inkImportFileName = this.baseFileName(result.filePath);
+    /* Which imported inks already exist in the current list (case-insensitive). */
+    const existingKeys = new Set(
+     normalizeInkExceptionsList(this.formState.inkExceptions).map((r) => normalizeInkNameKey(r.inkName))
+    );
+    const dupNames: string[] = [];
+    const seen = new Set<string>();
+    for (const row of result.rows) {
+     const key = normalizeInkNameKey(String(row?.inkName || ''));
+     if (key && existingKeys.has(key) && !seen.has(key)) {
+      seen.add(key);
+      dupNames.push(String(row.inkName));
+     }
+    }
+    this.inkImportDuplicateNames = dupNames;
+    this.inkImportDialogOpen = true;
+    this.cdr.detectChanges();
+   })
+   .catch((err: any) => {
+    this.inkImportBusy = false;
+    this.inkImportError = err?.message || String(err);
+    this.inkImportDialogOpen = true;
+    this.cdr.detectChanges();
+   });
+ }
+
+ get inkImportHasDuplicates(): boolean {
+  return this.inkImportDuplicateNames.length > 0;
+ }
+
+ /* Apply the imported rows using the chosen strategy. */
+ applyInkImport(mode: 'replace' | 'keepExisting' | 'useImported'): void {
+  /*
+   * Resolve which profile the imported rows belong to. The profileCode from the Excel wins so the
+   * entries land in the correct block of the single profile_ink_exceptions.json; fall back to the
+   * currently-open profile when the Excel omits it. Captured before closeInkImportDialog() clears the
+   * import buffer.
+   */
+  const codeFromExcel =
+   this.inkImportRows
+    .map((r: any) => (r && r.profileCode != null ? String(r.profileCode).trim() : ''))
+    .find((c: string) => c !== '') || '';
+  const nameFromExcel =
+   this.inkImportRows
+    .map((r: any) => (r && r.profile != null ? String(r.profile).trim() : ''))
+    .find((n: string) => n !== '') || '';
+
+  const imported: InkExceptionRow[] = normalizeInkExceptionsList(
+   this.inkImportRows.map((r) => ({ ...r, id: makeInkExceptionId() }))
+  );
+  if (mode === 'replace') {
+   this.formState.inkExceptions = imported;
+  } else {
+   const existing = normalizeInkExceptionsList(this.formState.inkExceptions);
+   const indexByKey = new Map<string, number>();
+   existing.forEach((row, idx) => indexByKey.set(normalizeInkNameKey(row.inkName), idx));
+   for (const imp of imported) {
+    const key = normalizeInkNameKey(imp.inkName);
+    if (indexByKey.has(key)) {
+     if (mode === 'useImported') {
+      const idx = indexByKey.get(key) as number;
+      existing[idx] = { ...imp, id: existing[idx].id };
+     }
+     /* keepExisting: leave the current row untouched. */
+    } else {
+     existing.push(imp);
+     indexByKey.set(key, existing.length - 1);
+    }
+   }
+   this.formState.inkExceptions = existing;
+  }
+  this.closeInkImportDialog();
+  this.cdr.detectChanges();
+  setTimeout(() => this.scrollInkExceptionsToTop(), 0);
+
+  /* Persist to the single profile_ink_exceptions.json right away so the import survives a restart. */
+  this.persistInkExceptionsAfterImport(codeFromExcel, nameFromExcel);
+ }
+
+ /*
+  * Write the current ink-exception grid into the single profile_ink_exceptions.json immediately after an
+  * import. Uses the Excel's profileCode (else the open profile's code). saveInkExceptions replaces only
+  * this profileCode's block and preserves every other profile, so one shared file accumulates all imports.
+  */
+ private persistInkExceptionsAfterImport(codeFromExcel: string, nameFromExcel: string): void {
+  const profileCode = (codeFromExcel || this.getInkProfileFilterCode() || (this.formState.code || '')).trim();
+  const profileName = (nameFromExcel || this.getInkProfileFilterName() || (this.formState.name || '')).trim();
+  if (!profileCode) {
+   console.error(
+    '[InkImport] No profileCode found (add a profileCode column to the Excel, or set the profile code); ' +
+     'profile_ink_exceptions.json was not written.'
+   );
+   return;
+  }
+  this.controller
+   .saveInkExceptions(profileCode, this.formState.inkExceptions, profileName)
+   .then((res: any) => {
+    if (!res || !res.success) {
+     console.error('[InkImport] Failed to write profile_ink_exceptions.json:', res && res.error);
+    } else {
+     console.log('[InkImport] profile_ink_exceptions.json updated for profileCode:', profileCode);
+    }
+   })
+   .catch((err: any) => console.error('[InkImport] Failed to write profile_ink_exceptions.json:', err));
+ }
+
+ closeInkImportDialog(): void {
+  this.inkImportDialogOpen = false;
+  this.inkImportRows = [];
+  this.inkImportCount = 0;
+  this.inkImportDuplicateNames = [];
+  this.inkImportFileName = '';
+  this.inkImportError = '';
+ }
+
+ private baseFileName(filePath: string): string {
+  const p = String(filePath || '').replace(/[\\/]+$/, '');
+  const parts = p.split(/[\\/]/);
+  return parts.length ? parts[parts.length - 1] : p;
+ }
+
  /** Scroll ink list (and any parent scroll containers) so the new top row is visible. */
  private scrollInkExceptionsToTop(): void {
   const tableBody = this.inkExceptionsTableBody?.nativeElement;
@@ -776,6 +947,7 @@ export class EditSeparationProfileModalComponent implements OnInit, OnChanges {
     underbaseEnabled: [...this.formState.underbaseEnabled],
     underbaseKnockoutBlack: [...this.formState.underbaseKnockoutBlack],
     underbaseKnockoutSwatches: [...this.formState.underbaseKnockoutSwatches],
+    underbaseNames: [...this.formState.underbaseNames],
     blockerKnockoutBlack: !!this.formState.blockerKnockoutBlack,
     blockerKnockoutSwatch: this.formState.blockerKnockoutSwatch,
     underbaseSwatch: this.formState.underbaseSwatch,

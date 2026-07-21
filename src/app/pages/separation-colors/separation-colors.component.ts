@@ -12,6 +12,7 @@ import {
 } from '@angular/core';
 import { checkForJSXUpdates } from '../../../libs/helper';
 import { ConfirmDialogCheckboxOption } from '../../components/confirm-dialog/confirm-dialog.component';
+import { ExportResultFile } from '../../components/export-results-modal/export-results-modal.component';
 import { ControllerService } from '../../services/controller.service';
 import { roiLogEvent } from '../../services/roi';
 
@@ -20,6 +21,18 @@ interface ColorRow {
  colorName: string;
  /** SEPARATED_ART sublayer / document swatch name when it differs from formal colorName (XMP swatchName). */
  swatchName?: string;
+ /**
+  * SEPARATED_ART sublayer name reported by getGraphicSwatches. Used to classify a plate as
+  * White UB / Blocker for grouping even when its displayed swatch name differs (e.g. a
+  * "White UB 2" plate backed by a shared "PANTONE White C" swatch).
+  */
+ layerName?: string;
+ /** True when getGraphicSwatches flagged this plate as an underbase pass (standard or custom-named). */
+ isUnderbase?: boolean;
+ /** 1-based underbase pass number (from XMP / "White UB N"), used to order underbase plates. */
+ underbasePass?: number;
+ /** True when this is a real ink plate that also serves as underbase (shared swatch): group up top but keep the ink mesh. */
+ underbaseSharedInk?: boolean;
  mesh: string;
  micron: string;
  type: 'separation' | 'compound';
@@ -88,6 +101,13 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
  isSeparationModalOpen = false;
  isCompoundModalOpen = false;
  isExportModalOpen = false;
+ /* Per-ink second-hit mesh from Inks.xlsx "WUB Mesh 2" (key: normalized ink name). Empty = same as first hit. */
+ private secondHitMeshByInk = new Map<string, string>();
+ /* Export-results modal: shown after an export run with a link per exported file. */
+ isExportResultsModalOpen = false;
+ exportResultFiles: ExportResultFile[] = [];
+ /* Guards the results modal so it opens exactly once per export run. */
+ private exportResultsShown = false;
  exportPostscriptReady = true;
  exportPostscriptIssues: Array<{ id: string; message: string }> = [];
  isAddSelectionInkConfirmOpen = false;
@@ -735,6 +755,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
      console.warn('[SEPARATION] Failed to load ink information, using default mesh values');
      this.createColorRowsFromSwatchesWithDefaults();
      this.cdr.detectChanges(); // Force change detection after creating default rows
+  this.pushTotalColorsToDocument(); // keep [C#] / TOTAL COLORS in sync with the Plates UI
      return;
     }
 
@@ -770,8 +791,15 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
      let currentId = 1;
      let newColorRows: ColorRow[] = [];
 
+     /* Rebuild the per-ink second-hit mesh map (from Inks.xlsx "WUB Mesh 2") for this load. */
+     this.secondHitMeshByInk = new Map<string, string>();
+
      this.graphicSwatches.forEach((swatchData: any, index: number) => {
       const inkInfo = inkResult.inkInfoList[index] || { mesh: '110', twoHits: false, found: false };
+      const secondHitMesh = inkInfo.mesh2 != null ? String(inkInfo.mesh2).trim() : '';
+      if (secondHitMesh) {
+       this.secondHitMeshByInk.set(this.inkNameKey(swatchData.name), secondHitMesh);
+      }
       const firstRow = this.createColorRowFromSwatch(
        swatchData,
        inkInfo,
@@ -790,7 +818,9 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
        const secondRow: ColorRow = {
         ...firstRow,
         id: currentId++,
-        colorName: `${swatchData.name} 2`
+        colorName: `${swatchData.name} 2`,
+        /* Second hit uses the Inks.xlsx "WUB Mesh 2" value when present, else the first hit's mesh. */
+        mesh: this.secondHitMeshOrFallback(swatchData.name, firstRow.mesh)
        };
        newColorRows.push(secondRow);
       }
@@ -803,6 +833,14 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
      );
      newColorRows = withMissingHits.rows;
      currentId = withMissingHits.nextId;
+
+     /*
+      * Normalize every second-hit ("… 2") plate's mesh in one place: the Inks.xlsx "WUB Mesh 2"
+      * value wins, otherwise it matches the first hit's mesh. This also corrects a real "… 2"
+      * plate that was loaded as its own swatch (it would otherwise inherit the base ink's
+      * exception/profile mesh instead of "WUB Mesh 2").
+      */
+     newColorRows = this.applySecondHitMeshRule(newColorRows);
 
      const mergedColorRows = this.mergeXmpMetadataIntoColorRows(newColorRows);
      // On a refresh-triggered reload, keep each surviving plate's current grid values
@@ -823,6 +861,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
      this.nextId = currentId;
      this.isLoadingSwatches = false;
      this.cdr.detectChanges(); // Force change detection after loading color rows
+     this.pushTotalColorsToDocument(); // keep [C#] / TOTAL COLORS in sync with the Plates UI
      console.log('[SEPARATION] Color rows array:', this.colorRows);
      console.log('[SEPARATION] isLoadingSwatches:', this.isLoadingSwatches);
      console.log('[SEPARATION] isSeparatedDoc:', this.isSeparatedDoc);
@@ -950,8 +989,20 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   currentId: number
  ): ColorRow {
   const colorHex = swatchData.hex || this.getRandomColor();
-  const isWhiteUBColor = this.isWhiteUB(swatchData.name);
-  const isBlockerColor = this.isBlocker(swatchData.name);
+  /*
+   * Classify by the SEPARATED_ART layer identity (falls back to the display name) so a
+   * White UB / Blocker plate backed by a shared or renamed swatch is still recognized.
+   */
+  const plateIdentity = this.swatchPlateIdentity(swatchData);
+  /* Underbase flag/pass come from getGraphicSwatches (XMP-backed) so custom-named passes count too. */
+  const swatchIsUnderbase = swatchData.isUnderbase === true;
+  const swatchUbPass =
+   swatchData.underbasePass != null && !isNaN(parseInt(swatchData.underbasePass, 10))
+    ? parseInt(swatchData.underbasePass, 10)
+    : 0;
+  const swatchSharedInk = swatchData.underbaseSharedInk === true;
+  const isWhiteUBColor = swatchIsUnderbase || this.isWhiteUB(plateIdentity);
+  const isBlockerColor = this.isBlocker(plateIdentity);
 
   // Determine which profile to use
   let profileInfo: any = {};
@@ -976,10 +1027,22 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   const profileBlockerMesh = this.getProfileBlockerMesh(profileInfo);
   const underbaseMeshes = this.getProfileUnderbaseMeshes();
   let meshValue = inkInfo.mesh || '110';
-  if (isWhiteUBColor) {
-   const ubPass = this.getWhiteUbPassNumber(swatchData.name);
+  if (isWhiteUBColor && !swatchSharedInk) {
+   const ubPass = swatchUbPass > 0 ? swatchUbPass : this.getWhiteUbPassNumber(plateIdentity);
    const meshFromProfile = ubPass > 0 ? underbaseMeshes[ubPass - 1] : '';
    meshValue = meshFromProfile || inkInfo.mesh || '110';
+  } else if (
+   inkInfo.source === 'inkException' &&
+   inkInfo.mesh != null &&
+   String(inkInfo.mesh).trim() !== ''
+  ) {
+   /*
+    * An ink-exception mesh (from profile_ink_exceptions.json) is an explicit per-ink override
+    * and must win over the profile's default Color Mesh. This covers the first hit and any
+    * "… 2" hit plate that still resolves to the same exception (e.g. "LS 1235" / "LS 1235 2"
+    * with an exception mesh of 110 instead of the profile Color Mesh).
+    */
+   meshValue = String(inkInfo.mesh).trim();
   } else if (isBlockerColor && profileBlockerMesh !== '') {
    meshValue = profileBlockerMesh;
   } else if (profileColorMesh !== '') {
@@ -989,6 +1052,10 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   return {
    id: currentId,
    colorName: swatchData.name,
+   layerName: this.normalizeLayerName(swatchData.layerName),
+   isUnderbase: swatchIsUnderbase || undefined,
+   underbasePass: swatchUbPass > 0 ? swatchUbPass : undefined,
+   underbaseSharedInk: swatchSharedInk || undefined,
    mesh: meshValue,
    micron: micron,
    type: 'separation',
@@ -1005,10 +1072,18 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   const profileBlockerMesh = this.getProfileBlockerMesh();
   const newColorRows: ColorRow[] = this.graphicSwatches.map((swatchData: any, index: number) => {
    const colorHex = swatchData.hex || this.getRandomColor();
-   const isWhiteUBColor = this.isWhiteUB(swatchData.name);
-   const isBlockerColor = this.isBlocker(swatchData.name);
+   const plateIdentity = this.swatchPlateIdentity(swatchData);
+   const swatchIsUnderbase = swatchData.isUnderbase === true;
+   const swatchUbPass =
+    swatchData.underbasePass != null && !isNaN(parseInt(swatchData.underbasePass, 10))
+     ? parseInt(swatchData.underbasePass, 10)
+     : 0;
+   const swatchSharedInk = swatchData.underbaseSharedInk === true;
+   const isWhiteUBColor = swatchIsUnderbase || this.isWhiteUB(plateIdentity);
+   const isBlockerColor = this.isBlocker(plateIdentity);
    let meshValue = '110';
-   if (!isWhiteUBColor) {
+   /* Shared-ink underbase keeps its ink mesh (treated as an ink for mesh, underbase only for grouping). */
+   if (!isWhiteUBColor || swatchSharedInk) {
     if (isBlockerColor && profileBlockerMesh !== '') {
      meshValue = profileBlockerMesh;
     } else if (profileColorMesh !== '') {
@@ -1018,6 +1093,10 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
    return {
     id: index + 1,
     colorName: swatchData.name,
+    layerName: this.normalizeLayerName(swatchData.layerName),
+    isUnderbase: swatchIsUnderbase || undefined,
+    underbasePass: swatchUbPass > 0 ? swatchUbPass : undefined,
+    underbaseSharedInk: swatchSharedInk || undefined,
     mesh: meshValue,
     micron: 'NA',
     type: 'separation',
@@ -1044,11 +1123,19 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   if (!rows || rows.length === 0) return rows;
 
   // Print order: Blocker first, then White UB rows (1, 2, 3…), then other inks. Stable within each group.
+  // Classification uses the SEPARATED_ART layer identity (layerName) when present so a White UB /
+  // Blocker plate shown under a shared or renamed swatch name is still grouped correctly.
   const rank = (row: ColorRow): number => {
-   if (this.isBlocker(row.colorName)) return 0;
-   if (this.isWhiteUB(row.colorName)) return 1;
+   const identity = this.plateIdentityName(row);
+   if (this.isBlocker(identity)) return 0;
+   if (row.isUnderbase || this.isWhiteUB(identity)) return 1;
    return 2;
   };
+  /* Underbase pass index: prefer the XMP-backed pass (handles custom names), else parse the name. */
+  const passIndex = (row: ColorRow): number =>
+   row.underbasePass && row.underbasePass > 0
+    ? row.underbasePass
+    : this.getWhiteUbPassIndex(this.plateIdentityName(row));
 
   return rows
    .map((row, index) => ({ row, index }))
@@ -1057,13 +1144,85 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
     const rb = rank(b.row);
     if (ra !== rb) return ra - rb;
     if (ra === 1) {
-     const pa = this.getWhiteUbPassIndex(a.row.colorName);
-     const pb = this.getWhiteUbPassIndex(b.row.colorName);
+     const pa = passIndex(a.row);
+     const pb = passIndex(b.row);
      if (pa !== pb) return pa - pb;
     }
     return a.index - b.index;
    })
    .map((x) => x.row);
+ }
+
+ /*
+  * The name used to classify a plate's group (Blocker / White UB / ink). Prefers the stable
+  * SEPARATED_ART layer name from getGraphicSwatches, falling back to the displayed color name.
+  */
+ private plateIdentityName(row: ColorRow): string {
+  const layer = row.layerName && String(row.layerName).trim();
+  return layer || String(row.colorName || '').trim();
+ }
+
+ /* Same identity resolution for a raw getGraphicSwatches entry (layerName, else name). */
+ private swatchPlateIdentity(swatchData: any): string {
+  const layer = swatchData && swatchData.layerName != null ? String(swatchData.layerName).trim() : '';
+  return layer || String((swatchData && swatchData.name) || '').trim();
+ }
+
+ /* Normalize a raw layerName value to a trimmed string or undefined (kept off the row when absent). */
+ private normalizeLayerName(layerName: any): string | undefined {
+  const value = layerName != null ? String(layerName).trim() : '';
+  return value || undefined;
+ }
+
+ /* Normalized key for matching an ink name in the second-hit mesh map. */
+ private inkNameKey(name: string): string {
+  return String(name || '').trim().toLowerCase();
+ }
+
+ /*
+  * Mesh to use for a second hit: the Inks.xlsx "WUB Mesh 2" value for the base ink when present,
+  * otherwise the provided fallback (the first hit's mesh).
+  */
+ private secondHitMeshOrFallback(baseInkName: string, fallbackMesh: string): string {
+  const key = this.inkNameKey(baseInkName);
+  const mesh2 = key ? this.secondHitMeshByInk.get(key) : '';
+  return mesh2 && String(mesh2).trim() !== '' ? String(mesh2).trim() : fallbackMesh;
+ }
+
+ /*
+  * Apply the second-hit mesh rule to every "… 2" hit plate regardless of how the row was created
+  * (synthetic Two-Hits row, appended-from-layer, manual add, or a real "… 2" swatch loaded through
+  * createColorRowFromSwatch): the Inks.xlsx "WUB Mesh 2" value for the base ink wins; when there is
+  * no "WUB Mesh 2", the second hit keeps the first hit's mesh. Any later user edit saved to XMP still
+  * overrides this via mergeXmpMetadataIntoColorRows, which runs after this pass.
+  */
+ private applySecondHitMeshRule(rows: ColorRow[]): ColorRow[] {
+  /* Diagnostic: what "WUB Mesh 2" values were captured from Inks.xlsx for this load. */
+  try {
+   const mapDump: { [k: string]: string } = {};
+   this.secondHitMeshByInk.forEach((v, k) => (mapDump[k] = v));
+   console.log('[SECOND_HIT_MESH] secondHitMeshByInk map:', mapDump);
+  } catch (e) {}
+  return rows.map((row) => {
+   const name = (row.colorName || '').trim();
+   if (!this.isInkHitPlateName(name)) {
+    return row;
+   }
+   const baseName = name.replace(/\s+\d+$/, '').trim();
+   const baseRow = rows.find(
+    (r) => (r.colorName || '').trim().toLowerCase() === baseName.toLowerCase()
+   );
+   const fallbackMesh = baseRow && baseRow.mesh != null ? baseRow.mesh : row.mesh;
+   const resolvedMesh = this.secondHitMeshOrFallback(baseName, fallbackMesh);
+   console.log(
+    '[SECOND_HIT_MESH] hit plate:', name,
+    '| base:', baseName,
+    '| firstHitMesh:', fallbackMesh,
+    '| mapValue:', this.secondHitMeshByInk.get(this.inkNameKey(baseName)) || '(none)',
+    '| resolved:', resolvedMesh
+   );
+   return resolvedMesh === row.mesh ? row : { ...row, mesh: resolvedMesh };
+  });
  }
 
  private getWhiteUbPassIndex(colorName: string): number {
@@ -1334,8 +1493,67 @@ private getProfileBlockerMesh(profileInfo?: any): string {
  }
 
  handleExportSeparations(exportOptions: any): void {
+  const controlNumber = (exportOptions && exportOptions.controlNumber ? String(exportOptions.controlNumber) : '').trim();
+  const versionNumber = (exportOptions && exportOptions.versionNumber ? String(exportOptions.versionNumber) : '').trim();
+
+  // Control number + Version number are required (the Export button is gated on both). Write them into
+  // the document's [CONTROL]/[V#] tokens (first export) or the Control_Number/Version_Number text frames
+  // (repeat export) and SAVE FIRST, then continue to the PostScript/Print-Guide export. Never blocks the
+  // export on an update failure (it's logged; the export still runs).
+  this.controller
+   .updateControlAndVersionNumbers(controlNumber, versionNumber)
+   .then((res: any) => {
+    if (!res || res.success !== true) {
+     console.error('[SEPARATION] Control/Version number update failed:', res && res.error ? res.error : 'unknown error');
+    }
+   })
+   .catch((err: any) => {
+    console.error('[SEPARATION] Control/Version number update error:', err && (err.message || err.reason) ? (err.message || err.reason) : err);
+   })
+   .then(() => this.runExports(exportOptions));
+ }
+
+ private runExports(exportOptions: any): void {
   console.log('[SEPARATION] Starting export process...');
 
+  /* Reset the results collection + modal for this fresh export run. */
+  this.exportResultFiles = [];
+  this.exportResultsShown = false;
+  this.isExportResultsModalOpen = false;
+
+  /*
+   * Always copy the separation .ai file to the "Separation file path" first,
+   * independent of the export checkboxes. Running it before any PDF saveAs keeps
+   * the copy pointing at the on-disk .ai. Best-effort: logged, never blocks the
+   * Print Guide / PostScript exports, which run once the copy settles.
+   */
+  this.controller
+   .copySeparationFile()
+   .then((res: any) => {
+    if (res && res.success) {
+     if (!res.skipped) {
+      console.log('[SEPARATION] Separation file copied → ' + (res.filePath || ''));
+      this.pushExportResultFile('Separation File (.ai)', res.filePath);
+     }
+    } else {
+     console.error('[SEPARATION] Separation file copy failed: ' + (res && res.error ? res.error : 'unknown error'));
+    }
+   })
+   .catch((err: any) => {
+    console.error(
+     '[SEPARATION] Separation file copy error: ' +
+      (err && (err.message || err.reason) ? (err.message || err.reason) : err)
+    );
+   })
+   .then(() => this.runPdfAndPostscriptExports(exportOptions));
+ }
+
+ /*
+  * Runs the Print Guide PDF and PostScript (+ Seps Preview PDF) exports per the
+  * selected checkboxes. Split out from runExports so the always-on separation .ai
+  * copy can complete first.
+  */
+ private runPdfAndPostscriptExports(exportOptions: any): void {
   const exportResults: string[] = [];
   const exportErrors: string[] = [];
 
@@ -1346,6 +1564,7 @@ private getProfileBlockerMesh(profileInfo?: any): string {
     .then((result) => {
      if (result && result.success) {
       exportResults.push('Print Guide PDF');
+      this.pushExportResultFile('Print Guide PDF', result.filePath);
      } else {
       exportErrors.push('Print Guide PDF: ' + (result?.error || 'Failed'));
      }
@@ -1361,7 +1580,7 @@ private getProfileBlockerMesh(profileInfo?: any): string {
 
   const postscriptDelay = exportOptions.exportPrintGuide ? 500 : 0;
 
-  // Postscript (.ps at postscriptFilePath) + Separations Preview PDF (Distiller → separationPreviewFilePath)
+  // Postscript export: .ps and the distilled Seps Preview .pdf both land in the postscriptFilePath folder
   if (exportOptions.exportPostscript) {
    const postscriptInks = this.getPostscriptInks();
    setTimeout(() => {
@@ -1375,10 +1594,15 @@ private getProfileBlockerMesh(profileInfo?: any): string {
        return;
       }
 
+      /* .ps landed in the Postscript folder — link it in the results modal. */
+      this.pushExportResultFile('PostScript (.ps)', psResult.filePath);
+
       try {
        const distillResult = await this.controller.distillSeparationsPreviewPDF(psResult.filePath);
        if (distillResult && distillResult.success) {
         exportResults.push(label);
+        /* Distilled Seps Preview PDF (beside the .ps) — link it too. */
+        this.pushExportResultFile('Seps Preview PDF', distillResult.filePath);
         // ROI: one sepexport event per completed separation output (see services/roi.ts; never throws)
         roiLogEvent({
           action: 'sepexport',
@@ -1430,6 +1654,48 @@ private getProfileBlockerMesh(profileInfo?: any): string {
       : `Exported ${exportResults.length} files successfully!`;
     console.log('[SEPARATION]', successMessage);
    }
+
+   /*
+    * The whole export run is done — show the results modal once with a link per
+    * exported file (Separation .ai, Print Guide, .ps, Seps Preview PDF).
+    */
+   this.openExportResultsModal();
+  }
+ }
+
+ /*
+  * Record an exported file for the results modal. De-dupes by absolute path and
+  * derives the display name from the path. Ignores empty paths.
+  */
+ private pushExportResultFile(label: string, filePath: string | undefined | null): void {
+  const path = String(filePath || '').trim();
+  if (!path) return;
+  if (this.exportResultFiles.some((file) => file.path === path)) return;
+  const name = path.split(/[\\/]/).pop() || path;
+  this.exportResultFiles.push({ label, path, name });
+ }
+
+ /* Open the export-results modal exactly once per export run (inside the zone). */
+ private openExportResultsModal(): void {
+  if (this.exportResultsShown) return;
+  this.exportResultsShown = true;
+  this.ngZone.run(() => {
+   this.isExportResultsModalOpen = true;
+   this.cdr.detectChanges();
+  });
+ }
+
+ handleExportResultsModalClose(): void {
+  this.ngZone.run(() => {
+   this.isExportResultsModalOpen = false;
+   this.cdr.detectChanges();
+  });
+ }
+
+ handleRevealExportFile(filePath: string): void {
+  const result = this.controller.revealFileInFinder(filePath);
+  if (!result.success) {
+   console.error('[SEPARATION] Reveal in Finder failed: ' + (result.error || 'unknown error'));
   }
  }
 
@@ -1443,6 +1709,24 @@ private getProfileBlockerMesh(profileInfo?: any): string {
   } else if (item === 'Delete UB, choke and blocker plates') {
    this.handleDeleteUbChokeBlockerPlates();
   }
+ }
+
+ /*
+  * Push the Plates-UI total color count to the document's [C#] / "TOTAL COLORS" text frames.
+  * The count is every non-removed plate the Plates UI shows (ink colors + White UB underbase
+  * passes + Blocker) — NOT the raw SEPARATED_ART layer count — so the sheet's total matches what
+  * the user sees, including after "Generate underbase from existing inks" and after removing a color.
+  */
+ private pushTotalColorsToDocument(): void {
+  if (this.isRunningInBrowser || !this.isSeparatedDoc) {
+   return;
+  }
+  const count = this.colorRows.filter((row) => !row.removed).length;
+  this.controller
+   .updateTotalColors?.(count)
+   ?.catch((err: any) => {
+    console.error('[SEPARATION] updateTotalColors failed:', err?.message || err);
+   });
  }
 
  handleGenerateUnderbaseFromExistingInks(): void {
@@ -1831,6 +2115,8 @@ private getProfileBlockerMesh(profileInfo?: any): string {
    ...originalRow,
    id: this.nextId,
    colorName: duplicateName,
+   /* Second hit uses the Inks.xlsx "WUB Mesh 2" value for the base ink when present, else same mesh. */
+   mesh: this.secondHitMeshOrFallback(originalRow.colorName || this.hostLayerName(originalRow), originalRow.mesh),
    /** Second hit is its own plate; do not inherit parent's XMP swatch name (would target wrong layer/swatch on remove). */
    swatchName: undefined,
    removed: false
@@ -1966,6 +2252,7 @@ private getProfileBlockerMesh(profileInfo?: any): string {
    this.updateSepTableInDocument();
    this.hasUIChanges = false;
    this.cdr.detectChanges();
+   this.pushTotalColorsToDocument(); // TOTAL COLORS drops when a plate is removed
   };
 
   if (!this.isRunningInBrowser && inkDeletionTryNames.length > 0 && (removeSublayer || removeSwatch)) {
@@ -2390,7 +2677,7 @@ private getProfileBlockerMesh(profileInfo?: any): string {
    merged.push({
     id: nextId++,
     colorName: layerName,
-    mesh: baseRow?.mesh || '110',
+    mesh: this.secondHitMeshOrFallback(baseName, baseRow?.mesh || '110'),
     micron: baseRow?.micron || 'NA',
     type: 'separation',
     layerColor: swatch.hex || baseRow?.layerColor || this.getRandomColor(),
@@ -2422,7 +2709,7 @@ private getProfileBlockerMesh(profileInfo?: any): string {
   const withoutPrefix = pantoneBase.replace(/^PANTONE\s+/i, '');
   const tokenMatch = withoutPrefix.match(/^(.*?)\s+[A-Z]{1,3}P?$/);
   const token = tokenMatch ? tokenMatch[1].trim() : withoutPrefix.trim();
-  return format.replace(/XXX/g, token) + hitSuffix;
+  return format.replace(/###/g, token) + hitSuffix;
  }
 
  updateSepTableInDocument(): void {
@@ -2440,7 +2727,7 @@ private getProfileBlockerMesh(profileInfo?: any): string {
    this.documentProfileMetadata?.colorNameLabelFormat &&
    String(this.documentProfileMetadata.colorNameLabelFormat).trim() !== ''
     ? String(this.documentProfileMetadata.colorNameLabelFormat)
-    : 'PANTONE XXX C';
+    : 'PANTONE ### C';
 
   const tableRows = this.buildTableRowsWithRequiredWhiteUb(activeRows);
   const separationData = tableRows.map((row, index) => {

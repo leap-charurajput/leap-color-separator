@@ -1,0 +1,35 @@
+<div *ngIf="isOpen" class="modal-overlay" (mousedown)="onClose()" (click)="onClose()">
+	<div
+		class="export-results-modal modal-container"
+		(mousedown)="onDialogClick($event)"
+		(click)="onDialogClick($event)"
+	>
+		<div class="modal-header">
+			<h3 class="modal-title">Export Separations</h3>
+		</div>
+
+		<div class="modal-body">
+			<p class="export-results-message">{{ message }}</p>
+
+			<div *ngIf="displayedFiles.length > 0; else noFiles" class="export-results-list">
+				<button
+					*ngFor="let file of displayedFiles"
+					type="button"
+					class="export-results-item"
+					[attr.title]="'Reveal in Finder: ' + file.path"
+					(click)="onReveal(file)"
+				>
+					<span class="export-results-item-label">{{ file.label }}</span>
+					<span class="export-results-item-name">{{ file.name }}</span>
+				</button>
+			</div>
+			<ng-template #noFiles>
+				<p class="export-results-empty">No files were exported.</p>
+			</ng-template>
+		</div>
+
+		<div class="modal-footer">
+			<app-button variant="primary" (click)="onClose()">Close</app-button>
+		</div>
+	</div>
+</div>

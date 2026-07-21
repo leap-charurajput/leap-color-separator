@@ -362,6 +362,14 @@
   >
   </app-export-separations-modal>
 
+  <app-export-results-modal
+   [isOpen]="isExportResultsModalOpen"
+   [files]="exportResultFiles"
+   (close)="handleExportResultsModalClose()"
+   (reveal)="handleRevealExportFile($event)"
+  >
+  </app-export-results-modal>
+
   <app-confirm-dialog
    [isOpen]="isAddSelectionInkConfirmOpen"
    title="Add Ink"

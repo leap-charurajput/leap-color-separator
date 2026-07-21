@@ -11,6 +11,18 @@ interface ExportSettingField {
  label: string;
 }
 
+/*
+ * A graphic position chip rendered under the "Positions" section.
+ * - label: the text shown on the chip (the ABBV from graphic_positions.json).
+ * - value: the text copied to the clipboard when the chip is clicked.
+ * - title: optional tooltip showing the full position DESC.
+ */
+export interface GraphicPositionChip {
+ label: string;
+ value: string;
+ title?: string;
+}
+
 const DEFAULT_EXPORT_SETTINGS: ExportSettings = {
  printGuideFilePath: '',
  separationPreviewFilePath: '',
@@ -45,7 +57,12 @@ const FALLBACK_GRAPHIC_POSITIONS = [
 export class ExportSettingsPanelComponent {
  @Input() exportSettings: ExportSettings = { ...DEFAULT_EXPORT_SETTINGS };
  @Input() excelColumns: string[] = [];
- @Input() graphicPositions: string[] = [];
+ /*
+  * Graphic positions accept either plain strings or GraphicPositionChip objects.
+  * When sourced from graphic_positions.json each entry is a chip whose label is
+  * the abbreviation (ABBV) and whose tooltip is the full description (DESC).
+  */
+ @Input() graphicPositions: Array<string | GraphicPositionChip> = [];
  @Input() profileCodes: string[] = [];
  @Output() exportSettingChange = new EventEmitter<{ field: keyof ExportSettings; value: string }>();
 
@@ -53,7 +70,7 @@ export class ExportSettingsPanelComponent {
 
  readonly fields: ExportSettingField[] = [
   { key: 'printGuideFilePath', label: 'Print guide file path' },
-  { key: 'separationPreviewFilePath', label: 'Separation Preview file path' },
+  { key: 'separationPreviewFilePath', label: 'Separation file path' },
   { key: 'postscriptFilePath', label: 'Postscript file path' }
  ];
 
@@ -62,17 +79,19 @@ export class ExportSettingsPanelComponent {
   return columns.length > 0 ? columns : [...FALLBACK_EXCEL_COLUMNS];
  }
 
- get displayedGraphicPositions(): string[] {
-  const positions = this.uniqueNonEmpty(this.graphicPositions);
-  return positions.length > 0 ? positions : [...FALLBACK_GRAPHIC_POSITIONS];
+ get displayedGraphicPositions(): GraphicPositionChip[] {
+  const positions = this.normalizePositionChips(this.graphicPositions);
+  if (positions.length > 0) return positions;
+  /* Fall back to a static list when no graphic_positions.json data is available. */
+  return FALLBACK_GRAPHIC_POSITIONS.map((label) => ({ label, value: label }));
  }
 
  get filteredExcelColumns(): string[] {
   return this.filterValues(this.displayedExcelColumns);
  }
 
- get filteredGraphicPositions(): string[] {
-  return this.filterValues(this.displayedGraphicPositions);
+ get filteredGraphicPositions(): GraphicPositionChip[] {
+  return this.filterPositionChips(this.displayedGraphicPositions);
  }
 
  get filteredProfileCodes(): string[] {
@@ -100,6 +119,45 @@ export class ExportSettingsPanelComponent {
   const query = this.tokenSearch.trim().toLowerCase();
   if (!query) return values;
   return values.filter((value) => String(value || '').toLowerCase().includes(query));
+ }
+
+ /*
+  * Normalize the graphicPositions input (plain strings and/or chip objects) into
+  * a de-duplicated list of GraphicPositionChip entries. De-duplication is keyed
+  * on the copy value so the same abbreviation is never shown twice.
+  */
+ private normalizePositionChips(values: Array<string | GraphicPositionChip> = []): GraphicPositionChip[] {
+  const seen = new Set<string>();
+  const chips: GraphicPositionChip[] = [];
+  (Array.isArray(values) ? values : []).forEach((entry) => {
+   let chip: GraphicPositionChip | null = null;
+   if (typeof entry === 'string') {
+    const value = entry.trim();
+    if (value) chip = { label: value, value };
+   } else if (entry && typeof entry === 'object') {
+    const value = String(entry.value || entry.label || '').trim();
+    const label = String(entry.label || entry.value || '').trim();
+    const title = entry.title != null ? String(entry.title).trim() : '';
+    if (value) chip = { label: label || value, value, title: title || undefined };
+   }
+   if (!chip || seen.has(chip.value)) return;
+   seen.add(chip.value);
+   chips.push(chip);
+  });
+  return chips;
+ }
+
+ /*
+  * Filter position chips by the search box, matching the chip label (ABBV), its
+  * copy value, and its tooltip (DESC) so searching either the abbreviation or the
+  * full position name surfaces the chip.
+  */
+ private filterPositionChips(chips: GraphicPositionChip[]): GraphicPositionChip[] {
+  const query = this.tokenSearch.trim().toLowerCase();
+  if (!query) return chips;
+  return chips.filter((chip) =>
+   [chip.label, chip.value, chip.title || ''].some((text) => String(text || '').toLowerCase().includes(query))
+  );
  }
 
  private uniqueNonEmpty(values: string[] = []): string[] {

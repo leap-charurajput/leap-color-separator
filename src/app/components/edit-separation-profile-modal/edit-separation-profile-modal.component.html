@@ -75,6 +75,7 @@
      <div class="profile-ub-table" role="group" aria-label="Underbase Mesh Dark inks">
       <div class="profile-ub-table-header">
        <span class="profile-ub-th">Underbase</span>
+       <span class="profile-ub-th">Name</span>
        <span class="profile-ub-th">Mesh</span>
        <span class="profile-ub-th profile-ub-th-dark">Dark inks</span>
       </div>
@@ -82,6 +83,9 @@
       <div *ngFor="let mesh of formState.underbaseMeshes; let i = index; trackBy: trackByIndex" class="profile-ub-row" [class.is-row-disabled]="!formState.underbaseEnabled[i]">
        <div class="profile-ub-cell profile-ub-cell-underbase">
         <app-checkbox class="profile-checkbox-tight" [checked]="formState.underbaseEnabled[i]" [label]="'UB ' + (i + 1)" [disabled]="i === 0" (change)="onUnderbaseEnabledChange(i, $event)"></app-checkbox>
+       </div>
+       <div class="profile-ub-cell profile-ub-cell-name">
+        <input type="text" class="settings-field-input profile-input profile-ub-name-input" [value]="formState.underbaseNames[i]" (input)="onUnderbaseNameChange(i, $event)" [attr.placeholder]="'White UB' + (i === 0 ? '' : ' ' + (i + 1))" [attr.aria-label]="'Custom name for UB ' + (i + 1)" />
        </div>
        <div class="profile-ub-cell profile-ub-cell-mesh">
         <input type="text" class="settings-field-input profile-input profile-ub-mesh-input" [value]="formState.underbaseMeshes[i]" (input)="onMeshChange(i, $event)" />
@@ -104,6 +108,7 @@
        <div class="profile-ub-cell profile-ub-cell-underbase">
         <app-checkbox class="profile-checkbox-tight" [checked]="formState.blocker" [label]="'Blocker'" (change)="onCheckboxChange('blocker', $event)"></app-checkbox>
        </div>
+       <div class="profile-ub-cell profile-ub-cell-name"></div>
        <div class="profile-ub-cell profile-ub-cell-mesh">
         <input type="text" class="settings-field-input profile-input profile-ub-mesh-input" [value]="formState.blockerMesh" (input)="onInputChange('blockerMesh', $event)" />
        </div>
@@ -138,8 +143,7 @@
     <div *ngIf="activeTab === 'inkExceptions'" class="profile-modal-tab-panel profile-modal-tab-panel--ink profile-ink-tab" id="sep-profile-panel-inkExceptions" role="tabpanel" aria-labelledby="sep-profile-tab-inkExceptions">
      <div class="profile-ink-top-bar">
       <h4 class="profile-modal-section-title profile-ink-section-title">Ink Exceptions <span class="profile-ink-profile-tag" *ngIf="activeInkProfileLabel">({{ activeInkProfileLabel }})</span></h4>
-      <div class="profile-ink-toolbar">
-       <div class="profile-ink-search">
+      <div class="profile-ink-search">
         <span class="profile-ink-search-icon" aria-hidden="true">
          <svg class="profile-ink-toolbar-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true">
           <circle cx="11" cy="11" r="6" stroke="currentColor" stroke-width="1.5"></circle>
@@ -148,11 +152,50 @@
         </span>
         <input type="search" class="settings-field-input profile-input profile-ink-search-input" placeholder="Search inks…" [value]="inkExceptionQuery" (input)="inkExceptionQuery = $any($event.target).value" aria-label="Search ink exceptions" />
        </div>
+      </div>
+      <div class="profile-ink-actions-row">
+       <button type="button" class="profile-ink-add-btn profile-ink-btn-labeled" (click)="handleInkExceptionImport()" [disabled]="inkImportBusy" title="Import ink exceptions from Excel" aria-label="Import ink exceptions from Excel">
+        <svg class="profile-ink-toolbar-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true">
+         <path d="M12 3v11m0 0l-4-4m4 4l4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path>
+         <path d="M5 17v2a2 2 0 002 2h10a2 2 0 002-2v-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
+        </svg>
+        <span class="profile-ink-add-btn-label">Import</span>
+       </button>
        <button type="button" class="profile-ink-add-btn" (click)="handleInkExceptionAdd()" title="Add ink exception" aria-label="Add ink exception">
         <svg class="profile-ink-toolbar-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true">
          <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
         </svg>
        </button>
+      </div>
+
+     <!-- Import ink exceptions dialog -->
+     <div *ngIf="inkImportDialogOpen" class="ink-import-overlay" (mousedown)="closeInkImportDialog()">
+      <div class="ink-import-dialog" (mousedown)="$event.stopPropagation()">
+       <div class="ink-import-header">Import Ink Exceptions</div>
+       <div class="ink-import-body">
+        <ng-container *ngIf="inkImportError; else importChoices">
+         <p class="ink-import-error">{{ inkImportError }}</p>
+        </ng-container>
+        <ng-template #importChoices>
+         <p class="ink-import-summary">
+          <strong>{{ inkImportCount }}</strong> ink exception(s) read<span *ngIf="inkImportFileName"> from <em>{{ inkImportFileName }}</em></span>.
+         </p>
+         <p *ngIf="inkImportHasDuplicates" class="ink-import-dupes">
+          {{ inkImportDuplicateNames.length }} already exist: {{ inkImportDuplicateNames.join(', ') }}
+         </p>
+         <div class="ink-import-actions">
+          <app-button variant="secondary" (click)="applyInkImport('replace')">Replace all</app-button>
+          <ng-container *ngIf="inkImportHasDuplicates">
+           <app-button variant="secondary" (click)="applyInkImport('keepExisting')">Merge · keep existing</app-button>
+           <app-button variant="primary" (click)="applyInkImport('useImported')">Merge · use imported</app-button>
+          </ng-container>
+          <app-button *ngIf="!inkImportHasDuplicates" variant="primary" (click)="applyInkImport('keepExisting')">Merge (add new)</app-button>
+         </div>
+        </ng-template>
+       </div>
+       <div class="ink-import-footer">
+        <app-button variant="secondary" (click)="closeInkImportDialog()">Cancel</app-button>
+       </div>
       </div>
      </div>
 

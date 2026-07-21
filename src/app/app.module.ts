@@ -15,6 +15,7 @@ import { EditSeparationModalComponent } from './components/edit-separation-modal
 import { SeparationProfileActionDialogComponent } from './components/separation-profile-action-dialog/separation-profile-action-dialog.component';
 import { EditSeparationProfileModalComponent } from './components/edit-separation-profile-modal/edit-separation-profile-modal.component';
 import { ExportSeparationsModalComponent } from './components/export-separations-modal/export-separations-modal.component';
+import { ExportResultsModalComponent } from './components/export-results-modal/export-results-modal.component';
 import { PostscriptSetupAlertComponent } from './components/postscript-setup-alert/postscript-setup-alert.component';
 import { PostscriptSetupDetailComponent } from './components/postscript-setup-detail/postscript-setup-detail.component';
 import { ReportProblemComponent } from './components/report-problem/report-problem.component';
@@ -58,6 +59,7 @@ import { ControllerService } from './services/controller.service';
   SeparationProfilesPanelComponent,
   EditSeparationProfileModalComponent,
   ExportSeparationsModalComponent,
+  ExportResultsModalComponent,
   PostscriptSetupAlertComponent,
   PostscriptSetupDetailComponent,
   ReportProblemComponent,

@@ -417,52 +417,167 @@ function getUnderbase2SwatchName(profileMetadata, doc) {
 	}
 }
 
+/**
+ * Custom name entered for a UB pass in the profile Underbase Settings (UB1-4), trimmed.
+ * Empty string means "use the default White UB N naming".
+ */
+function getUnderbaseCustomName(profileMetadata, ubIndex) {
+	try {
+		if (
+			profileMetadata &&
+			profileMetadata.underbaseNames &&
+			profileMetadata.underbaseNames[ubIndex] != null
+		) {
+			return String(profileMetadata.underbaseNames[ubIndex]).replace(/^\s+|\s+$/g, "");
+		}
+	} catch (e) { }
+	return "";
+}
+
+/** All non-empty custom underbase names configured on the profile (lowercased set for matching). */
+function collectCustomUnderbaseNames(profileMetadata) {
+	var names = [];
+	try {
+		var arr = profileMetadata && profileMetadata.underbaseNames ? profileMetadata.underbaseNames : [];
+		for (var i = 0; i < arr.length; i++) {
+			var nm = arr[i] != null ? String(arr[i]).replace(/^\s+|\s+$/g, "") : "";
+			if (nm) names.push(nm);
+		}
+	} catch (e) { }
+	return names;
+}
+
+/**
+ * When UB1 (the base white) is given a custom name, REUSE the existing "White UB" swatch by renaming
+ * it to the custom name instead of letting ensureUnderbaseSwatch copy it — otherwise both "White UB"
+ * and the custom swatch end up in the Swatches panel. No-op if the target already exists or there is
+ * no "White UB" swatch to reuse.
+ */
+function renameBaseWhiteUnderbaseSwatch(doc, toName) {
+	try {
+		if (!toName) return false;
+		var target = String(toName).replace(/^\s+|\s+$/g, "");
+		if (!target || target === CONSTANTS.SWATCH_NAMES.WHITE_UB) return false;
+		if (getSwatchByName(doc, target)) return false;              // custom swatch already exists
+		var sw = getSwatchByName(doc, CONSTANTS.SWATCH_NAMES.WHITE_UB);
+		if (!sw) return false;                                       // no White UB swatch to reuse
+		try {
+			if (sw.color && sw.color.typename === "SpotColor" && sw.color.spot) {
+				sw.color.spot.name = target;
+			}
+		} catch (e1) { }
+		try { sw.name = target; } catch (e2) { }
+		return true;
+	} catch (e) {
+		return false;
+	}
+}
+
+/*
+ * Name of the existing white plate swatch that UB2+ should SHARE, tolerant of ink-name formatting.
+ *
+ * When a profile enables formatInkNameLabel, renameFormattedInks() renames the "PANTONE White C"
+ * plate (and its swatch) to the formatted label (e.g. "SL White"). On the first separation the
+ * underbase is built BEFORE that rename, so the canonical name still matches; but on "Generate
+ * underbase from existing inks" the inks are already formatted, so we must also try the formatted
+ * white name. resolveFormattedInkName (from cep_adapters.jsx) is the exact inverse of the rename, so
+ * it reproduces the current swatch name precisely. Returns the actual swatch name, or "" if none.
+ */
+function resolveSharedWhitePlateSwatchName(doc, profileMetadata) {
+	var candidates = [];
+	try {
+		if (profileMetadata && profileMetadata.formatInkNameLabel) {
+			var fmt = String(profileMetadata.colorNameLabelFormat || "").replace(/^\s+|\s+$/g, "");
+			if (fmt) {
+				/* Exact inverse of the rename (handles e.g. "SL ###" -> "SL White"). */
+				if (typeof resolveFormattedInkName === "function") {
+					candidates.push(resolveFormattedInkName("PANTONE White C", fmt));
+					candidates.push(resolveFormattedInkName("PANTONE White", fmt));
+				}
+				/* Fallback: swap the numeric/placeholder token for "White" (e.g. "LS XXX C" -> "LS White C"). */
+				candidates.push(fmt.replace(/#+/g, "White").replace(/X{2,}/g, "White"));
+			}
+		}
+	} catch (eFmt) { }
+	/* Canonical (unformatted) white plate names — win on the first separation, before any rename. */
+	candidates.push("PANTONE White C");
+	candidates.push("PANTONE White");
+	candidates.push("White");
+	for (var i = 0; i < candidates.length; i++) {
+		var nm = candidates[i] ? getSwatchNameCaseInsensitive(doc, candidates[i]) : "";
+		if (nm) return nm;
+	}
+	return "";
+}
+
 /** Resolve SEPARATED_ART layer + fill swatch for a profile underbase pass index. */
 function resolveUnderbaseLayerAndSwatch(ubIndex, profileMetadata, doc) {
+	// A custom name (when entered) is used for BOTH the underbase swatch and the layer name.
+	var customName = getUnderbaseCustomName(profileMetadata, ubIndex);
+
 	if (ubIndex === 0) {
 		return {
-			layerName: CONSTANTS.LAYER_NAMES.WHITE_UB,
-			swatchName: getProfileUnderbaseSwatchName(profileMetadata),
+			layerName: customName || CONSTANTS.LAYER_NAMES.WHITE_UB,
+			swatchName: customName || getProfileUnderbaseSwatchName(profileMetadata),
 			clearBeforeCopy: true
 		};
 	}
 	var layerName = getUnderbaseLayerNameForIndex(ubIndex);
 
-	// UB2 (ubIndex === 1) ONLY: if a white plate swatch already exists in the document, fill the
-	// separate "White UB 2" underbase layer with THAT existing swatch instead of a dedicated
-	// "White UB 2" spot. Result: the UB2 underbase layer and the white color plate share one
-	// swatch (two separate SEPARATED_ART layers, same swatch). Preference order:
-	// "PANTONE White C" -> "PANTONE White" -> "White". If none exist, UB2 falls back to the
-	// dedicated "White UB 2" swatch (current behavior). UB3/UB4 are unchanged.
+	// UB2 (ubIndex === 1) precedence (per product decision):
+	//   1) If a white plate swatch already exists (PANTONE White C -> PANTONE White -> White),
+	//      SHARE it as the fill; the layer takes the custom name when entered, else "White UB 2".
+	//   2) Else, if a custom name was entered, use it for the layer + swatch.
+	//   3) Else, fall back to the dedicated "White UB 2" swatch (unchanged behavior).
 	if (ubIndex === 1) {
-		var whiteSwatchName =
-			getSwatchNameCaseInsensitive(doc, "PANTONE White C") ||
-			getSwatchNameCaseInsensitive(doc, "PANTONE White") ||
-			getSwatchNameCaseInsensitive(doc, "White");
+		/* Format-aware: when ink-name formatting is on, the white plate swatch may already be
+		   renamed (e.g. "PANTONE White C" -> "SL White") — as happens on "Generate underbase from
+		   existing inks", where inks are already formatted. resolveSharedWhitePlateSwatchName finds
+		   the formatted name too so UB2 still SHARES the real white plate instead of falling back. */
+		var whiteSwatchName = resolveSharedWhitePlateSwatchName(doc, profileMetadata);
 		if (whiteSwatchName) {
 			return {
-				layerName: layerName,        // keep the separate "White UB 2" layer
-				swatchName: whiteSwatchName, // but fill it with the existing white plate swatch
+				// Custom name (when entered) renames the layer; the swatch still shares the existing
+				// white plate (PANTONE White C -> PANTONE White -> White). Falls back to "White UB 2"
+				// when no custom name is set (unchanged behavior).
+				layerName: customName || layerName,
+				swatchName: whiteSwatchName,
+				clearBeforeCopy: true
+			};
+		}
+		if (customName) {
+			return {
+				layerName: customName,
+				swatchName: customName,
 				clearBeforeCopy: true
 			};
 		}
 		// else: no white plate swatch found -> fall through to dedicated "White UB 2" swatch.
 	}
 
-	// Each extra underbase pass gets its own dedicated white swatch named after the plate
-	// (e.g. "White UB 2"), separate from PANTONE White C. finalizeUnderbaseLayer creates it
-	// white from the "White UB" swatch when it does not exist yet.
+	// UB3/UB4 (and UB2 fallback): a custom name wins; otherwise each extra underbase pass gets its
+	// own dedicated white swatch named after the plate (e.g. "White UB 3"). finalizeUnderbaseLayer
+	// creates the swatch white from the "White UB" swatch when it does not exist yet.
 	return {
-		layerName: layerName,
-		swatchName: layerName,
+		layerName: customName || layerName,
+		swatchName: customName || layerName,
 		clearBeforeCopy: true
 	};
 }
 
-/** Layer belongs in the underbase stack (White UB variants). */
+/**
+ * Layer belongs in the underbase stack (White UB variants, or a profile custom underbase name).
+ * When profileMetadata carries custom UB names, those are treated as underbase layers too.
+ */
 function isUnderbaseStackLayerName(layerName, profileMetadata, doc) {
 	if (!layerName) return false;
-	return String(layerName).indexOf(CONSTANTS.LAYER_NAMES.WHITE_UB) === 0;
+	if (String(layerName).indexOf(CONSTANTS.LAYER_NAMES.WHITE_UB) === 0) return true;
+	var custom = collectCustomUnderbaseNames(profileMetadata);
+	var target = String(layerName).replace(/^\s+|\s+$/g, "").toLowerCase();
+	for (var i = 0; i < custom.length; i++) {
+		if (String(custom[i]).toLowerCase() === target) return true;
+	}
+	return false;
 }
 
 /** Plate list uses live SEPARATED_ART layer names (no filtering). */
@@ -812,6 +927,94 @@ function populateTempLayerFromExistingInkPlates(separatedArtLayer, profileMetada
 	}
 }
 
+/**
+ * Persist the set of SEPARATED_ART underbase layer names to the document XMP
+ * (struct field "UnderbaseLayerNames", ordered ascending by pass). The Plates panel reads this so
+ * custom-named underbase plates are still recognized/grouped as underbase even though their name no
+ * longer starts with "White UB".
+ */
+function writeUnderbaseLayerNamesXmp(doc, orderedNames) {
+	try {
+		if (typeof xmpModifier !== "object") return;
+		var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
+		if (!xmp.isXmpCreated) return;
+		var clean = [];
+		for (var i = 0; i < orderedNames.length; i++) {
+			var nm = orderedNames[i] != null ? String(orderedNames[i]).replace(/^\s+|\s+$/g, "") : "";
+			if (nm) clean.push(nm);
+		}
+		xmp.setStructField("UnderbaseLayerNames", clean, true, false);
+		xmp.commit();
+	} catch (e) { }
+}
+
+/**
+ * Persist the swatch each underbase pass is filled with (struct field "UnderbaseSwatchNames",
+ * ordered by pass). The Plates panel flags a plate as underbase when its swatch matches one of these,
+ * so a shared white (e.g. UB2 sharing "PANTONE White") groups with the underbase.
+ */
+function writeUnderbaseSwatchNamesXmp(doc, orderedSwatches) {
+	try {
+		if (typeof xmpModifier !== "object") return;
+		var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
+		if (!xmp.isXmpCreated) return;
+		var clean = [];
+		for (var i = 0; i < orderedSwatches.length; i++) {
+			var nm = orderedSwatches[i] != null ? String(orderedSwatches[i]).replace(/^\s+|\s+$/g, "") : "";
+			if (nm) clean.push(nm);
+		}
+		xmp.setStructField("UnderbaseSwatchNames", clean, true, false);
+		xmp.commit();
+	} catch (e) { }
+}
+
+/**
+ * Record every SEPARATED_ART underbase layer to XMP: the layer names (UnderbaseLayerNames) and each
+ * layer's ACTUAL fill swatch (UnderbaseSwatchNames), ordered by pass. The fill-swatch record catches
+ * a shared white (e.g. a localized "White UB 2" filled with "PANTONE White" that is also a real ink
+ * plate) so that ink plate groups with the underbase. MUST be called AFTER any formatted-ink rename
+ * so the recorded swatch names match the final plate names the panel sees.
+ */
+function recordUnderbaseLayersToXmp(doc, profileMetadata) {
+	try {
+		var separatedArtLayer = null;
+		try { separatedArtLayer = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SEPARATED_ART); } catch (e0) { return; }
+		if (!separatedArtLayer || !separatedArtLayer.layers) return;
+
+		var ubPassRows = []; // { layer, swatch, pass }
+		for (var si = 0; si < separatedArtLayer.layers.length; si++) {
+			var slayer = separatedArtLayer.layers[si];
+			if (!slayer || !slayer.name) continue;
+			if (!isUnderbaseStackLayerName(slayer.name, profileMetadata, doc)) continue;
+			var ubPass = underbasePassNumberForLayer(slayer.name, profileMetadata);
+			var ubFill = getFirstFillColorFromSeparatedArtSublayer(doc, slayer.name);
+			var ubFillSwatch = null;
+			if (ubFill && ubFill.typename === "SpotColor" && ubFill.spot && ubFill.spot.name) {
+				ubFillSwatch = String(ubFill.spot.name).replace(/^\s+|\s+$/g, "");
+			}
+			ubPassRows.push({ layer: slayer.name, swatch: ubFillSwatch, pass: ubPass });
+		}
+		ubPassRows.sort(function (a, b) { return a.pass - b.pass; });
+
+		var ubNamesForXmp = [];
+		var ubSwatchesForXmp = [];
+		var seenUbSwatch = {};
+		for (var pr = 0; pr < ubPassRows.length; pr++) {
+			ubNamesForXmp.push(ubPassRows[pr].layer);
+			var sw = ubPassRows[pr].swatch;
+			if (sw && !seenUbSwatch[sw.toLowerCase()]) {
+				seenUbSwatch[sw.toLowerCase()] = true;
+				ubSwatchesForXmp.push(sw);
+			}
+		}
+		writeUnderbaseLayerNamesXmp(doc, ubNamesForXmp);
+		writeUnderbaseSwatchNamesXmp(doc, ubSwatchesForXmp);
+		appendLeapSepLog("[UB_ORDER] UnderbaseLayerNames=[" + ubNamesForXmp.join(" | ") + "] UnderbaseSwatchNames=[" + ubSwatchesForXmp.join(" | ") + "]");
+	} catch (ubXmpErr) {
+		appendLeapSepLog("[UB_ORDER] underbase XMP record error: " + (ubXmpErr.message || ubXmpErr));
+	}
+}
+
 function generateUnderbase(_graphicName, cleanupOpts, profileMetadata, genOptions) {
 	genOptions = genOptions || {};
 	var fromExistingInks = genOptions.fromExistingInks === true;
@@ -870,6 +1073,9 @@ function generateUnderbase(_graphicName, cleanupOpts, profileMetadata, genOption
 			}
 		}
 
+		// pass number (1-based) -> the swatch each underbase pass is filled with, so the panel can
+		// flag a plate as underbase when it SHARES an underbase swatch (e.g. UB2 sharing PANTONE White).
+		var ubResolvedSwatchByPass = {};
 		var enabledUnderbaseIndices = getEnabledUnderbaseIndices(profileMetadata);
 		for (var ub = 0; ub < enabledUnderbaseIndices.length; ub++) {
 			var ubIndex = enabledUnderbaseIndices[ub];
@@ -877,6 +1083,15 @@ function generateUnderbase(_graphicName, cleanupOpts, profileMetadata, genOption
 			var ubLayerName = resolved.layerName;
 			var ubLayer = getOrCreateSeparatedArtSubLayer(app.activeDocument, ubLayerName, _separatedArtLayer);
 			var ubSwatchName = resolved.swatchName;
+			if (ubSwatchName) ubResolvedSwatchByPass[ubIndex + 1] = ubSwatchName;
+			// UB1 with a custom name: reuse the base "White UB" swatch (rename it) so the Swatches
+			// panel does not keep both "White UB" and the custom swatch.
+			if (ubIndex === 0) {
+				var ubBaseCustomName = getUnderbaseCustomName(profileMetadata, 0);
+				if (ubBaseCustomName) {
+					renameBaseWhiteUnderbaseSwatch(app.activeDocument, ubBaseCustomName);
+				}
+			}
 			var existingCount = 0;
 			try { existingCount = ubLayer.pageItems ? ubLayer.pageItems.length : 0; } catch (ecErr) { }
 			if (resolved.clearBeforeCopy || forceClearUnderbases) {
@@ -915,6 +1130,12 @@ function generateUnderbase(_graphicName, cleanupOpts, profileMetadata, genOption
 		// Generate Choke
 		generateChoke(tempWhiteUBLayer, _separatedArtLayer, profileMetadata);
 		reorderGeneratedUnderbaseLayers(_separatedArtLayer, profileMetadata);
+
+		// Record the underbase passes to XMP so the Plates panel can recognize them. NOTE: this runs
+		// again after any formatted-ink rename (see recordUnderbaseLayersToXmp caller in
+		// handlePerformSeparation) so the recorded swatch names match the FINAL plate names.
+		recordUnderbaseLayersToXmp(app.activeDocument, profileMetadata);
+
 		try { tempWhiteUBLayer.remove(); } catch (tempRemoveErr) { }
 		app.activeDocument.selection = null;
 	} catch (e) {
@@ -989,6 +1210,25 @@ function generateChoke(sourceLayer, separatedArtLayer, profileMetadata) {
 	setStrokeOverprintOnContainer(chokeLayer, true);
 }
 
+/**
+ * Underbase pass number (1-based) for a layer. Uses the "White UB N" number when present, else
+ * the position of a matching custom underbase name in the profile (so custom-named passes stack in
+ * the same order as UB1..UB4). Falls back to 1.
+ */
+function underbasePassNumberForLayer(layerName, profileMetadata) {
+	var n = getWhiteUbLayerNumber(layerName);
+	if (n >= 1) return n;
+	try {
+		var arr = profileMetadata && profileMetadata.underbaseNames ? profileMetadata.underbaseNames : [];
+		var target = String(layerName || "").replace(/^\s+|\s+$/g, "").toLowerCase();
+		for (var i = 0; i < arr.length; i++) {
+			var nm = arr[i] != null ? String(arr[i]).replace(/^\s+|\s+$/g, "").toLowerCase() : "";
+			if (nm && nm === target) return i + 1;
+		}
+	} catch (e) { }
+	return 1;
+}
+
 function reorderGeneratedUnderbaseLayers(separatedArtLayer, profileMetadata) {
 	try {
 		if (!separatedArtLayer || !separatedArtLayer.layers) return;
@@ -1002,12 +1242,12 @@ function reorderGeneratedUnderbaseLayers(separatedArtLayer, profileMetadata) {
 			if (!layer || !layer.name) continue;
 			if (layer.name === CONSTANTS.LAYER_NAMES.CHOKE) chokeLayer = layer;
 			else if (layer.name === CONSTANTS.LAYER_NAMES.BLOCKER) blockerLayer = layer;
-			else if (isWhiteUbLayerName(layer.name)) whiteUbLayers.push(layer);
+			else if (isUnderbaseStackLayerName(layer.name, profileMetadata, app.activeDocument)) whiteUbLayers.push(layer);
 		}
 
 		whiteUbLayers.sort(function(a, b) {
-			// Descending so the stack is White UB 4, White UB 3, White UB 2, White UB (top -> bottom).
-			return getWhiteUbLayerNumber(b.name) - getWhiteUbLayerNumber(a.name);
+			// Descending so the stack is UB4, UB3, UB2, UB1 (top -> bottom), including custom-named passes.
+			return underbasePassNumberForLayer(b.name, profileMetadata) - underbasePassNumberForLayer(a.name, profileMetadata);
 		});
 
 		var tailOrdered = [];

@@ -117,6 +117,47 @@ function GetXMP(nameSpace, nodeName, document) {
   }
  }
 
+ /*
+  * Remove EVERY property under the ColorSeparator namespace — the whole "ColorSeparator" struct node
+  * and all of its fields (colors, layer names, underbase swatches, profile metadata, body color,
+  * document type, graphics-organization data, separation paths, and anything added in the future).
+  * The struct-node delete removes all of our data in one call; the XMPUtils sweep is a
+  * belt-and-suspenders pass for any stray top-level property left in the same namespace. Returns
+  * true when something was removed.
+  */
+ context.deleteAllData = function (autoCommit) {
+  var removedAny = false;
+  try {
+   if (context.xmp.doesPropertyExist(context.destNamespace, context.nodeName)) {
+    context.xmp.deleteProperty(context.destNamespace, context.nodeName);
+    removedAny = true;
+   }
+  } catch (delNodeErr) { }
+  try {
+   if (
+    typeof XMPUtils !== 'undefined' &&
+    XMPUtils.removeProperties &&
+    typeof XMPConst !== 'undefined' &&
+    XMPConst.REMOVE_ALL_PROPERTIES != null
+   ) {
+    XMPUtils.removeProperties(
+     context.xmp,
+     context.destNamespace,
+     '',
+     XMPConst.REMOVE_ALL_PROPERTIES
+    );
+    removedAny = true;
+   }
+  } catch (removeAllErr) { }
+  if (removedAny) {
+   context.hasPendingChanges = true;
+   if (autoCommit !== false) {
+    context.commit();
+   }
+  }
+  return removedAny;
+ }
+
  context.setStructField = function (structFieldName, structFieldValue, doesStringify, autoCommit) {
   structFieldValue = doesStringify ? JSON.stringify(structFieldValue) : structFieldValue;
   context.xmp.setStructField(context.destNamespace, context.nodeName, context.destNamespace, structFieldName, structFieldValue);
@@ -257,6 +298,35 @@ function hideSizedGraphicsSublayer(doc) {
    sizedGraphics.visible = false;
   } catch (sgErr) { }
  } catch (e) { }
+}
+
+/**
+ * Keep SIZED_ART visible but DELETE the SIZED_GRAPHICS sublayer entirely.
+ * Used after a separation finishes: the embedded source graphic is no longer
+ * needed on the SEP document. "Delete / Recreate All Plates" have been removed
+ * from the UI (they were the only consumers that re-read SIZED_GRAPHICS on the
+ * SEP doc), and underbase white-swatch detection reads LIVE_ART on the master
+ * document, so removing this sublayer has no downstream impact. SIZED_ART itself
+ * is preserved so its guides and placed PNG stay on the plate.
+ */
+function deleteSizedGraphicsSublayer(doc) {
+ /* Guard against a missing document reference. */
+ if (!doc) return;
+ try {
+  var sizedArt = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_ART);
+  /* Keep SIZED_ART visible so guides / placed PNG remain intact. */
+  sizedArt.visible = true;
+  try {
+   var sizedGraphics = sizedArt.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_GRAPHICS);
+   /* A locked layer cannot be removed, so unlock first. */
+   sizedGraphics.locked = false;
+   sizedGraphics.remove();
+  } catch (sgErr) {
+   /* SIZED_GRAPHICS already absent (e.g. removed on a prior run) - nothing to do. */
+  }
+ } catch (e) {
+  /* SIZED_ART missing - leave the document untouched. */
+ }
 }
 
 function findPageItemByName(container, itemName) {
@@ -1681,7 +1751,7 @@ function isFormatInkNameLabelEnabled(profileMetadata) {
 
 /**
  * Formatted display name for a Pantone ink using the profile format string, e.g.
- * resolveFormattedInkName("PANTONE 1235 C", "PANTONE XXX") -> "PANTONE 1235".
+ * resolveFormattedInkName("PANTONE 1235 C", "PANTONE ###") -> "PANTONE 1235".
  * Non-Pantone names pass through unchanged; a trailing hit number ("… 2") is kept.
  * Mirrors the panel's resolveColorDisplayName so both sides produce the same name.
  */
@@ -1702,9 +1772,9 @@ function resolveFormattedInkName(name, format) {
  var token = tokenMatch ? String(tokenMatch[1]).replace(/^\s+|\s+$/g, "") : withoutPrefix.replace(/^\s+|\s+$/g, "");
  var fmt = String(format || "").replace(/^\s+|\s+$/g, "");
  if (!fmt) {
-  fmt = "PANTONE XXX C";
+  fmt = "PANTONE ### C";
  }
- return fmt.replace(/XXX/g, token) + hitSuffix;
+ return fmt.replace(/###/g, token) + hitSuffix;
 }
 
 /**
@@ -1719,7 +1789,7 @@ function renameFormattedInks(doc, profileMetadata) {
  }
  var format = String(profileMetadata.colorNameLabelFormat || "").replace(/^\s+|\s+$/g, "");
  if (!format) {
-  format = "PANTONE XXX C";
+  format = "PANTONE ### C";
  }
 
  var sep = null;
@@ -1977,7 +2047,7 @@ function handlePerformSeparation(params_string) {
   }
   auditSecondHitLayers(sepDoc, secondHitApplied, "after applyInkExceptionSecondHitLayers");
   setOverprintOnSeparatedArt(sepDoc, true);
-  hideSizedGraphicsSublayer(sepDoc);
+  deleteSizedGraphicsSublayer(sepDoc);
   unloadLEAPColorSepsActions();
 
   // Apply formatted ink names (layer + swatch + spot) before collecting layer names,
@@ -1986,6 +2056,10 @@ function handlePerformSeparation(params_string) {
   if (formattedInkCount > 0) {
    appendLeapSepLog("formatted ink names applied: " + formattedInkCount);
   }
+
+  // Re-record the underbase layer/swatch XMP AFTER the formatted-ink rename so recorded underbase
+  // swatch names match the final plate names (e.g. "PANTONE White C" -> "PANTONE White").
+  try { recordUnderbaseLayersToXmp(sepDoc, profileMetadata); } catch (ubRecErr) { }
 
   var layerNames = [];
   try {
@@ -2036,7 +2110,8 @@ function handlePerformSeparation(params_string) {
   }
 
   try {
-   updateSeparationPageVariables(sepDoc, inkColorCount, profileMetadata.separationVersion);
+   /* [V#] is written only at export (alongside the control number), not auto-filled at separation. */
+   updateSeparationPageVariables(sepDoc, inkColorCount, null);
    sepDoc.save();
   } catch (cvErr) {
    appendLeapSepLog("C#/V# page variable update error: " + (cvErr.message || cvErr));
@@ -2274,10 +2349,11 @@ function handleRecreatePlatesInActiveDocument(params_string) {
      xmpRecreate.commit();
     }
    } catch (xmpRecErr) { }
+   /* [V#] is written only at export (alongside the control number), not auto-filled on recreate. */
    updateSeparationPageVariables(
     doc,
     inkColorCountRecreate,
-    profileMetadata.separationVersion
+    null
    );
    try {
     doc.save();
@@ -3432,6 +3508,15 @@ function handleGetGraphicSwatches(params_string) {
 
   // For separated documents, get layer names from XMP (works even when file is moved outside 09 SEPARATIONS)
   var profileMetaForPlates = null;
+  /*
+   * Map of lowercased underbase layer name -> 1-based pass index, from the XMP "UnderbaseLayerNames"
+   * written during underbase generation. Lets the panel recognize custom-named underbase plates
+   * (whose names no longer start with "White UB") as underbase.
+   */
+  var underbaseLayerNameMap = {};
+  /* Map of lowercased underbase SWATCH name -> 1-based pass (from XMP "UnderbaseSwatchNames"). Lets a
+     plate that merely shares an underbase swatch (e.g. "PANTONE White" doubling as UB2) group as underbase. */
+  var underbaseSwatchNameMap = {};
   if (isSeparatedDocument) {
    try {
     var sepXmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", activeDoc);
@@ -3443,6 +3528,24 @@ function handleGetGraphicSwatches(params_string) {
       sepXmp.getStructField("SeparationProfileMetadata", true),
       activeDoc
      );
+    }
+    if (sepXmp.isXmpCreated && sepXmp.doesStructFieldExist("UnderbaseLayerNames")) {
+     var ubLayerNamesXmp = sepXmp.getStructField("UnderbaseLayerNames", true);
+     if (ubLayerNamesXmp && ubLayerNamesXmp.length) {
+      for (var ubn = 0; ubn < ubLayerNamesXmp.length; ubn++) {
+       var ubnName = ubLayerNamesXmp[ubn] != null ? String(ubLayerNamesXmp[ubn]).replace(/^\s+|\s+$/g, "") : "";
+       if (ubnName) underbaseLayerNameMap[ubnName.toLowerCase()] = ubn + 1;
+      }
+     }
+    }
+    if (sepXmp.isXmpCreated && sepXmp.doesStructFieldExist("UnderbaseSwatchNames")) {
+     var ubSwatchNamesXmp = sepXmp.getStructField("UnderbaseSwatchNames", true);
+     if (ubSwatchNamesXmp && ubSwatchNamesXmp.length) {
+      for (var ubs = 0; ubs < ubSwatchNamesXmp.length; ubs++) {
+       var ubsName = ubSwatchNamesXmp[ubs] != null ? String(ubSwatchNamesXmp[ubs]).replace(/^\s+|\s+$/g, "") : "";
+       if (ubsName) underbaseSwatchNameMap[ubsName.toLowerCase()] = ubs + 1;
+      }
+     }
     }
     if (!layerNames || !layerNames.length) {
      layerNames = getSeparatedArtLayerNames(activeDoc);
@@ -3572,8 +3675,61 @@ function handleGetGraphicSwatches(params_string) {
     }
     seenPlateKeys[plateKey] = true;
 
-    swatches.push(resolveLayerSwatchData(activeDoc, plateName));
+    /*
+     * Attach the SEPARATED_ART sublayer name (layerNm) alongside the resolved swatch
+     * data. The panel uses this stable layer identity to classify underbase / blocker
+     * plates for grouping, so a "White UB N" plate backed by a shared or renamed white
+     * spot swatch (e.g. "PANTONE White C") is still grouped with the underbase instead
+     * of being ranked as an ordinary ink. Additive; never changes which plates surface.
+     */
+    var plateSwatchData = resolveLayerSwatchData(activeDoc, plateName);
+    if (plateSwatchData && typeof plateSwatchData === "object") {
+     plateSwatchData.layerName = layerNm;
+     /*
+      * Flag underbase plates by layer identity: either the standard "White UB" prefix or a
+      * custom underbase layer recorded in XMP UnderbaseLayerNames. underbasePass (1-based) lets
+      * the panel order underbase passes even when they carry custom names.
+      */
+     var ubKey = String(layerNm || "").replace(/^\s+|\s+$/g, "").toLowerCase();
+     var ubPassFromXmp = underbaseLayerNameMap[ubKey];
+     var isWhiteUbPrefix = String(layerNm || "").indexOf(CONSTANTS.LAYER_NAMES.WHITE_UB) === 0;
+     /* Swatch-based match: a plate that shares an underbase swatch (e.g. "PANTONE White" doubling as
+        UB2) is grouped as underbase. Check the plate name and its actual fill swatch. */
+     var plateNameKey = String(plateSwatchData.name || plateName || "").replace(/^\s+|\s+$/g, "").toLowerCase();
+     var fillSwatchKey = String(plateSwatchData.fillSwatchName || "").replace(/^\s+|\s+$/g, "").toLowerCase();
+     var ubPassFromSwatch = underbaseSwatchNameMap[plateNameKey] || underbaseSwatchNameMap[fillSwatchKey];
+     if (ubPassFromXmp || isWhiteUbPrefix || ubPassFromSwatch) {
+      plateSwatchData.isUnderbase = true;
+      plateSwatchData.underbasePass = ubPassFromXmp
+       ? ubPassFromXmp
+       : (isWhiteUbPrefix ? getWhiteUbLayerNumber(layerNm) : ubPassFromSwatch);
+      /* Swatch-only match = a real ink plate that ALSO serves as underbase. Group it with the
+         underbase, but keep its ink mesh (do not force the underbase mesh). */
+      if (!ubPassFromXmp && !isWhiteUbPrefix && ubPassFromSwatch) {
+       plateSwatchData.underbaseSharedInk = true;
+      }
+     }
+    }
+    swatches.push(plateSwatchData);
    }
+
+   try {
+    var _dbgMapS = [];
+    for (var _mk in underbaseSwatchNameMap) { if (underbaseSwatchNameMap.hasOwnProperty(_mk)) _dbgMapS.push(_mk + "=" + underbaseSwatchNameMap[_mk]); }
+    var _dbgMapL = [];
+    for (var _lk in underbaseLayerNameMap) { if (underbaseLayerNameMap.hasOwnProperty(_lk)) _dbgMapL.push(_lk + "=" + underbaseLayerNameMap[_lk]); }
+    var _dbgPlates = [];
+    for (var _pi = 0; _pi < swatches.length; _pi++) {
+     var _sw = swatches[_pi];
+     _dbgPlates.push(
+      (_sw.name || "?") +
+      "(layer=" + (_sw.layerName || "?") + ",fill=" + (_sw.fillSwatchName || "?") + ")" +
+      (_sw.isUnderbase ? "[UB pass " + _sw.underbasePass + (_sw.underbaseSharedInk ? " sharedInk" : "") + "]" : "")
+     );
+    }
+    appendLeapSepLog("[UB_ORDER] getGraphicSwatches swatchMap={" + _dbgMapS.join(", ") + "} layerMap={" + _dbgMapL.join(", ") + "}");
+    appendLeapSepLog("[UB_ORDER] getGraphicSwatches plates: " + _dbgPlates.join(" | "));
+   } catch (_dbgErr) { }
 
    return JSON.stringify({
     success: true,
@@ -4504,19 +4660,36 @@ function handleRemoveSeparationData(params_string) {
    });
   }
 
+  /*
+   * Report which known ColorSeparator fields were present before the wipe. The removal itself deletes
+   * the ENTIRE ColorSeparator namespace node (xmp.deleteAllData), so any field not in this list is
+   * still removed — this array only drives the informational "removedFields" response.
+   */
+  var knownFields = [
+   "DocumentType",
+   "SeparationProfileMetadata",
+   "BodyColor",
+   "SeparatedLayerNames",
+   "LEAPSeparationColorsData",
+   "LEAPSeparationProfileData",
+   "GraphicsOrganizationData",
+   "Underbase2Swatch",
+   "Underbase3Swatch",
+   "Underbase4Swatch",
+   "UnderbaseLayerNames",
+   "UnderbaseSwatchNames"
+  ];
   var removedFields = [];
-
-  if (xmp.doesStructFieldExist("GraphicsOrganizationData")) {
-   xmp.deleteStructField("GraphicsOrganizationData", false);
-   removedFields.push("GraphicsOrganizationData");
+  for (var kf = 0; kf < knownFields.length; kf++) {
+   if (xmp.doesStructFieldExist(knownFields[kf])) {
+    removedFields.push(knownFields[kf]);
+   }
   }
 
-  if (xmp.doesStructFieldExist("LEAPSeparationProfileData")) {
-   xmp.deleteStructField("LEAPSeparationProfileData", false);
-   removedFields.push("LEAPSeparationProfileData");
-  }
+  /* Delete every property under the ColorSeparator namespace in one shot. */
+  var removedAny = xmp.deleteAllData(false);
 
-  if (removedFields.length > 0) {
+  if (removedAny) {
    xmp.commit();
 
    if (activeDoc.fullName && activeDoc.fullName.fsName) {
@@ -5361,7 +5534,18 @@ function handleDeleteUbChokeBlockerArtInSeparationDocument(params_string) {
    if (isUbChokeBlockerColorName(entry.swatchName, profileMetadata, doc)) return true;
    return false;
   }
-  function collectUbChokeBlockerLayerNames(separatedArtLayer) {
+  function layerNameMatchesCustomUnderbase(layerName, profileMetadata) {
+   try {
+    var names = profileMetadata && profileMetadata.underbaseNames instanceof Array ? profileMetadata.underbaseNames : [];
+    var target = normalizeLayerNameLocal(layerName);
+    for (var i = 0; i < names.length; i++) {
+     var nm = names[i] != null ? normalizeLayerNameLocal(names[i]) : "";
+     if (nm && nm === target) return true;
+    }
+   } catch (e) { }
+   return false;
+  }
+  function collectUbChokeBlockerLayerNames(separatedArtLayer, profileMetadata) {
    var names = [];
    var seen = {};
    if (!separatedArtLayer || !separatedArtLayer.layers) return names;
@@ -5372,7 +5556,8 @@ function handleDeleteUbChokeBlockerArtInSeparationDocument(params_string) {
      if (!layer) continue;
      var layerName = trimStr(layer.name);
      if (!layerName) continue;
-     if (!isUbChokeBlockerLayerName(layerName)) continue;
+     /* Standard White UB N / Choke / Blocker OR a custom-named underbase pass (profile underbaseNames). */
+     if (!isUbChokeBlockerLayerName(layerName) && !layerNameMatchesCustomUnderbase(layerName, profileMetadata)) continue;
      var key = normalizeLayerNameLocal(layerName);
      if (seen[key]) continue;
      seen[key] = true;
@@ -5400,7 +5585,7 @@ function handleDeleteUbChokeBlockerArtInSeparationDocument(params_string) {
    }
   } catch (metaLoadErr) { }
 
-  var namesToRemove = collectUbChokeBlockerLayerNames(sepLayer);
+  var namesToRemove = collectUbChokeBlockerLayerNames(sepLayer, profileMetadata);
   var deletedLayers = [];
   var failedLayers = [];
   for (var ri = 0; ri < namesToRemove.length; ri++) {

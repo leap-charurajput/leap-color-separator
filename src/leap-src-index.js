@@ -107,7 +107,15 @@ function getServerBasePath() {
   }
  } catch (error) {}
 
- if (cachedServerBasePath && fs.existsSync(cachedServerBasePath)) {
+ /*
+  * Once a base path has been resolved, keep returning it even if a later existsSync() momentarily
+  * fails. The LEAP server folder is commonly on a network / cloud-synced drive that intermittently
+  * reports "not found"; re-validating on every call let a transient blip null the path and made
+  * getInkInformation / getProfileInformation / getStyleInformation fall back to defaults (e.g. mesh
+  * 110 instead of the real Inks.xlsx value). A genuinely-gone drive still surfaces a clear error on
+  * the actual file read below.
+  */
+ if (cachedServerBasePath) {
   return cachedServerBasePath;
  }
 
@@ -1483,7 +1491,7 @@ async function getProfileInformation(profileCode, options) {
    colorNameLabelFormat:
     matchedProfile.colorNameLabelFormat != null && String(matchedProfile.colorNameLabelFormat).trim() !== ''
      ? String(matchedProfile.colorNameLabelFormat)
-     : 'PANTONE XXX C'
+     : 'PANTONE ### C'
   };
  } catch (error) {
   console.error('[LEAP][UB_DEBUG] getProfileInformation failed:', profileCode, error.message);
@@ -1514,6 +1522,19 @@ function inkExceptionNameMatchesInk(inkName, exceptionInkColor) {
  const target = normalizeInkMatchString(inkName);
  if (!needle || !target) return false;
  if (target === needle) return true;
+
+ /*
+  * Ink names reformatted after separation (e.g. a custom "LS ####" label applied by
+  * renameFormattedInks) drop the "PANTONE" prefix but keep the Pantone number. Match the
+  * exception's numeric code as a standalone digit token so the exception still resolves at
+  * load time (e.g. exception "1235" / "PANTONE 1235 C" matches "LS 1235" and "LS 1235 2").
+  * The digit boundaries preserve the strict rule that "123" must not match "1235".
+  */
+ const exceptionDigitRun = (needle.match(/\d{2,}/) || [])[0];
+ if (exceptionDigitRun) {
+  const digitTokenRe = new RegExp('(?:^|[^0-9])' + exceptionDigitRun + '(?:[^0-9]|$)');
+  if (digitTokenRe.test(target)) return true;
+ }
 
  const numericNeedle = needle.replace(/\s+/g, '');
  if (/^\d+[A-Z]?$/.test(numericNeedle)) {
@@ -1610,7 +1631,19 @@ async function getInkInformation(inkName, profileName, inkExceptionProfileCode) 
    throw new Error(`Inks.xlsx file not found at: ${inksFilePath}`);
   }
 
-  const workbook = XLSX.readFile(inksFilePath);
+  /*
+   * Read Inks.xlsx by loading the bytes with Node fs and parsing the buffer, matching every other
+   * Excel read in this file. The bundled (webpacked) SheetJS cannot reach Node's fs from inside its
+   * own XLSX.readFile(), which threw "Cannot access file ..." here; XLSX.readFile stays only as a
+   * last-resort fallback.
+   */
+  let workbook;
+  try {
+   const inksBuffer = fs.readFileSync(inksFilePath);
+   workbook = XLSX.read(inksBuffer, { type: 'buffer' });
+  } catch (inksBufferError) {
+   workbook = XLSX.readFile(inksFilePath);
+  }
   const sheetName = workbook.SheetNames[0];
   const worksheet = workbook.Sheets[sheetName];
   const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
@@ -1624,6 +1657,10 @@ async function getInkInformation(inkName, profileName, inkExceptionProfileCode) 
   const colorMeshColIndex = headerRow.findIndex((col) => col === 'Color Mesh');
   const twoHitsColIndex = headerRow.findIndex((col) => col === 'Two Hits');
   const profileColIndex = headerRow.findIndex((col) => col === 'Profile');
+  /* Optional second-hit mesh column ("WUB Mesh 2"), matched case-insensitively. */
+  const secondHitMeshColIndex = headerRow.findIndex(
+   (col) => String(col == null ? '' : col).trim().toLowerCase() === 'wub mesh 2'
+  );
 
   if (inkColorColIndex === -1 || colorMeshColIndex === -1 || twoHitsColIndex === -1) {
    throw new Error('Required columns not found in Inks.xlsx');
@@ -1632,6 +1669,12 @@ async function getInkInformation(inkName, profileName, inkExceptionProfileCode) 
   const profileNameUpper = profileName ? String(profileName).trim().toUpperCase() : null;
   const inkNameUpper = inkName.toUpperCase().trim();
   let matchedRow = null;
+  /*
+   * First row whose Ink Color matches, regardless of Profile. Used only to recover the "WUB Mesh 2"
+   * second-hit mesh when the profile-matched row lacks it, or when the ink resolves via an exception
+   * (no profile-matched row) — the second hit still needs its "WUB Mesh 2" value.
+   */
+  let inkColorOnlyRow = null;
 
   for (let row = 1; row < data.length; row++) {
    const rowData = data[row];
@@ -1640,6 +1683,9 @@ async function getInkInformation(inkName, profileName, inkExceptionProfileCode) 
     const inkColorMatches = inkExceptionNameMatchesInk(inkNameUpper, excelInkColor);
 
     if (inkColorMatches) {
+     if (!inkColorOnlyRow) {
+      inkColorOnlyRow = rowData;
+     }
      if (profileNameUpper && profileColIndex !== -1) {
       const excelProfileName = rowData[profileColIndex]
        ? String(rowData[profileColIndex]).trim().toUpperCase()
@@ -1661,15 +1707,42 @@ async function getInkInformation(inkName, profileName, inkExceptionProfileCode) 
     ? String(inkExceptionProfileCode).trim()
     : null;
 
+  /* "WUB Mesh 2" from any ink-color match, so an exception-resolved ink still carries its second-hit mesh. */
+  const secondHitMeshFromInkColor =
+   secondHitMeshColIndex !== -1 &&
+   inkColorOnlyRow &&
+   inkColorOnlyRow[secondHitMeshColIndex] != null &&
+   String(inkColorOnlyRow[secondHitMeshColIndex]).trim() !== ''
+    ? String(inkColorOnlyRow[secondHitMeshColIndex]).trim()
+    : '';
+
+  /* Diagnostic: shows exactly what was read for this ink so a wrong/empty second-hit mesh is traceable. */
+  try {
+   console.log(
+    '[INK_DEBUG] ink=' + inkName +
+    ' | serverPath=' + (serverBasePath ? 'ok' : 'null') +
+    ' | rows=' + (data ? data.length : 0) +
+    ' | inkColorColIdx=' + inkColorColIndex +
+    ' | wub2ColIdx=' + secondHitMeshColIndex +
+    ' | matchedRow=' + (matchedRow ? 'yes' : 'no') +
+    ' | inkColorOnlyRow=' + (inkColorOnlyRow ? 'yes' : 'no') +
+    ' | matchedRowWUB2=' + (matchedRow && secondHitMeshColIndex !== -1 ? String(matchedRow[secondHitMeshColIndex]) : '-') +
+    ' | inkColorOnlyWUB2=' + (inkColorOnlyRow && secondHitMeshColIndex !== -1 ? String(inkColorOnlyRow[secondHitMeshColIndex]) : '-') +
+    ' | secondHitMeshFromInkColor=' + secondHitMeshFromInkColor
+   );
+  } catch (dbgErr) {}
+
   if (!matchedRow) {
    const fromException = await resolveInkExceptionOverride(inkName, codeForException);
    if (fromException) {
+    fromException.mesh2 = secondHitMeshFromInkColor;
     return fromException;
    }
    return {
     found: false,
     mesh: '110',
     twoHits: false,
+    mesh2: secondHitMeshFromInkColor,
     inkName: inkName,
     profileCode: null
    };
@@ -1678,6 +1751,17 @@ async function getInkInformation(inkName, profileName, inkExceptionProfileCode) 
   const meshValue = matchedRow[colorMeshColIndex]
    ? String(matchedRow[colorMeshColIndex]).trim()
    : '110';
+  /*
+   * Second-hit mesh from the optional "WUB Mesh 2" column ('' when the column/value is absent). Prefer
+   * the profile-matched row; fall back to any ink-color match so the value is still captured when only
+   * a different-profile row carries "WUB Mesh 2".
+   */
+  const secondHitMeshValue =
+   (secondHitMeshColIndex !== -1 &&
+   matchedRow[secondHitMeshColIndex] != null &&
+   String(matchedRow[secondHitMeshColIndex]).trim() !== ''
+    ? String(matchedRow[secondHitMeshColIndex]).trim()
+    : '') || secondHitMeshFromInkColor;
   const twoHitsValue = matchedRow[twoHitsColIndex]
    ? String(matchedRow[twoHitsColIndex]).trim().toUpperCase()
    : 'N';
@@ -1697,6 +1781,7 @@ async function getInkInformation(inkName, profileName, inkExceptionProfileCode) 
   let result = {
    found: true,
    mesh: meshValue,
+   mesh2: secondHitMeshValue,
    twoHits: twoHits,
    inkName: inkName,
    profileCode: profileCode,
@@ -1712,8 +1797,12 @@ async function getInkInformation(inkName, profileName, inkExceptionProfileCode) 
     source: 'inkException'
    };
   }
+  try {
+   console.log('[INK_DEBUG] ink=' + inkName + ' RESULT mesh=' + result.mesh + ' mesh2=' + result.mesh2 + ' source=' + (result.source || '-'));
+  } catch (dbgErr2) {}
   return result;
  } catch (error) {
+  try { console.log('[INK_DEBUG] ink=' + inkName + ' THREW: ' + (error && error.message ? error.message : error)); } catch (dbgErr3) {}
   const fromException = await resolveInkExceptionOverride(
    inkName,
    inkExceptionProfileCode != null ? String(inkExceptionProfileCode).trim() : null
@@ -2073,6 +2162,35 @@ class Leap {
     success: false,
     error: error.message
    };
+  }
+ }
+
+ /**
+  * Read an arbitrary Excel/CSV file (chosen by the user) and return its first sheet as an array of
+  * row objects keyed by header. Uses the bundled XLSX so it works even though `xlsx` is not in the
+  * extension's on-disk node_modules (it is webpacked into this bundle). Returns { success, rows }.
+  */
+ async readExcelRows(filePath) {
+  try {
+   if (!filePath || !fs.existsSync(filePath)) {
+    return { success: false, error: 'File not found: ' + filePath };
+   }
+   let workbook;
+   try {
+    const fileBuffer = fs.readFileSync(filePath);
+    workbook = XLSX.read(fileBuffer, { type: 'buffer' });
+   } catch (bufferError) {
+    workbook = XLSX.readFile(filePath);
+   }
+   const sheetName = workbook && workbook.SheetNames ? workbook.SheetNames[0] : null;
+   const worksheet = sheetName ? workbook.Sheets[sheetName] : null;
+   if (!worksheet) {
+    return { success: false, error: 'No sheet found in the selected file' };
+   }
+   const rows = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+   return { success: true, rows: Array.isArray(rows) ? rows : [] };
+  } catch (error) {
+   return { success: false, error: error && error.message ? error.message : String(error) };
   }
  }
 

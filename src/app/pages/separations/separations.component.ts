@@ -326,6 +326,32 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
   }
  }
 
+ /*
+  * Look up the custom UB names array for a profile from the raw Profiles.json. Returns four
+  * entries (UB1-4); empty strings mean "use the default White UB N naming". Matches by profile
+  * code first, then profile name.
+  */
+ private async resolveUnderbaseNamesForProfile(profileCode: string, profileName: string): Promise<string[]> {
+  const empty = ['', '', '', ''];
+  try {
+   if (this.isRunningInBrowser || !this.controller.getSeparationProfiles) return empty;
+   const result: any = await this.controller.getSeparationProfiles();
+   const profiles: any[] = result && result.success && Array.isArray(result.profiles) ? result.profiles : [];
+   const code = String(profileCode || '').trim().toLowerCase();
+   const name = String(profileName || '').trim().toLowerCase();
+   const match = profiles.find((p) => {
+    const pc = String((p && (p['Profile Code'] ?? p.profileCode)) || '').trim().toLowerCase();
+    const pn = String((p && (p['Profile Name'] ?? p.profileName ?? p.name)) || '').trim().toLowerCase();
+    return (!!code && pc === code) || (!!name && pn === name);
+   });
+   const arr = match && Array.isArray(match.underbaseNames) ? match.underbaseNames : null;
+   if (!arr) return empty;
+   return [0, 1, 2, 3].map((i) => (arr[i] != null ? String(arr[i]).trim() : ''));
+  } catch (_) {
+   return empty;
+  }
+ }
+
  loadProfileNamesFromSettings(): Promise<void> {
   if (this.isRunningInBrowser || !this.controller.getSeparationProfiles) {
    return Promise.resolve();
@@ -891,6 +917,15 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
        : defaultUbSwatches[j]
      )
     : [...defaultUbSwatches];
+   /*
+    * Custom per-UB names live in the raw Profiles.json (the Node profileInfo does not expose
+    * them), so read them directly and thread them through so the JSX underbase generator can
+    * use each custom name for the underbase swatch + layer name.
+    */
+   profileMetadata.underbaseNames = await this.resolveUnderbaseNamesForProfile(
+    profileMetadata.profileCode,
+    profileMetadata.resolvedProfileName || profileName
+   );
    profileMetadata.blackInksKnockoutDisplay =
     profileInfo.blackInksKnockoutDisplay != null
      ? String(profileInfo.blackInksKnockoutDisplay)
@@ -914,7 +949,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
    profileMetadata.colorNameLabelFormat =
     (profileInfo as any).colorNameLabelFormat != null && String((profileInfo as any).colorNameLabelFormat).trim() !== ''
      ? String((profileInfo as any).colorNameLabelFormat)
-     : 'PANTONE XXX C';
+     : 'PANTONE ### C';
     console.log('[SEPARATIONS][UB_DEBUG] profileMetadata underbase flags/meshes:', {
      profileName,
      profileCode,

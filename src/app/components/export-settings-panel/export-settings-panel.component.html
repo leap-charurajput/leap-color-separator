@@ -43,9 +43,10 @@
      *ngFor="let position of filteredGraphicPositions"
      type="button"
      class="export-settings-token"
-     (click)="copyValue(position)"
+     [attr.title]="position.title || position.label"
+     (click)="copyValue(position.value)"
     >
-     {{ position }}
+     {{ position.label }}
     </button>
     <p *ngIf="filteredGraphicPositions.length === 0" class="export-settings-empty">No positions found.</p>
    </div>
