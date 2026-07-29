@@ -1587,27 +1587,22 @@ function inkExceptionNameMatchesInk(inkName, exceptionInkColor) {
  if (target === needle) return true;
 
  /*
-  * Ink names reformatted after separation (e.g. a custom "LS ####" label applied by
-  * renameFormattedInks) drop the "PANTONE" prefix but keep the Pantone number. Match the
-  * exception's numeric code as a standalone digit token so the exception still resolves at
-  * load time (e.g. exception "1235" / "PANTONE 1235 C" matches "LS 1235" and "LS 1235 2").
-  * The digit boundaries preserve the strict rule that "123" must not match "1235".
+  * The exception's Ink Color is a color code ("62Q", "24C", "4FA", "1235", or a full
+  * "PANTONE 1235 C"). It must match a COMPLETE alphanumeric token in the target name, never a bare
+  * digit fragment. Matching only the digit run ("24" out of "24C") wrongly collided with unrelated
+  * tokens such as the season code in "SPORT RED 62Q S24" (the "24" inside "S24"), so the WRONG
+  * exception row was picked. Alphanumeric token boundaries fix that and still (a) keep "123" from
+  * matching "1235", and (b) resolve reformatted Pantone names, because the shared number token
+  * ("1235") matches both "PANTONE 1235 C" and "LS 1235" / "LS 1235 2".
   */
- const exceptionDigitRun = (needle.match(/\d{2,}/) || [])[0];
- if (exceptionDigitRun) {
-  const digitTokenRe = new RegExp('(?:^|[^0-9])' + exceptionDigitRun + '(?:[^0-9]|$)');
-  if (digitTokenRe.test(target)) return true;
+ var codeToken = needle;
+ var pantoneNumber = needle.match(/PANTONE\s+([0-9]+[A-Z]?)/);
+ if (pantoneNumber) {
+  codeToken = pantoneNumber[1];
  }
-
- const numericNeedle = needle.replace(/\s+/g, '');
- if (/^\d+[A-Z]?$/.test(numericNeedle)) {
-  const pantoneRe = new RegExp(
-   `PANTONE\\s+${escapeRegExpForInkMatch(numericNeedle)}(?:\\s|$)`,
-   'i'
-  );
-  if (pantoneRe.test(target)) return true;
-  if (target === numericNeedle) return true;
-  return false;
+ if (/^[0-9A-Z]+$/.test(codeToken)) {
+  var tokenRe = new RegExp("(?:^|[^A-Z0-9])" + escapeRegExpForInkMatch(codeToken) + "(?:[^A-Z0-9]|$)");
+  return tokenRe.test(target);
  }
 
  if (target.indexOf(needle) !== -1) return true;
