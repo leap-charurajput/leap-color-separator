@@ -15,10 +15,18 @@ import { flareInit } from './services/flare';
 export class AppComponent implements OnInit, OnDestroy {
  private readonly panelVersion = '1.0.1';
  /** Bump this string when you ship a new build (same format as before: "Mon DD, YYYY"). */
- private readonly panelDeployDate = 'July 21, 2026';
+ private readonly panelDeployDate = 'July 29, 2026';
  activeTab: number | null = 0;
  selectedMenuOption: string | null = null;
  documentRefreshKey = 0;
+ /*
+  * Gate for the Standalone (non-LEAP) tab (index 3). It stays visible-but-disabled in the tab
+  * bar and can only be opened via the Graphics "+" button, which calls openStandaloneSeparation().
+  * Navigating to any other tab re-disables it, so it is never reachable directly.
+  */
+ standaloneEnabled = false;
+ /** Fixed tab index for the Standalone tab (kept in one place for the guards below). */
+ private readonly standaloneTabIndex = 3;
  private documentActivateListener: any;
  private flyoutMenuListener: any;
  showConfirmDialog = false;
@@ -65,6 +73,10 @@ export class AppComponent implements OnInit, OnDestroy {
     (window as any).__LEAP_TAB_NAVIGATION__ = {
      navigateToTab: (index: number) => {
       this.onTabChange(index);
+     },
+     /* Enables and jumps to the Standalone tab (used by the Graphics "+" button). */
+     openStandalone: () => {
+      this.openStandaloneSeparation();
      }
     };
    })
@@ -73,6 +85,10 @@ export class AppComponent implements OnInit, OnDestroy {
     (window as any).__LEAP_TAB_NAVIGATION__ = {
      navigateToTab: (index: number) => {
       this.onTabChange(index);
+     },
+     /* Enables and jumps to the Standalone tab (used by the Graphics "+" button). */
+     openStandalone: () => {
+      this.openStandaloneSeparation();
      }
     };
    });
@@ -141,14 +157,46 @@ export class AppComponent implements OnInit, OnDestroy {
  }
 
  onTabChange(index: number): void {
-  const tabNames = ['Graphics', 'Separations', 'Separation Colors', 'Settings'];
+  const tabNames = ['Graphics', 'Separations', 'Plates', 'Standalone'];
   this.leapSepsLog.logClick('Tab: ' + (tabNames[index] ?? String(index)), { index });
   this.activeTab = index;
   this.selectedMenuOption = null;
-  // Refetch document/XMP when switching to Separations tab so UI shows correct hasVersionDocument / isSeparatedDoc
-  if (index === 1) {
+  /*
+   * Re-disable the Standalone tab whenever the user moves to a different tab, so it can only be
+   * reopened through the Graphics "+" button. The tab's component instance (and any in-progress
+   * form values) is preserved because the tab content is rendered with *ngIf on the loop index,
+   * not on the active tab.
+   */
+  if (index !== this.standaloneTabIndex) {
+   this.standaloneEnabled = false;
+  }
+  // Refetch document/XMP when switching to Separations (1) or Plates (2) so the UI reflects the
+  // current front document — e.g. the standalone separation lands on Plates and must read the new
+  // separated document's plate list.
+  if (index === 1 || index === 2) {
    this.documentRefreshKey++;
    this.cdr.detectChanges();
+  }
+ }
+
+ /*
+  * Enable and open the Standalone (non-LEAP) separation tab. Invoked from the Graphics "+"
+  * button via window.__LEAP_TAB_NAVIGATION__.openStandalone(). Enabling first, then routing
+  * through onTabChange, keeps the gate open for index 3 while the same call re-disables it for
+  * any other destination.
+  */
+ openStandaloneSeparation(): void {
+  this.standaloneEnabled = true;
+  this.onTabChange(this.standaloneTabIndex);
+  this.cdr.detectChanges();
+  /*
+   * Ask the Standalone page to (re)prefill its fields from the active document's LICENSING
+   * sheet. The page registers this hook in its ngOnInit; guarded so nothing breaks if the page
+   * has not initialised yet (it also prefills itself on first load).
+   */
+  const prefill = (window as any).__LEAP_STANDALONE_PREFILL__;
+  if (typeof prefill === 'function') {
+   prefill();
   }
  }
 
@@ -194,6 +242,17 @@ export class AppComponent implements OnInit, OnDestroy {
  private async autoSelectTabForActiveDocument(): Promise<void> {
   // If session not ready, skip quietly
   if (!this.controller.hasSession || !this.controller.hasSession()) {
+   return;
+  }
+
+  /*
+   * Standalone flow: while the user is on the Standalone tab, do NOT auto-switch away when a
+   * document activates. The Export action opens the exported ASSETS file (which activates it and
+   * would otherwise route to Graphics/Separations); we keep the user on Standalone so the
+   * profile-grouped Separations view stays in front.
+   */
+  if (this.activeTab === this.standaloneTabIndex) {
+   this.standaloneEnabled = true;
    return;
   }
 

@@ -845,6 +845,69 @@ async function getProfileNamesFromExcel(styleCodes) {
  }
 }
 
+/*
+ * Standalone (non-LEAP) variant of getProfileNamesFromExcel that takes an EXPLICIT base path
+ * instead of resolving it via getServerBasePath(). getServerBasePath() gates on an existsSync()
+ * of the LEAP Data folder, which a cold / cloud-synced drive can fail persistently at call time
+ * ("Server base path not found"); the panel resolves the same path more leniently through
+ * getLeapServerDataPath() (CEP fs) and passes it here. We do NOT gate on existsSync — we attempt
+ * the read directly so an on-demand cloud file can hydrate, and surface a real error only if the
+ * read genuinely fails. Additive: the existing getProfileNamesFromExcel / getServerBasePath used by
+ * the Separations path are untouched.
+ */
+async function getProfileNamesFromExcelAtPath(styleCodes, basePath) {
+ if (!styleCodes || !Array.isArray(styleCodes) || styleCodes.length === 0) {
+  throw new Error('Style codes array is required');
+ }
+ if (!basePath || String(basePath).trim() === '') {
+  throw new Error('LEAP Data folder path is empty');
+ }
+
+ const normalizedBasePath = String(basePath).replace(/\/$/, '');
+ const excelFilePath = path.join(normalizedBasePath, 'SETTINGS', 'LEAP_SEPS', 'Data', 'Styles.xlsx');
+
+ let workbook;
+ try {
+  const fileBuffer = fs.readFileSync(excelFilePath);
+  workbook = XLSX.read(fileBuffer, { type: 'buffer' });
+ } catch (readError) {
+  throw new Error(`Failed to read Styles.xlsx at ${excelFilePath}: ${readError.message}`);
+ }
+
+ const sheetName = workbook.SheetNames[0];
+ const worksheet = workbook.Sheets[sheetName];
+ const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+ if (!data.length) {
+  return {};
+ }
+
+ const headerRow = data[0];
+ const normalizedHeaders = headerRow.map((col) => String(col || '').trim().toLowerCase());
+ const findHeaderIndex = (candidates) =>
+  normalizedHeaders.findIndex((header) => candidates.indexOf(header) >= 0);
+ const styleCodeColIndex = findHeaderIndex(['style code', 'lineup style code']);
+ const profileNameColIndex = findHeaderIndex(['profile name', 'profile', 'lineup profile name']);
+ if (styleCodeColIndex === -1 || profileNameColIndex === -1) {
+  throw new Error('Required columns (Style Code / Profile Name) not found in Styles.xlsx');
+ }
+
+ const styleCodesSet = new Set(styleCodes.map((sc) => String(sc).trim()));
+ const profileMap = {};
+ for (let row = 1; row < data.length; row++) {
+  const rowData = data[row];
+  if (rowData && rowData[styleCodeColIndex]) {
+   const styleCode = String(rowData[styleCodeColIndex]).trim();
+   if (styleCodesSet.has(styleCode)) {
+    const profileName = rowData[profileNameColIndex];
+    if (profileName) {
+     profileMap[styleCode] = String(profileName).trim();
+    }
+   }
+  }
+ }
+ return profileMap;
+}
+
 /**
  * Get full style information from Styles.xlsx (Icon, Style Desc, and all columns)
  * Returns styleInfoMap: { [styleCode]: { Icon, Style Desc, ... } }
@@ -1582,15 +1645,21 @@ async function loadInkExceptionsForProfileCode(profileCode) {
 
 function inkExceptionEntryToInfo(entry) {
  if (!entry) return null;
- const twoHitsRaw = entry.Two_Hits != null ? String(entry.Two_Hits).trim().toUpperCase() : 'N';
- let hitsCount = twoHitsRaw === 'Y' || twoHitsRaw === 'YES' ? 2 : 1;
+ /*
+  * "Two Hits" is value-driven (no longer Y/N): any non-empty value (except N/No/False/0) means a
+  * second hit. A numeric value is the second-hit mesh (mesh2); a legacy Y/Yes carries no mesh.
+  */
+ const twoHitsRaw = entry.Two_Hits != null ? String(entry.Two_Hits).trim() : '';
+ const twoHitsIsNegative = /^(n|no|false|0)$/i.test(twoHitsRaw);
+ let hitsCount = twoHitsRaw !== '' && !twoHitsIsNegative ? 2 : 1;
  if (entry.hitsCount != null) {
   const parsed = parseInt(entry.hitsCount, 10);
   if (!isNaN(parsed) && parsed >= 1) hitsCount = parsed;
  }
+ const mesh2 = /^(y|yes|true)$/i.test(twoHitsRaw) || twoHitsIsNegative ? '' : twoHitsRaw;
  const meshRaw = entry.Color_Mesh;
  const mesh = meshRaw == null || meshRaw === '' ? '110' : String(meshRaw).trim();
- return { mesh, twoHits: hitsCount >= 2, hitsCount };
+ return { mesh, mesh2, twoHits: hitsCount >= 2, hitsCount };
 }
 
 async function resolveInkExceptionOverride(inkName, profileCode) {
@@ -1604,7 +1673,9 @@ async function resolveInkExceptionOverride(inkName, profileCode) {
   return {
    found: true,
    mesh: info.mesh,
+   mesh2: info.mesh2,
    twoHits: info.twoHits,
+   hitsCount: info.hitsCount,
    inkName,
    profileCode,
    source: 'inkException'
@@ -1619,200 +1690,68 @@ async function getInkInformation(inkName, profileName, inkExceptionProfileCode) 
    throw new Error('Ink name is required');
   }
 
-  const serverBasePath = await getServerBasePathWithRetry();
-  if (!serverBasePath) {
-   throw new Error('Server base path not found');
-  }
-
-  const normalizedBasePath = serverBasePath.replace(/\/$/, '');
-  const inksFilePath = path.join(normalizedBasePath, 'SETTINGS', 'LEAP_SEPS', 'Data', 'Inks.xlsx');
-
-  if (!fs.existsSync(inksFilePath)) {
-   throw new Error(`Inks.xlsx file not found at: ${inksFilePath}`);
-  }
-
   /*
-   * Read Inks.xlsx by loading the bytes with Node fs and parsing the buffer, matching every other
-   * Excel read in this file. The bundled (webpacked) SheetJS cannot reach Node's fs from inside its
-   * own XLSX.readFile(), which threw "Cannot access file ..." here; XLSX.readFile stays only as a
-   * last-resort fallback.
+   * Inks.xlsx is no longer used. Ink data is resolved entirely from profile_ink_exceptions.json
+   * (keyed by profileCode + Ink Color): "Color Mesh" is the first-hit mesh, and "Two Hits" carries
+   * BOTH the second-hit flag and the second-hit mesh (mesh2). Profile settings (mesh defaults,
+   * flash/cool/wb, underbase meshes) still come from Profiles.json via getProfileInformation.
    */
-  let workbook;
-  try {
-   const inksBuffer = fs.readFileSync(inksFilePath);
-   workbook = XLSX.read(inksBuffer, { type: 'buffer' });
-  } catch (inksBufferError) {
-   workbook = XLSX.readFile(inksFilePath);
-  }
-  const sheetName = workbook.SheetNames[0];
-  const worksheet = workbook.Sheets[sheetName];
-  const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-
-  if (data.length === 0) {
-   throw new Error('Inks.xlsx file is empty');
-  }
-
-  const headerRow = data[0];
-  const inkColorColIndex = headerRow.findIndex((col) => col === 'Ink Color');
-  const colorMeshColIndex = headerRow.findIndex((col) => col === 'Color Mesh');
-  const twoHitsColIndex = headerRow.findIndex((col) => col === 'Two Hits');
-  const profileColIndex = headerRow.findIndex((col) => col === 'Profile');
-  /* Optional second-hit mesh column ("WUB Mesh 2"), matched case-insensitively. */
-  const secondHitMeshColIndex = headerRow.findIndex(
-   (col) => String(col == null ? '' : col).trim().toLowerCase() === 'wub mesh 2'
-  );
-
-  if (inkColorColIndex === -1 || colorMeshColIndex === -1 || twoHitsColIndex === -1) {
-   throw new Error('Required columns not found in Inks.xlsx');
-  }
-
-  const profileNameUpper = profileName ? String(profileName).trim().toUpperCase() : null;
-  const inkNameUpper = inkName.toUpperCase().trim();
-  let matchedRow = null;
-  /*
-   * First row whose Ink Color matches, regardless of Profile. Used only to recover the "WUB Mesh 2"
-   * second-hit mesh when the profile-matched row lacks it, or when the ink resolves via an exception
-   * (no profile-matched row) — the second hit still needs its "WUB Mesh 2" value.
-   */
-  let inkColorOnlyRow = null;
-
-  for (let row = 1; row < data.length; row++) {
-   const rowData = data[row];
-   if (rowData && rowData[inkColorColIndex]) {
-    const excelInkColor = String(rowData[inkColorColIndex]).trim().toUpperCase();
-    const inkColorMatches = inkExceptionNameMatchesInk(inkNameUpper, excelInkColor);
-
-    if (inkColorMatches) {
-     if (!inkColorOnlyRow) {
-      inkColorOnlyRow = rowData;
-     }
-     if (profileNameUpper && profileColIndex !== -1) {
-      const excelProfileName = rowData[profileColIndex]
-       ? String(rowData[profileColIndex]).trim().toUpperCase()
-       : '';
-      if (excelProfileName === profileNameUpper) {
-       matchedRow = rowData;
-       break;
-      }
-     } else {
-      matchedRow = rowData;
-      break;
-     }
-    }
-   }
-  }
-
   const codeForException =
    inkExceptionProfileCode != null && String(inkExceptionProfileCode).trim() !== ''
     ? String(inkExceptionProfileCode).trim()
-    : null;
+    : (profileName != null && String(profileName).trim() !== '' ? String(profileName).trim() : null);
 
-  /* "WUB Mesh 2" from any ink-color match, so an exception-resolved ink still carries its second-hit mesh. */
-  const secondHitMeshFromInkColor =
-   secondHitMeshColIndex !== -1 &&
-   inkColorOnlyRow &&
-   inkColorOnlyRow[secondHitMeshColIndex] != null &&
-   String(inkColorOnlyRow[secondHitMeshColIndex]).trim() !== ''
-    ? String(inkColorOnlyRow[secondHitMeshColIndex]).trim()
-    : '';
-
-  /* Diagnostic: shows exactly what was read for this ink so a wrong/empty second-hit mesh is traceable. */
-  try {
-   console.log(
-    '[INK_DEBUG] ink=' + inkName +
-    ' | serverPath=' + (serverBasePath ? 'ok' : 'null') +
-    ' | rows=' + (data ? data.length : 0) +
-    ' | inkColorColIdx=' + inkColorColIndex +
-    ' | wub2ColIdx=' + secondHitMeshColIndex +
-    ' | matchedRow=' + (matchedRow ? 'yes' : 'no') +
-    ' | inkColorOnlyRow=' + (inkColorOnlyRow ? 'yes' : 'no') +
-    ' | matchedRowWUB2=' + (matchedRow && secondHitMeshColIndex !== -1 ? String(matchedRow[secondHitMeshColIndex]) : '-') +
-    ' | inkColorOnlyWUB2=' + (inkColorOnlyRow && secondHitMeshColIndex !== -1 ? String(inkColorOnlyRow[secondHitMeshColIndex]) : '-') +
-    ' | secondHitMeshFromInkColor=' + secondHitMeshFromInkColor
-   );
-  } catch (dbgErr) {}
-
-  if (!matchedRow) {
-   const fromException = await resolveInkExceptionOverride(inkName, codeForException);
-   if (fromException) {
-    fromException.mesh2 = secondHitMeshFromInkColor;
-    return fromException;
-   }
-   return {
-    found: false,
-    mesh: '110',
-    twoHits: false,
-    mesh2: secondHitMeshFromInkColor,
-    inkName: inkName,
-    profileCode: null
-   };
-  }
-
-  const meshValue = matchedRow[colorMeshColIndex]
-   ? String(matchedRow[colorMeshColIndex]).trim()
-   : '110';
-  /*
-   * Second-hit mesh from the optional "WUB Mesh 2" column ('' when the column/value is absent). Prefer
-   * the profile-matched row; fall back to any ink-color match so the value is still captured when only
-   * a different-profile row carries "WUB Mesh 2".
-   */
-  const secondHitMeshValue =
-   (secondHitMeshColIndex !== -1 &&
-   matchedRow[secondHitMeshColIndex] != null &&
-   String(matchedRow[secondHitMeshColIndex]).trim() !== ''
-    ? String(matchedRow[secondHitMeshColIndex]).trim()
-    : '') || secondHitMeshFromInkColor;
-  const twoHitsValue = matchedRow[twoHitsColIndex]
-   ? String(matchedRow[twoHitsColIndex]).trim().toUpperCase()
-   : 'N';
-  const twoHits = twoHitsValue === 'Y' || twoHitsValue === 'YES';
-  const matchedProfileName =
-   profileColIndex !== -1 && matchedRow[profileColIndex]
-    ? String(matchedRow[profileColIndex]).trim()
-    : null;
-
+  /* Profile row from Profiles.json (matched by code or name); may be null when unavailable. */
   let profileInfo = null;
-  let profileCode = null;
-  if (matchedProfileName) {
-   profileCode = matchedProfileName;
-   profileInfo = await getProfileInformation(profileCode);
+  if (codeForException) {
+   try {
+    profileInfo = await getProfileInformation(codeForException);
+   } catch (profileErr) {
+    profileInfo = null;
+   }
   }
 
-  let result = {
-   found: true,
-   mesh: meshValue,
-   mesh2: secondHitMeshValue,
-   twoHits: twoHits,
-   inkName: inkName,
-   profileCode: profileCode,
-   profileName: matchedProfileName,
-   profileInfo: profileInfo
-  };
-  const exceptionOverride = await resolveInkExceptionOverride(inkName, codeForException);
-  if (exceptionOverride) {
-   result = {
-    ...result,
-    mesh: exceptionOverride.mesh || result.mesh,
-    twoHits: exceptionOverride.twoHits,
+  const fromException = await resolveInkExceptionOverride(inkName, codeForException);
+
+  if (fromException) {
+   const result = {
+    found: true,
+    mesh: fromException.mesh,
+    mesh2: fromException.mesh2,
+    twoHits: fromException.twoHits,
+    hitsCount: fromException.hitsCount,
+    inkName: inkName,
+    profileCode: fromException.profileCode || codeForException,
+    profileName: profileName != null ? profileName : null,
+    profileInfo: profileInfo,
     source: 'inkException'
    };
+   try {
+    console.log('[INK_DEBUG] ink=' + inkName + ' mesh=' + result.mesh + ' mesh2=' + result.mesh2 + ' source=inkException');
+   } catch (dbgErr) {}
+   return result;
   }
+
+  /* Ink is not in the exceptions table -> profile defaults handle mesh/flags downstream. */
   try {
-   console.log('[INK_DEBUG] ink=' + inkName + ' RESULT mesh=' + result.mesh + ' mesh2=' + result.mesh2 + ' source=' + (result.source || '-'));
+   console.log('[INK_DEBUG] ink=' + inkName + ' not in profile_ink_exceptions.json (profileCode=' + (codeForException || '-') + ')');
   } catch (dbgErr2) {}
-  return result;
- } catch (error) {
-  try { console.log('[INK_DEBUG] ink=' + inkName + ' THREW: ' + (error && error.message ? error.message : error)); } catch (dbgErr3) {}
-  const fromException = await resolveInkExceptionOverride(
-   inkName,
-   inkExceptionProfileCode != null ? String(inkExceptionProfileCode).trim() : null
-  );
-  if (fromException) {
-   return fromException;
-  }
   return {
    found: false,
    mesh: '110',
+   mesh2: '',
+   twoHits: false,
+   inkName: inkName,
+   profileCode: codeForException,
+   profileName: profileName != null ? profileName : null,
+   profileInfo: profileInfo
+  };
+ } catch (error) {
+  try { console.log('[INK_DEBUG] ink=' + inkName + ' THREW: ' + (error && error.message ? error.message : error)); } catch (dbgErr3) {}
+  return {
+   found: false,
+   mesh: '110',
+   mesh2: '',
    twoHits: false,
    inkName: inkName,
    profileCode: null,
@@ -2033,6 +1972,27 @@ class Leap {
    };
   } catch (error) {
    this.log(`Error getting profile names: ${error.message}`);
+   return {
+    success: false,
+    error: error.message
+   };
+  }
+ }
+
+ /*
+  * Standalone (non-LEAP) profile lookup that takes an explicit base path from the panel
+  * (getLeapServerDataPath), bypassing getServerBasePath()'s existsSync gate. See
+  * getProfileNamesFromExcelAtPath above.
+  */
+ async getProfileNamesFromExcelAtPath(styleCodes, basePath) {
+  try {
+   const profileMap = await getProfileNamesFromExcelAtPath(styleCodes, basePath);
+   return {
+    success: true,
+    profileMap: profileMap
+   };
+  } catch (error) {
+   this.log(`Error getting profile names (AtPath): ${error.message}`);
    return {
     success: false,
     error: error.message

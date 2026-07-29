@@ -169,9 +169,12 @@
          </div>
          <div class="generate-button-section">
           <app-button (click)="handleGenerateSeparations(separation.id, graphic)" variant="primary" size="medium"
-           [disabled]="!getGraphicFolderStatus(graphic) || !getGraphicFileStatus(graphic) || isFolderChecking(graphic) || hasUnknownProfile(separation) || isProfileMissingInSettings(separation)">
+           [disabled]="!getGraphicFolderStatus(graphic) || !getGraphicFileStatus(graphic) || isFolderChecking(graphic) || hasUnknownProfile(separation) || isProfileMissingInSettings(separation) || isInkInfoMissingForProfile(separation) || isSeparationFilePathMissing">
            Generate Separations
           </app-button>
+          <div *ngIf="isSeparationFilePathMissing" class="sep-path-missing-note">
+           Set Separation path first in Export Settings.
+          </div>
           <div *ngIf="hasUnknownProfile(separation)" class="folder-check-note">
            Please add profile information for the missing style code{{
            getMissingStyleCodes(separation).length
@@ -180,8 +183,11 @@
           <div *ngIf="isProfileMissingInSettings(separation)" class="folder-check-note">
            Profile missing. Please add from Separation Profile Settings.
           </div>
+          <div *ngIf="isInkInfoMissingForProfile(separation)" class="folder-check-note">
+           Ink information for this profile is missing. Please import the ink Excel for this profile.
+          </div>
           <div
-           *ngIf="(!getGraphicFolderStatus(graphic) || !getGraphicFileStatus(graphic)) && !isFolderChecking(graphic) && !hasUnknownProfile(separation) && !isProfileMissingInSettings(separation)"
+           *ngIf="(!getGraphicFolderStatus(graphic) || !getGraphicFileStatus(graphic)) && !isFolderChecking(graphic) && !hasUnknownProfile(separation) && !isProfileMissingInSettings(separation) && !isInkInfoMissingForProfile(separation)"
            class="folder-check-note">
            Art must be exported before separations can be created
           </div>

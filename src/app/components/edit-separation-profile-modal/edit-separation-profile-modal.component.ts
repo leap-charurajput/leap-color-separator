@@ -21,6 +21,7 @@ interface InkExceptionRow {
  mesh: string;
  underbaseCount: number;
  hitsCount: number;
+ secondHitMesh?: string;
  printMethod?: string;
  profile?: string;
 }
@@ -78,6 +79,7 @@ const normalizeInkExceptionsList = (raw: any): InkExceptionRow[] => {
      ? Math.max(1, Math.min(4, parseInt(row.underbaseCount, 10)))
      : 1;
    const hitsCount = clampCount(row.hitsCount, 2);
+   const secondHitMesh = row.secondHitMesh != null ? String(row.secondHitMesh) : '';
    return {
     id,
     enabled,
@@ -85,6 +87,7 @@ const normalizeInkExceptionsList = (raw: any): InkExceptionRow[] => {
     mesh,
     underbaseCount,
     hitsCount,
+    secondHitMesh,
     printMethod: row.printMethod != null ? String(row.printMethod) : '',
     profile: row.profile != null ? String(row.profile) : ''
    } as InkExceptionRow;
@@ -99,6 +102,7 @@ const createEmptyInkException = (): InkExceptionRow => ({
  mesh: '',
  underbaseCount: 1,
  hitsCount: 1,
+ secondHitMesh: '',
  printMethod: '',
  profile: ''
 });
@@ -554,6 +558,16 @@ export class EditSeparationProfileModalComponent implements OnInit, OnChanges {
    return Math.max(1, Math.min(4, enabled.filter(Boolean).length));
   };
 
+  /*
+   * Prefer the LIVE edited state (formState.underbaseEnabled) so toggling Underbase 2/3/4 on the
+   * General tab is reflected immediately in the Ink Exceptions "Profile Defaults" row. Fall back to
+   * the loaded profile (_jsonData / underbaseEnabled) only when formState is not populated yet.
+   */
+  const formEnabled = this.formState?.underbaseEnabled;
+  if (Array.isArray(formEnabled) && formEnabled.length > 0) {
+   return countFromEnabledFlags(formEnabled);
+  }
+
   const json = this.profile?._jsonData;
   if (json) {
    let count = 1;
@@ -628,6 +642,17 @@ export class EditSeparationProfileModalComponent implements OnInit, OnChanges {
  cycleInkExceptionHits(id: string, current: number): void {
   const nextHits = this.cycleBrushCount(current || 1);
   this.updateInkException(id, { hitsCount: nextHits });
+ }
+
+ /**
+  * Update the second-hit mesh for an ink exception (digits only; empty clears it). The input is shown
+  * only when the ink has two hits; the value is stored on the row and saved into the "Two Hits" column
+  * of profile_ink_exceptions.json.
+  */
+ onInkExceptionSecondHitMeshInput(id: string, event: Event): void {
+  const raw = (event.target as HTMLInputElement).value;
+  const cleaned = String(raw == null ? '' : raw).replace(/[^0-9]/g, '');
+  this.updateInkException(id, { secondHitMesh: cleaned });
  }
 
  cycleInkExceptionUnderbases(id: string, current: number): void {

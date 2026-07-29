@@ -1555,6 +1555,7 @@ function ensureSwatchExistsFromSource(sourceSwatchName, newSwatchName, fallbackC
   if (!sourceSwatch || !sourceSwatch.color) {
    if (fallbackCmyk) {
     var fallbackSpot = doc.spots.add();
+    fallbackSpot.colorType = ColorModel.SPOT;
     fallbackSpot.name = newSwatchName;
     var fallbackColor = new CMYKColor();
     fallbackColor.cyan = Math.max(0, Math.min(100, Number(fallbackCmyk.c) || 0));
@@ -1637,16 +1638,91 @@ function applyProfileUnderbaseLayers(profileMetadata) {
   // copyBlackLayersToUnderbaseTargets(profileMetadata);
  } catch (e) { }
 }
-function copyAndPrepareSEPDocument(templateFile, destinationFolder, docName, jsonData, styleCodes, profileMetadata, bodyColorFromXMP) {
+/*
+ * Resolve the separation file NAME from the Export Settings "Separation file path" pattern
+ * (separationPreviewFilePath). Only the basename is used — the folder stays the standard
+ * 09 SEPARATIONS/[League]/[Team]/[Graphic]/ structure. Tokens [Name] are filled from the team JSON
+ * batch row (batch_excel_information / batch_excel_records) plus a few known fields (position,
+ * profile). Returns "" if nothing usable resolves (caller then keeps the default name).
+ */
+function resolveSeparationFileNameFromPattern(pattern, jsonData, profileMetadata) {
+ if (!pattern) return "";
+ var meta = profileMetadata || {};
+
+ var batch = {};
+ try {
+  if (jsonData && jsonData.batch_excel_information) {
+   for (var k in jsonData.batch_excel_information) {
+    if (jsonData.batch_excel_information.hasOwnProperty(k)) batch[k] = jsonData.batch_excel_information[k];
+   }
+  }
+  if (jsonData && jsonData.batch_excel_records) {
+   for (var k2 in jsonData.batch_excel_records) {
+    if (jsonData.batch_excel_records.hasOwnProperty(k2) && batch[k2] == null) {
+     var arr = jsonData.batch_excel_records[k2];
+     if (arr && arr.length) batch[k2] = arr[0];
+    }
+   }
+  }
+ } catch (eBatch) { }
+
+ var posAbbv = "";
+ try {
+  if (meta.position) posAbbv = getGraphicPositionAbbreviation(String(meta.position));
+ } catch (ePos) { posAbbv = meta.position ? String(meta.position) : ""; }
+
+ var extra = {
+  "position": posAbbv,
+  "pos": posAbbv,
+  "profile code": meta.profileCode != null ? String(meta.profileCode) : "",
+  "profile name": meta.profileName != null ? String(meta.profileName) : "",
+  "graphic name": meta.graphicName != null ? String(meta.graphicName) : "",
+  "art code": meta.graphicName != null ? String(meta.graphicName) : ""
+ };
+
+ function lookupSepToken(name) {
+  var key = String(name).replace(/^\s+|\s+$/g, "");
+  var lk = key.toLowerCase();
+  if (extra.hasOwnProperty(lk)) return extra[lk];
+  if (batch.hasOwnProperty(key)) return String(batch[key]);
+  for (var bk in batch) {
+   if (batch.hasOwnProperty(bk) && String(bk).toLowerCase() === lk) return String(batch[bk]);
+  }
+  return "";
+ }
+
+ var resolved = String(pattern).replace(/\[([^\]]+)\]/g, function (m, name) {
+  return lookupSepToken(name);
+ });
+
+ /* Basename only. Avoid a forward slash inside a regex char class (ExtendScript parser bug):
+    replace backslashes with "/" via string ops, then split on "/". */
+ var normalized = resolved.split("\\").join("/");
+ var segs = normalized.split("/");
+ var base = segs[segs.length - 1];
+ base = base.replace(/^\s+|\s+$/g, "");
+ if (!base) return "";
+ base = base.replace(/\.[^.]+$/, "");
+ if (!base) return "";
+ return base + ".ai";
+}
+
+function copyAndPrepareSEPDocument(templateFile, destinationFolder, docName, jsonData, styleCodes, profileMetadata, bodyColorFromXMP, separationFileName) {
  var profileCode = null;
  if (profileMetadata && profileMetadata.profileCode) {
   profileCode = profileMetadata.profileCode;
  }
- var filename = docName + "-SEP";
- if (profileCode) {
-  filename += "-" + profileCode;
+ var filename;
+ if (separationFileName && String(separationFileName).replace(/^\s+|\s+$/g, "") !== "") {
+  /* Name from the Export Settings "Separation file path" pattern (basename). */
+  filename = String(separationFileName).replace(/^\s+|\s+$/g, "");
+ } else {
+  filename = docName + "-SEP";
+  if (profileCode) {
+   filename += "-" + profileCode;
+  }
+  filename += ".ai";
  }
- filename += ".ai";
  var destinationFile = new File(destinationFolder.fsName + "/" + filename);
  templateFile.copy(destinationFile);
  if (!destinationFile.exists) {
@@ -1919,7 +1995,15 @@ function handlePerformSeparation(params_string) {
    }
   } catch (e) { }
   var graphicNameFolder = createSeparationsFolders(rootFolder, league, teamCode, graphicName);
-  var sepDoc = copyAndPrepareSEPDocument(templateFile, graphicNameFolder, docName, jsonData, styleCodes, profileMetadata, bodyColorFromXMP);
+  /* Separation file NAME from the Export Settings "Separation file path" pattern (basename only);
+     folder stays the 09 SEPARATIONS structure above. Falls back to the default name if unresolved. */
+  var separationFileName = "";
+  try {
+   if (profileMetadata && profileMetadata.separationFileNamePattern) {
+    separationFileName = resolveSeparationFileNameFromPattern(profileMetadata.separationFileNamePattern, jsonData, profileMetadata);
+   }
+  } catch (eSepName) { separationFileName = ""; }
+  var sepDoc = copyAndPrepareSEPDocument(templateFile, graphicNameFolder, docName, jsonData, styleCodes, profileMetadata, bodyColorFromXMP, separationFileName);
   if (!sepDoc) {
    return JSON.stringify({
     success: false,
@@ -4029,6 +4113,20 @@ function handleGetSeparationProfiles() {
   });
  }
 }
+/**
+ * Collapse arrays that contain only primitives (no nested objects/arrays) onto a single line, so the
+ * saved Profiles.json keeps arrays like underbaseEnabled compact while objects stay multi-line. Newlines
+ * inside a flat array become single spaces; values are NOT split on commas, so quoted strings that
+ * contain commas are preserved as-is.
+ */
+function collapseFlatArraysInJson(jsonString) {
+ if (jsonString == null) return jsonString;
+ return String(jsonString).replace(/\[\s*([^\[\]{}]*?)\s*\]/g, function (match, inner) {
+  var collapsed = inner.replace(/\s*\r?\n\s*/g, " ").replace(/^\s+|\s+$/g, "");
+  return "[" + collapsed + "]";
+ });
+}
+
 function handleSaveSeparationProfiles(params_string) {
  try {
   var params = JSON.parse(params_string);
@@ -4058,6 +4156,8 @@ function handleSaveSeparationProfiles(params_string) {
    });
   }
   var jsonString = JSON.stringify(profiles, null, 2);
+  /* Keep flat arrays (e.g. underbaseEnabled) on one line for a compact, readable file. */
+  jsonString = collapseFlatArraysInJson(jsonString);
   profilesFile.write(jsonString);
   profilesFile.close();
   return JSON.stringify({
@@ -4095,12 +4195,18 @@ function inkJsonEntryToRow(entry, index) {
  var inkColor = entry.Ink_Color != null ? String(entry.Ink_Color).trim() : "";
  var profile = entry.Profile != null ? String(entry.Profile).trim() : "";
  var mesh = meshValueFromJsonEntry(entry.Color_Mesh);
- var twoHitsRaw = entry.Two_Hits != null ? String(entry.Two_Hits).trim().toUpperCase() : "N";
- var hitsCount = (twoHitsRaw === "Y" || twoHitsRaw === "YES") ? 2 : 1;
+ /*
+  * "Two Hits" is value-driven (no longer Y/N): any non-empty value (except N/No/False/0) means a
+  * second hit is required. A numeric value is the second-hit mesh; a legacy Y/Yes carries no mesh.
+  */
+ var twoHitsRaw = entry.Two_Hits != null ? String(entry.Two_Hits).trim() : "";
+ var twoHitsIsNegative = /^(n|no|false|0)$/i.test(twoHitsRaw);
+ var hitsCount = (twoHitsRaw !== "" && !twoHitsIsNegative) ? 2 : 1;
  if (entry.hitsCount != null) {
   var parsedHits = parseInt(entry.hitsCount, 10);
   if (!isNaN(parsedHits) && parsedHits >= 1) hitsCount = parsedHits;
  }
+ var secondHitMesh = (/^(y|yes|true)$/i.test(twoHitsRaw) || twoHitsIsNegative) ? "" : twoHitsRaw;
  var underbaseCount = entry.underbase_count != null ? parseInt(entry.underbase_count, 10) : 1;
  if (isNaN(underbaseCount) || underbaseCount < 1) underbaseCount = 1;
  if (underbaseCount > 4) underbaseCount = 4;
@@ -4112,6 +4218,7 @@ function inkJsonEntryToRow(entry, index) {
   mesh: mesh,
   underbaseCount: underbaseCount,
   hitsCount: hitsCount,
+  secondHitMesh: secondHitMesh,
   printMethod: entry.Print_Method != null ? String(entry.Print_Method).trim() : "",
   profile: profile
  };
@@ -4122,6 +4229,12 @@ function inkRowToJsonEntry(row, profileName, profileCode) {
  var enabled = row && row.enabled !== false;
  var hitsCount = enabled && row.hitsCount != null ? parseInt(row.hitsCount, 10) : 1;
  if (isNaN(hitsCount) || hitsCount < 1) hitsCount = 1;
+ /*
+  * "Two Hits" stores the raw second-hit value: a numeric mesh means a second hit is required (and is
+  * the second-hit mesh); "" means single hit. A legacy row with only hitsCount writes "Y".
+  */
+ var secondHitMeshOut = enabled && row && row.secondHitMesh != null ? String(row.secondHitMesh).trim() : "";
+ var twoHitsValue = hitsCount >= 2 ? (secondHitMeshOut !== "" ? secondHitMeshOut : "Y") : "";
  var underbaseCount = enabled && row.underbaseCount != null ? parseInt(row.underbaseCount, 10) : 1;
  if (isNaN(underbaseCount) || underbaseCount < 1) underbaseCount = 1;
  if (underbaseCount > 4) underbaseCount = 4;
@@ -4131,7 +4244,7 @@ function inkRowToJsonEntry(row, profileName, profileCode) {
   Print_Method: row && row.printMethod != null ? String(row.printMethod).trim() : "",
   Profile: profileName,
   profileCode: profileCode != null ? String(profileCode).trim() : "",
-  Two_Hits: hitsCount >= 2 ? "Y" : "N",
+  Two_Hits: twoHitsValue,
   underbase_count: underbaseCount
  };
 }

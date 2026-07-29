@@ -464,17 +464,15 @@ export class SettingsComponent implements OnInit, OnChanges {
    'Profile Name': reactProfile.name || '',
    'Profile Code': reactProfile.code || '',
    'Color Mesh': stringToNumberOrEmpty(reactProfile.colorMesh),
-   'Underbase Swatch':
-    rp.underbaseSwatch != null && String(rp.underbaseSwatch).trim() !== ''
-     ? String(rp.underbaseSwatch).trim()
-     : 'White UB',
    'UB 1 Mesh': stringToNumberOrEmpty(reactProfile.underbaseMeshes[0]),
    'UB 2 Mesh': stringToNumberOrEmpty(reactProfile.underbaseMeshes[1]),
    'UB 3 Mesh': stringToNumberOrEmpty(reactProfile.underbaseMeshes[2]),
    'UB 4 Mesh': stringToNumberOrEmpty(reactProfile.underbaseMeshes[3]),
-   'Underbase 2': reactProfile.underbaseEnabled && reactProfile.underbaseEnabled[1] ? 'Y' : 'N',
-   'Underbase 3': reactProfile.underbaseEnabled && reactProfile.underbaseEnabled[2] ? 'Y' : 'N',
-   'Underbase 4': reactProfile.underbaseEnabled && reactProfile.underbaseEnabled[3] ? 'Y' : 'N',
+   /*
+    * Underbase-enabled is written ONLY as the canonical underbaseEnabled array. The legacy
+    * 'Underbase 2/3/4' Y/N keys were dropped (readers already prefer underbaseEnabled and fall back
+    * to the old keys for pre-existing files, so no workflow is affected).
+    */
    underbaseEnabled: [
     true,
     !!(reactProfile.underbaseEnabled && reactProfile.underbaseEnabled[1]),
@@ -519,7 +517,6 @@ export class SettingsComponent implements OnInit, OnChanges {
 
   if (reactProfile._jsonData) {
    jsonProfile.Distress = reactProfile._jsonData.Distress || 'N';
-   jsonProfile['2 Hits'] = reactProfile._jsonData['2 Hits'] || 'N';
    jsonProfile.Blocker =
     rp.blocker === true || rp.blocker === false
      ? rp.blocker
@@ -541,7 +538,6 @@ export class SettingsComponent implements OnInit, OnChanges {
    jsonProfile.Micron = reactProfile._jsonData.Micron || 'XXX';
   } else {
    jsonProfile.Distress = 'N';
-   jsonProfile['2 Hits'] = 'N';
    jsonProfile.Blocker = rp.blocker === true || rp.blocker === false ? (rp.blocker ? 'Y' : 'N') : 'N';
    jsonProfile.Flash = '';
    jsonProfile.Cool = '';

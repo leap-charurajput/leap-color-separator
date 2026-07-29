@@ -48,6 +48,12 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
  graphicsData: any[] = [];
  availableColors: string[] = [];
  separationPaths: { [key: string]: string } = {};
+ /*
+  * The "Separation file path" pattern from Export Settings (export_settings.json →
+  * separationPreviewFilePath). The separation file's NAME is taken from this pattern's basename;
+  * when it is empty, Generate is disabled and the user is asked to set it first.
+  */
+ separationFilePathPattern = '';
  graphicFolderStatus: { [key: string]: boolean } = {};
  graphicFileStatus: { [key: string]: boolean } = {};
  isCheckingFolderMap: { [key: string]: boolean } = {};
@@ -58,6 +64,13 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
  /** Profile names from Profiles.json (Separation Profile Settings); used to disable Generate when profile file missing. */
  profileNamesFromSettings: string[] = [];
  profileNamesLoaded = false;
+ /** Map of profile name (UPPERCASE) -> profile code (from Profiles.json); resolves a separation to its ink-info code. */
+ profileNameToCode: { [key: string]: string } = {};
+ /** Profile codes / names (UPPERCASE) that have at least one row in profile_ink_exceptions.json. */
+ inkInfoProfileCodes = new Set<string>();
+ inkInfoProfileNames = new Set<string>();
+ /** True once the ink-info presence check has run. */
+ inkInfoProfilesLoaded = false;
  /** Current version document path; used to resolve project Batch Excel for style/color codes. */
  versionDocumentPath: string | null = null;
  separatedDocInfo: {
@@ -164,10 +177,37 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
   }
  }
 
+ /*
+  * Load the "Separation file path" pattern from Export Settings. Kept in sync on each refresh so a
+  * change in Export Settings reflects in the Generate gating without a reload.
+  */
+ async loadSeparationFilePathSetting(): Promise<void> {
+  if (this.isRunningInBrowser || typeof this.controller.loadExportSettings !== 'function') {
+   this.separationFilePathPattern = '';
+   return;
+  }
+  try {
+   const res: any = await this.controller.loadExportSettings();
+   this.separationFilePathPattern =
+    res && res.success && res.data && res.data.separationPreviewFilePath != null
+     ? String(res.data.separationPreviewFilePath).trim()
+     : '';
+  } catch (e) {
+   this.separationFilePathPattern = '';
+  }
+  this.cdr.detectChanges();
+ }
+
+ /* True when the Separation file path (Export Settings) is not configured — Generate is blocked. */
+ get isSeparationFilePathMissing(): boolean {
+  return !this.separationFilePathPattern || this.separationFilePathPattern.trim() === '';
+ }
+
  async refreshData(): Promise<void> {
   this.isCheckingDocument = true;
   this.cdr.detectChanges();
   try {
+   await this.loadSeparationFilePathSetting();
    await this.checkVersionDocument();
    if (this.hasVersionDocument) {
     await this.loadGraphicsList();
@@ -294,6 +334,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 
     if (this.hasVersionDocument) {
      await this.loadProfileNamesFromSettings();
+     await this.loadInkInfoProfileCodes();
      await this.loadGraphicsList();
      await this.loadGraphicsData();
      await this.loadSeparationPaths();
@@ -371,8 +412,17 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
        return name;
       })
       .filter(Boolean);
+     /* Build a profile name (UPPERCASE) -> code map so a separation can be matched to its ink-info code. */
+     const nameToCode: { [key: string]: string } = {};
+     for (const p of result.profiles as any[]) {
+      const nm = String((p && (p['Profile Name'] ?? p.profileName ?? p.name)) || '').trim();
+      const cd = String((p && (p['Profile Code'] ?? p.profileCode)) || '').trim();
+      if (nm) nameToCode[nm.toUpperCase()] = cd;
+     }
+     this.profileNameToCode = nameToCode;
     } else {
      this.profileNamesFromSettings = [];
+     this.profileNameToCode = {};
     }
     this.profileNamesLoaded = true;
     this.cdr.detectChanges();
@@ -380,6 +430,38 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
    .catch((err) => {
     this.profileNamesFromSettings = [];
     this.profileNamesLoaded = true;
+    this.cdr.detectChanges();
+   });
+ }
+
+ /**
+  * Load which profiles have ink information in profile_ink_exceptions.json, so the Separations page can
+  * warn (and disable Generate) when a profile's inks have not been imported. Runs AFTER
+  * loadProfileNamesFromSettings (it relies on the name -> code map).
+  */
+ loadInkInfoProfileCodes(): Promise<void> {
+  if (this.isRunningInBrowser || !this.controller.getInkExceptionProfileCodes) {
+   this.inkInfoProfilesLoaded = true;
+   return Promise.resolve();
+  }
+  return this.controller
+   .getInkExceptionProfileCodes()
+   .then((result: any) => {
+    const codes = result && result.success && Array.isArray(result.profileCodes) ? result.profileCodes : [];
+    const names = result && result.success && Array.isArray(result.profileNames) ? result.profileNames : [];
+    this.inkInfoProfileCodes = new Set<string>(
+     codes.map((c: any) => String(c || '').trim().toUpperCase()).filter(Boolean)
+    );
+    this.inkInfoProfileNames = new Set<string>(
+     names.map((n: any) => String(n || '').trim().toUpperCase()).filter(Boolean)
+    );
+    this.inkInfoProfilesLoaded = true;
+    this.cdr.detectChanges();
+   })
+   .catch(() => {
+    this.inkInfoProfileCodes = new Set<string>();
+    this.inkInfoProfileNames = new Set<string>();
+    this.inkInfoProfilesLoaded = true;
     this.cdr.detectChanges();
    });
  }
@@ -996,6 +1078,15 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
     }
    }
 
+   /*
+    * Separation file NAME comes from the Export Settings "Separation file path" pattern. The host
+    * resolves its tokens (from the team JSON batch row + position/profile) and uses its basename;
+    * the folder stays the standard 09 SEPARATIONS/[League]/[Team]/[Graphic]/ structure.
+    */
+   if (this.separationFilePathPattern && this.separationFilePathPattern.trim() !== '') {
+    profileMetadata.separationFileNamePattern = this.separationFilePathPattern.trim();
+   }
+
    console.log('[SEPARATIONS][UB_DEBUG] performSeparation payload profileMetadata:', profileMetadata);
    return this.controller.performSeparation(graphicName, styleCodes, profileMetadata, {
     sepsTemplateFileName
@@ -1489,6 +1580,29 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
    return false;
   }
   return !this.profileNamesFromSettings.some((n) => n === profileNameTrim);
+ }
+
+ /**
+  * True when the separation's profile has NO ink information in profile_ink_exceptions.json (the ink
+  * Excel has not been imported for that profile). Used to warn and to disable Generate Separations.
+  */
+ isInkInfoMissingForProfile(separation: Separation): boolean {
+  if (!this.inkInfoProfilesLoaded || this.isRunningInBrowser) {
+   return false;
+  }
+  const profileNameTrim = (separation.profile || '').trim();
+  if (!profileNameTrim || profileNameTrim === 'Unknown Profile') {
+   return false;
+  }
+  /* Don't stack with the "profile missing from settings" message. */
+  if (this.isProfileMissingInSettings(separation)) {
+   return false;
+  }
+  const nameUpper = profileNameTrim.toUpperCase();
+  const code = String(this.profileNameToCode[nameUpper] || '').trim().toUpperCase();
+  const hasInkInfo =
+   (!!code && this.inkInfoProfileCodes.has(code)) || this.inkInfoProfileNames.has(nameUpper);
+  return !hasInkInfo;
  }
 
  openDocument(filePath: string): void {

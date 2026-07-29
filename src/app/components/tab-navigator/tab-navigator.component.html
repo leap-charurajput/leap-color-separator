@@ -5,6 +5,8 @@
  [id]="getTabId(tab.title)"
  [class.active]="activeTab === i"
  [class.tabSelector]="true"
+ [class.tab-disabled]="isTabDisabled(tab)"
+ [attr.aria-disabled]="isTabDisabled(tab) ? 'true' : null"
  (click)="handleTabClick(i)">
  <span *ngIf="tab.materialIcon" class="material-icons">{{tab.materialIcon}}</span>
  <span *ngIf="tab.title === 'Graphics'" class="tab-svg-icon">
@@ -44,6 +46,7 @@
  <app-graphics *ngIf="i === 0" [documentRefreshKey]="documentRefreshKey"></app-graphics>
  <app-separations *ngIf="i === 1" [documentRefreshKey]="documentRefreshKey"></app-separations>
  <app-separation-colors *ngIf="i === 2" [documentRefreshKey]="documentRefreshKey"></app-separation-colors>
+ <app-standalone-separation *ngIf="i === 3" [documentRefreshKey]="documentRefreshKey"></app-standalone-separation>
 </div>
 <div [class.innerTabContent]="true"
  [class.show]="selectedMenuOption === 'General Settings' || selectedMenuOption === 'Manage Profiles' || selectedMenuOption === 'Export Settings'">

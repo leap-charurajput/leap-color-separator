@@ -31,7 +31,7 @@
 
 .profile-modal-container {
  --profile-modal-body-height: 360px;
- width: min(380px, 94vw);
+ width: min(430px, 94vw);
  max-height: 92vh;
  display: flex;
  flex-direction: column;
@@ -258,7 +258,8 @@
 .profile-ub-table-header,
 .profile-ub-row {
  display: grid;
- grid-template-columns: minmax(92px, 1fr) minmax(88px, 1.1fr) 64px minmax(104px, 1fr);
+ /* Underbase | Name (min 170px so UB 1/2 custom names show fully) | Mesh | Dark inks */
+ grid-template-columns: minmax(74px, 0.7fr) minmax(170px, 2.4fr) 58px minmax(96px, 1fr);
  align-items: center;
  gap: 0;
  box-sizing: border-box;
@@ -510,7 +511,7 @@
 
 .profile-ink-row {
  display: grid;
- grid-template-columns: 26px minmax(0, 1fr) 56px 46px 68px 24px;
+ grid-template-columns: 26px minmax(0, 1fr) 56px 46px 64px 68px 24px;
  align-items: center;
  gap: 3px;
  padding: 3px 5px;
@@ -570,6 +571,25 @@
  min-width: 46px;
 }
 
+.profile-ink-cell--hitmesh {
+ display: flex;
+ align-items: center;
+ justify-content: center;
+}
+.profile-ink-cell--hitmesh > .profile-ink-hitmesh-input {
+ width: 100%;
+ max-width: 56px;
+ text-align: center;
+ padding: 2px 4px;
+ font-size: 11px;
+}
+.profile-ink-hitmesh-empty {
+ opacity: 0.4;
+}
+.profile-ink-hitmesh-th {
+ font-size: 10px;
+ white-space: nowrap;
+}
 .profile-ink-cell--del {
  justify-content: center;
 }

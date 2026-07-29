@@ -347,3 +347,13 @@
 .ml-10 {
 	margin-left: 10px;
 }
+/*
+ * "Set Separation path first in Export Settings" hint shown under Generate when the Separation
+ * file path (Export Settings) is not configured. Intentionally light/muted.
+ */
+.sep-path-missing-note {
+	margin-top: 6px;
+	font-size: 11px;
+	font-style: italic;
+	color: rgba(214, 214, 214, 0.55);
+}

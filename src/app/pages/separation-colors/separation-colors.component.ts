@@ -1009,7 +1009,7 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
   let hasProfile = false;
 
   if (inkInfo.found && inkInfo.profileInfo && inkInfo.profileInfo.found) {
-   // Primary: Use profile from Inks.xlsx
+   // Primary: profile resolved alongside the ink (from Profiles.json via the exception lookup)
    profileInfo = inkInfo.profileInfo;
    hasProfile = true;
   } else if (!inkInfo.found && fallbackProfile) {

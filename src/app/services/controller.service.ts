@@ -1,6 +1,12 @@
 import { Injectable } from '@angular/core';
 import { checkForJSXUpdates, csInterface, evalScript } from '../../libs/helper';
 import { createGraphicFromSelection } from '../../lib/scripts/createGraphicFromSelection.script';
+/* Standalone (non-LEAP) mode: read the LICENSING sheet from the active document to prefill the form. */
+import { getLicensingInfoFromDocument } from '../../lib/scripts/getLicensingInfoFromDocument.script';
+/* Standalone (non-LEAP) mode: export the current selection to a sibling ASSETS folder. */
+import { exportSelectionToAssets } from '../../lib/scripts/exportSelectionToAssets.script';
+/* Standalone (non-LEAP) mode: run the separation on the exported graphic. */
+import { runStandaloneSeparation } from '../../lib/scripts/standaloneSeparation.script';
 import { hasActiveDocument as hasHostActiveDocument } from '../../lib/scripts/hasActiveDocument.script';
 import { getSelectionCount as getHostSelectionCount } from '../../lib/scripts/getSelectionCount.script';
 import { LeapSepsLogService } from './leap-seps-log.service';
@@ -143,6 +149,63 @@ export class ControllerService {
   }
 
   return this.getGraphicPositionOptionsFromJson().then(() => runCreate());
+ }
+
+ /*
+  * Standalone (non-LEAP) mode: read the LICENSING submission sheet from the active document so
+  * the Standalone form can be prefilled on "+". Returns the raw label/value pairs (orgCode,
+  * teamName, conceptCode, style, color, placement, …). Never throws — resolves to a
+  * { success:false } shape on error so the form simply stays empty.
+  */
+ getLicensingInfo(): Promise<any> {
+  this.log('getLicensingInfo called');
+  return this.ensureSession()
+   .then(() => getLicensingInfoFromDocument())
+   .catch((err: any) => ({
+    success: false,
+    error: err?.message || 'Unknown error reading licensing info'
+   }));
+ }
+
+ /*
+  * Standalone (non-LEAP) mode: export the current selection to <activeDocFolder>/ASSETS/<name>.ai
+  * and leave that exported document open. Does not modify the active document.
+  */
+ exportSelectionToAssets(payload: {
+  teamCode?: string;
+  styleCode?: string;
+  position?: string;
+ }): Promise<any> {
+  this.log('exportSelectionToAssets called');
+  return this.ensureSession().then(() => exportSelectionToAssets(payload));
+ }
+
+ /*
+  * Standalone (non-LEAP) profile lookup that passes an explicit LEAP Data base path (resolved via
+  * getLeapServerDataPath) to the leap bundle, avoiding the Node-side getServerBasePath() existsSync
+  * gate that can fail on cold/cloud-synced drives. Returns { success, profileMap } / { success:false }.
+  */
+ getProfileNamesFromExcelAtPath(styleCodes: string[], basePath: string): Promise<any> {
+  this.log('getProfileNamesFromExcelAtPath called');
+  return this.ensureSession().then(() =>
+   (window as any).leap.getProfileNamesFromExcelAtPath(styleCodes, basePath)
+  );
+ }
+
+ /*
+  * Standalone (non-LEAP) mode: run the separation on the exported ASSETS graphic. Reuses the loaded
+  * separation engine via the inline script; writes to a flat SEPARATIONS folder next to ASSETS.
+  */
+ generateStandaloneSeparation(payload: {
+  graphicName: string;
+  styleCodes: string[];
+  profileMetadata: any;
+  jsonData: any;
+  sepsTemplateFileName?: string;
+  exportedFilePath: string;
+ }): Promise<any> {
+  this.log('generateStandaloneSeparation called');
+  return this.ensureSession().then(() => runStandaloneSeparation(payload));
  }
 
  toggleLayerVisibility(layerName: string): Promise<any> {
@@ -787,8 +850,15 @@ export class ControllerService {
   const profile = entry.Profile != null ? String(entry.Profile).trim() : '';
   const meshRaw = entry.Color_Mesh;
   const mesh = meshRaw == null || meshRaw === '' ? '' : String(meshRaw).trim();
-  const twoHitsRaw = entry.Two_Hits != null ? String(entry.Two_Hits).trim().toUpperCase() : 'N';
-  const hitsCount = twoHitsRaw === 'Y' || twoHitsRaw === 'YES' ? 2 : 1;
+  /*
+   * "Two Hits" is value-driven (no longer Y/N): any non-empty value (except N/No/False/0) means a
+   * second hit is required. A numeric value is the second-hit mesh; a legacy Y/Yes carries no mesh.
+   */
+  const twoHitsRaw = entry.Two_Hits != null ? String(entry.Two_Hits).trim() : '';
+  const twoHitsIsNegative = /^(n|no|false|0)$/i.test(twoHitsRaw);
+  const hitsCount = twoHitsRaw !== '' && !twoHitsIsNegative ? 2 : 1;
+  const secondHitMesh =
+   /^(y|yes|true)$/i.test(twoHitsRaw) || twoHitsIsNegative ? '' : twoHitsRaw;
   let underbaseCount = entry.underbase_count != null ? parseInt(entry.underbase_count, 10) : 1;
   if (isNaN(underbaseCount) || underbaseCount < 1) underbaseCount = 1;
   if (underbaseCount > 4) underbaseCount = 4;
@@ -800,6 +870,7 @@ export class ControllerService {
    mesh,
    underbaseCount,
    hitsCount,
+   secondHitMesh,
    printMethod: entry.Print_Method != null ? String(entry.Print_Method).trim() : '',
    profile,
    profileCode
@@ -817,6 +888,14 @@ export class ControllerService {
   }
   let hitsCount = enabled && row?.hitsCount != null ? parseInt(row.hitsCount, 10) : 1;
   if (isNaN(hitsCount) || hitsCount < 1) hitsCount = 1;
+  /*
+   * "Two Hits" now stores the raw second-hit value: a numeric mesh means a second hit is required
+   * (and is the second-hit mesh); '' means single hit. A legacy row with only hitsCount writes 'Y'.
+   */
+  const secondHitMeshTrimmed =
+   enabled && row?.secondHitMesh != null ? String(row.secondHitMesh).trim() : '';
+  const twoHitsValue =
+   hitsCount >= 2 ? (secondHitMeshTrimmed !== '' ? secondHitMeshTrimmed : 'Y') : '';
   let underbaseCount = enabled && row?.underbaseCount != null ? parseInt(row.underbaseCount, 10) : 1;
   if (isNaN(underbaseCount) || underbaseCount < 1) underbaseCount = 1;
   if (underbaseCount > 4) underbaseCount = 4;
@@ -835,7 +914,7 @@ export class ControllerService {
    Print_Method: row?.printMethod != null ? String(row.printMethod).trim() : '',
    Profile: rowProfile,
    profileCode: rowProfileCode,
-   Two_Hits: hitsCount >= 2 ? 'Y' : 'N',
+   Two_Hits: twoHitsValue,
    underbase_count: underbaseCount
   };
  }
@@ -904,6 +983,45 @@ export class ControllerService {
      success: false,
      error: err?.message || String(err) || 'Failed to read profile_ink_exceptions.json'
     };
+   }
+  });
+ }
+
+ /**
+  * Distinct profileCodes / profileNames present in profile_ink_exceptions.json (UPPERCASE).
+  * Used by the Separations page to flag profiles whose ink information has not been imported.
+  */
+ getInkExceptionProfileCodes(): Promise<{ success: boolean; profileCodes: string[]; profileNames: string[]; error?: string }> {
+  return this.getLeapServerDataPath().then((basePath) => {
+   if (!basePath || !String(basePath).trim()) {
+    return { success: false, profileCodes: [], profileNames: [] };
+   }
+   const fs = (window as any).cep_node?.require('fs');
+   if (!fs) {
+    /* Non-CEP (browser/dev): the Separations page guards this behind isRunningInBrowser. */
+    return { success: true, profileCodes: [], profileNames: [] };
+   }
+   try {
+    const filePath = this.getProfileInkExceptionsFilePath(basePath);
+    if (!filePath || !fs.existsSync(filePath)) {
+     return { success: true, profileCodes: [], profileNames: [] };
+    }
+    const allEntries = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    if (!Array.isArray(allEntries)) {
+     return { success: false, profileCodes: [], profileNames: [], error: 'profile_ink_exceptions.json does not contain an array' };
+    }
+    const codeSet: { [key: string]: true } = {};
+    const nameSet: { [key: string]: true } = {};
+    for (let i = 0; i < allEntries.length; i++) {
+     const entry = allEntries[i];
+     const code = entry && entry.profileCode != null ? String(entry.profileCode).trim().toUpperCase() : '';
+     const name = entry && entry.Profile != null ? String(entry.Profile).trim().toUpperCase() : '';
+     if (code) codeSet[code] = true;
+     if (name) nameSet[name] = true;
+    }
+    return { success: true, profileCodes: Object.keys(codeSet), profileNames: Object.keys(nameSet) };
+   } catch (err: any) {
+    return { success: false, profileCodes: [], profileNames: [], error: err?.message || String(err) };
    }
   });
  }
@@ -1046,20 +1164,22 @@ export class ControllerService {
     if (wubCount > 0) underbaseCount = Math.max(1, Math.min(4, wubCount));
    }
 
-   /* Hits count: a number (1/2), or a Y/N-style "Two Hits" value (Y/Yes/True → 2, else 1). */
-   let hitsCount = 1;
-   const hitsNum = parseInt(hitsRaw, 10);
-   if (!isNaN(hitsNum)) {
-    hitsCount = Math.max(1, Math.min(2, hitsNum));
-   } else if (/^(y|yes|true)$/i.test(String(hitsRaw).trim())) {
-    hitsCount = 2;
-   }
+   /*
+    * Second hit is driven by the PRESENCE of a value in "Two Hits": empty -> single hit; any value
+    * (except N/No/False/0) -> second hit. A numeric value is the second-hit mesh; a legacy Y/Yes has none.
+    */
+   const hitsValue = String(hitsRaw == null ? '' : hitsRaw).trim();
+   const hitsIsNegative = /^(n|no|false|0)$/i.test(hitsValue);
+   const hitsHasValue = hitsValue !== '' && !hitsIsNegative;
+   const hitsCount = hitsHasValue ? 2 : 1;
+   const secondHitMesh = /^(y|yes|true)$/i.test(hitsValue) ? '' : (hitsHasValue ? hitsValue : '');
 
    out.push({
     inkName,
     mesh,
     underbaseCount,
     hitsCount,
+    secondHitMesh,
     printMethod,
     profileCode: effectiveProfileCode,
     profile: profileRaw,
@@ -2153,6 +2273,24 @@ function getStyleCodesExportText(meta) {
  }
 }
 
+function getExportControlVersionValues(doc) {
+ var out = { control: "", version: "" };
+ try {
+  if (!doc || !doc.textFrames) return out;
+  for (var i = 0; i < doc.textFrames.length; i++) {
+   var tf = doc.textFrames[i];
+   var content = tf.contents == null ? "" : String(tf.contents);
+   var trimmed = trimExportString(content);
+   /* Skip blanks and bracketed placeholder tokens like [CONTROL] / [V#]. */
+   if (trimmed === "" || (trimmed.charAt(0) === "[" && trimmed.charAt(trimmed.length - 1) === "]")) continue;
+   var frameName = String(tf.name || "").toLowerCase();
+   if ((frameName === "control_number" || frameName === "control number") && out.control === "") { out.control = trimmed; }
+   else if ((frameName === "version_number" || frameName === "version number") && out.version === "") { out.version = trimmed; }
+  }
+ } catch (e) {}
+ return out;
+}
+
 function getExportVariableContext(doc) {
  var docFile = new File(doc.fullName);
  var docName = docFile.name.replace(/\\.[^\\.]+$/, "");
@@ -2208,6 +2346,21 @@ function getExportVariableContext(doc) {
  }
  setExportAlias(aliases, "Team Code", findExportValueInObject(jsonData, "TeamCode") || teamCodeFromPath || findExportValueInObject(batch, "Team Code") || findExportValueInObject(batch, "Lineup Org Code"));
  setExportAlias(aliases, "League", findExportValueInObject(jsonData, "League") || leagueFromPath || findExportValueInObject(batch, "League_desc") || findExportValueInObject(batch, "League"));
+ /*
+  * [CONTROL] / [CONTROL_NUMBER] / [CONTROL NUMBER] (and the VERSION equivalents) resolve from the
+  * document's CONTROL_NUMBER / VERSION_NUMBER text frames so export file/folder names can embed the
+  * control/version number. "Control" covers [CONTROL]; "Control Number" covers [CONTROL_NUMBER] and
+  * [CONTROL NUMBER] (both normalize to the same key). Bracketed placeholders and blanks are skipped.
+  */
+ var controlVersion = getExportControlVersionValues(doc);
+ if (controlVersion.control) {
+  setExportAlias(aliases, "Control", controlVersion.control);
+  setExportAlias(aliases, "Control Number", controlVersion.control);
+ }
+ if (controlVersion.version) {
+  setExportAlias(aliases, "Version", controlVersion.version);
+  setExportAlias(aliases, "Version Number", controlVersion.version);
+ }
  return {
   aliases: aliases,
   batch: batch,
@@ -2448,6 +2601,50 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
     return JSON.stringify({ success: true, replaced: replaced });
   } catch (e) {
     return JSON.stringify({ success: false, error: "Error updating control number: " + (e.message || e.toString()) });
+  }
+})();
+`;
+   return evalScript(script)
+    .then((res: any) => {
+     const str = typeof res === 'string' ? res : '';
+     try {
+      return str ? JSON.parse(str) : { success: false, error: 'Empty response from host' };
+     } catch (e) {
+      return { success: false, error: 'Invalid JSON response from host', raw: str };
+     }
+    });
+  });
+ }
+
+ /*
+  * Read the Control number and Version number back from the active document's text frames named
+  * CONTROL_NUMBER / VERSION_NUMBER (case-insensitive; also matches the spaced "CONTROL NUMBER").
+  * Used to pre-fill the Export modal on a repeat export. Returns { success, controlNumber, versionNumber }.
+  */
+ getControlAndVersionNumbers(): Promise<any> {
+  this.log('getControlAndVersionNumbers called');
+  return this.ensureSession().then(() => {
+   const script = `
+(function() {
+  try {
+    if (!app.documents.length) {
+      return JSON.stringify({ success: false, error: "No active document found" });
+    }
+    var doc = app.activeDocument;
+    var control = "";
+    var version = "";
+    if (doc.textFrames) {
+      for (var i = 0; i < doc.textFrames.length; i++) {
+        var tf = doc.textFrames[i];
+        var content = tf.contents == null ? "" : String(tf.contents);
+        var frameName = String(tf.name || "").toLowerCase();
+        if ((frameName === "control_number" || frameName === "control number") && control === "") { control = content; }
+        else if ((frameName === "version_number" || frameName === "version number") && version === "") { version = content; }
+      }
+    }
+    return JSON.stringify({ success: true, controlNumber: control, versionNumber: version });
+  } catch (e) {
+    return JSON.stringify({ success: false, error: "Error reading control/version: " + (e.message || e.toString()) });
   }
 })();
 `;
@@ -2951,6 +3148,16 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
     for (let i = 0; i < entries.length; i++) {
      const name = entries[i];
      if (!/\.pdf$/i.test(name)) continue;
+     /*
+      * Only accept the Distiller output, which shares the source .ps base name (e.g. "..._Seps.pdf").
+      * A blind "newest PDF" scan could otherwise grab an UNRELATED fresh PDF in the same folder — e.g.
+      * the Print Guide "..._PGN.pdf" — and move/rename it to the seps-preview PDF, destroying the Print
+      * Guide. This is exactly why exporting into the same /SEPS/ folder made the Print Guide disappear.
+      */
+     const nameBase = path.basename(name, path.extname(name));
+     const expectedBaseNoPs = baseName.replace(/_PS$/i, '');
+     const targetBase = path.basename(targetPdfPath, path.extname(targetPdfPath));
+     if (nameBase !== baseName && nameBase !== expectedBaseNoPs && nameBase !== targetBase) continue;
      const fullPath = path.join(dirs[d], name);
      try {
       const stat = fs.statSync(fullPath);

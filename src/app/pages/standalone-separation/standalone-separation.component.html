@@ -1,0 +1,169 @@
+<!--
+ Standalone (non-LEAP) separation form. Reached only via the Graphics "+" button, which
+ enables and navigates to this tab. Collects the metadata the batch Excel normally supplies,
+ then "Generate Separate" exports the selection to a sibling ASSETS folder and runs the same
+ separation process as the Separations tab (backend wired in Increment B).
+-->
+<div class="standalone-container">
+ <div class="panelTitle mb-5">
+  <span>Standalone Separation</span>
+ </div>
+
+ <div *ngIf="isRunningInBrowser" class="standalone-content">
+  <div class="panelTitle mx-5" style="text-align: center; padding: 40px 20px">
+   <span>Please run this in Illustrator</span>
+  </div>
+ </div>
+
+ <div *ngIf="!isRunningInBrowser" class="standalone-content">
+  <p class="standalone-hint">
+   Enter the details below for the selected artwork, then Generate Separate.
+   <span *ngIf="isPrefilling" class="standalone-prefill-note">Reading LICENSING sheet…</span>
+  </p>
+
+  <!-- Position -->
+  <div class="standalone-field">
+   <label class="standalone-label">Position</label>
+   <div class="standalone-control">
+    <app-combo-box
+     [value]="position"
+     [items]="positionOptions"
+     (onChange)="onPositionChange($event)"
+     placeholder="Choose…"
+    ></app-combo-box>
+   </div>
+  </div>
+
+  <!-- Team Code -->
+  <div class="standalone-field">
+   <label class="standalone-label">Team Code</label>
+   <div class="standalone-control">
+    <input type="text" class="standalone-input" [(ngModel)]="teamCode" placeholder="e.g. ABN" />
+   </div>
+  </div>
+
+  <!-- League -->
+  <div class="standalone-field">
+   <label class="standalone-label">League</label>
+   <div class="standalone-control">
+    <input type="text" class="standalone-input" [(ngModel)]="league" placeholder="e.g. SEPS" />
+   </div>
+  </div>
+
+  <!-- Style Code (drives the profile lookup) -->
+  <div class="standalone-field">
+   <label class="standalone-label">Style Code</label>
+   <div class="standalone-control">
+    <input
+     type="text"
+     class="standalone-input"
+     [(ngModel)]="styleCode"
+     (change)="onStyleCodeChange()"
+     placeholder="Style code"
+    />
+   </div>
+  </div>
+
+  <!-- Profile — resolved from the Style Code via Styles.xlsx (read-only) -->
+  <div class="standalone-field">
+   <label class="standalone-label">Profile</label>
+   <div class="standalone-control">
+    <span *ngIf="isResolvingProfile" class="standalone-readonly">Resolving…</span>
+    <span *ngIf="!isResolvingProfile && profileName" class="standalone-readonly">{{ profileName }}</span>
+    <span *ngIf="!isResolvingProfile && !profileName" class="standalone-readonly standalone-readonly-muted">
+     {{ styleCode ? 'No profile for this style' : 'Enter a style code' }}
+    </span>
+   </div>
+  </div>
+
+  <div *ngIf="profileResolveWarning" class="standalone-warning">{{ profileResolveWarning }}</div>
+  <div *ngIf="showLicensingDebug && profileLookupDebug" class="standalone-debug">
+   <div class="standalone-debug-title">Profile lookup (debug)</div>
+   <pre class="standalone-debug-pre">{{ profileLookupDebug }}</pre>
+  </div>
+
+  <!-- Optional SEP-grid token fields -->
+  <div class="standalone-optional-title">Optional (SEP grid tokens)</div>
+
+  <div class="standalone-field">
+   <label class="standalone-label">Team Name</label>
+   <div class="standalone-control">
+    <input type="text" class="standalone-input" [(ngModel)]="teamName" placeholder="Optional" />
+   </div>
+  </div>
+
+  <div class="standalone-field">
+   <label class="standalone-label">Concept</label>
+   <div class="standalone-control">
+    <input type="text" class="standalone-input" [(ngModel)]="concept" placeholder="Optional" />
+   </div>
+  </div>
+
+  <div class="standalone-field">
+   <label class="standalone-label">Garment Colors</label>
+   <div class="standalone-control">
+    <input
+     type="text"
+     class="standalone-input"
+     [(ngModel)]="garmentColors"
+     placeholder="Optional"
+    />
+   </div>
+  </div>
+
+  <div *ngIf="warningMessage" class="standalone-warning">{{ warningMessage }}</div>
+  <div *ngIf="statusMessage" class="standalone-status">{{ statusMessage }}</div>
+
+  <!-- TEMPORARY diagnostic: shows exactly what the LICENSING reader returned. Remove later. -->
+  <div *ngIf="showLicensingDebug && licensingDebug" class="standalone-debug">
+   <div class="standalone-debug-title">LICENSING read (debug)</div>
+   <pre class="standalone-debug-pre">{{ licensingDebug }}</pre>
+  </div>
+
+  <div class="standalone-footer">
+   <app-button
+    variant="primary"
+    size="medium"
+    [disabled]="!canGenerate"
+    (onClick)="onExport()"
+   >
+    {{ isExporting ? 'Exporting…' : 'Export' }}
+   </app-button>
+  </div>
+
+  <!-- Separations view (shown after Export), grouped by profile — like the Separations tab. -->
+  <div *ngIf="exported && separationGroups.length > 0" class="standalone-seps">
+   <div class="standalone-seps-title">Separations</div>
+   <div *ngIf="exportedFileName" class="standalone-seps-file">
+    Exported file: {{ exportedFileName }}
+   </div>
+
+   <div *ngFor="let group of separationGroups" class="standalone-sep-group">
+    <div class="standalone-sep-group-main">
+     <div class="standalone-sep-group-info">
+      <div class="standalone-sep-profile">{{ group.profileName }}</div>
+      <div class="standalone-sep-styles">{{ group.styleCodes.join(', ') }}</div>
+      <div *ngIf="group.colors.length > 0" class="standalone-sep-colors">
+       Colors: {{ group.colors.join(', ') }}
+      </div>
+      <div class="standalone-sep-colors">
+       Garment Colors:
+       <span *ngIf="group.garmentColors">{{ group.garmentColors }}</span>
+       <span *ngIf="!group.garmentColors" class="standalone-sep-colors-empty">—</span>
+      </div>
+     </div>
+     <app-button
+      variant="primary"
+      size="small"
+      [disabled]="group.isGenerating"
+      (onClick)="generateGroup(group)"
+     >
+      {{ group.isGenerating ? 'Generating…' : 'Generate Separation' }}
+     </app-button>
+    </div>
+    <div *ngIf="group.status" class="standalone-status">{{ group.status }}</div>
+    <div *ngIf="group.error" class="standalone-warning">{{ group.error }}</div>
+   </div>
+  </div>
+ </div>
+</div>

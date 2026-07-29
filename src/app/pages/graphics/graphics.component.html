@@ -2,18 +2,18 @@
  <div class="panelTitle mb-5 d-flex align-center justify-between">
   <span>Organize Graphics</span>
   <div class="organize-graphics-actions">
-   <button
+   <!-- <button
     *ngIf="showCreateGraphicActions"
-    (click)="openCreateGraphicModal()"
+    (click)="openStandaloneSeparation()"
     class="separation-action-btn create-graphic-btn"
     [class.disabled]="!hasSelection"
     [disabled]="!hasSelection"
-    title="Create graphic from selection"
+    title="Set up standalone separation from selection"
    >
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="20" height="20">
      <path fill="currentColor" d="M8 3.5a.5.5 0 0 1 .5.5v3.5H12a.5.5 0 0 1 0 1H8.5V12a.5.5 0 0 1-1 0V8.5H4a.5.5 0 0 1 0-1h3.5V4a.5.5 0 0 1 .5-.5z"/>
     </svg>
-   </button>
+   </button> -->
    <button
     (click)="loadGraphicsList()"
     class="separation-action-btn"

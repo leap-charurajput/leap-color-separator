@@ -871,6 +871,20 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
   this.cdr.detectChanges();
  }
 
+ /*
+  * Standalone (non-LEAP) entry point. The "+" button now routes here: with a live selection it
+  * asks the shell to enable and open the Standalone tab (index 3), where the user enters the
+  * metadata and runs "Generate Separate". The legacy create-graphic modal (openCreateGraphicModal)
+  * is intentionally left intact and unused so the previous behavior can be restored trivially.
+  */
+ openStandaloneSeparation(): void {
+  if (!this.hasSelection || this.isRunningInBrowser) return;
+  const nav = (window as any).__LEAP_TAB_NAVIGATION__;
+  if (nav && typeof nav.openStandalone === 'function') {
+   nav.openStandalone();
+  }
+ }
+
  closeCreateGraphicModal(): void {
   this.createGraphicModalOpen = false;
   this.createGraphicWarning = '';

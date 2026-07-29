@@ -612,6 +612,7 @@ function ensureSwatchExistsFromSource(sourceSwatchName, newSwatchName, fallbackC
 		if (!sourceSwatch || !sourceSwatch.color) {
 			if (fallbackCmyk) {
 				var fallbackSpot = doc.spots.add();
+				fallbackSpot.colorType = ColorModel.SPOT;
 				fallbackSpot.name = newSwatchName;
 				var fallbackColor = new CMYKColor();
 				fallbackColor.cyan = Math.max(0, Math.min(100, Number(fallbackCmyk.c) || 0));

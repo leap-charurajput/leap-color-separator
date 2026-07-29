@@ -35,6 +35,8 @@ import { ComboBoxComponent } from './components/combo-box/combo-box.component';
 import { RadioComponent } from './components/radio/radio.component';
 import { AddSeparationDialogComponent } from './components/add-separation-dialog/add-separation-dialog.component';
 import { CreateGraphicModalComponent } from './components/create-graphic-modal/create-graphic-modal.component';
+/* Standalone (non-LEAP) separation page — reached via the Graphics "+" button. */
+import { StandaloneSeparationComponent } from './pages/standalone-separation/standalone-separation.component';
 import { ControllerService } from './services/controller.service';
 
 @NgModule({
@@ -67,7 +69,8 @@ import { ControllerService } from './services/controller.service';
   SeparationColorsComponent,
   GraphicsComponent,
   SeparationsComponent,
-  SettingsComponent
+  SettingsComponent,
+  StandaloneSeparationComponent
  ],
  imports: [BrowserModule, FormsModule, DragDropModule, OverlayModule],
  providers: [ControllerService],

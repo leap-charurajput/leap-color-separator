@@ -1,5 +1,6 @@
 import { Component, EventEmitter, Input, Output, OnInit, OnChanges, SimpleChanges } from '@angular/core';
 import { PostscriptReadinessIssue } from '../postscript-setup-alert/postscript-setup-alert.component';
+import { ControllerService } from '../../services/controller.service';
 
 @Component({
 	selector: 'app-export-separations-modal',
@@ -21,6 +22,8 @@ export class ExportSeparationsModalComponent implements OnInit, OnChanges {
 	/** Version number entered by the user; written into the doc's [V#] / Version_Number frame before export. */
 	versionNumber = '';
 
+	constructor(private controller: ControllerService) {}
+
 	ngOnInit(): void {
 		this.resetCheckboxes();
 	}
@@ -28,6 +31,7 @@ export class ExportSeparationsModalComponent implements OnInit, OnChanges {
 	ngOnChanges(changes: SimpleChanges): void {
 		if (changes['isOpen'] && this.isOpen) {
 			this.resetCheckboxes();
+			this.prefillControlAndVersionFromDocument();
 		}
 	}
 
@@ -38,13 +42,46 @@ export class ExportSeparationsModalComponent implements OnInit, OnChanges {
 		this.versionNumber = '';
 	}
 
+	/*
+	 * On open, pre-fill Control number / Version number from the active Illustrator document. On a repeat
+	 * export the values live in the text frames named CONTROL_NUMBER / VERSION_NUMBER, so read those and
+	 * populate the fields. Bracketed placeholder tokens (e.g. "[CONTROL]", "[V#]") and blanks are ignored.
+	 */
+	private prefillControlAndVersionFromDocument(): void {
+		if (typeof (this.controller as any)?.getControlAndVersionNumbers !== 'function') {
+			return;
+		}
+		Promise.resolve(this.controller.getControlAndVersionNumbers())
+			.then((res: any) => {
+				if (!res || res.success === false) {
+					return;
+				}
+				const clean = (value: any): string => {
+					const v = value == null ? '' : String(value).trim();
+					return v !== '' && !/^\[.*\]$/.test(v) ? v : '';
+				};
+				const control = clean(res.controlNumber);
+				const version = clean(res.versionNumber);
+				if (control !== '') {
+					this.controlNumber = control;
+				}
+				if (version !== '') {
+					this.versionNumber = version;
+				}
+			})
+			.catch(() => {});
+	}
+
 	handleVersionNumberChange(event: Event): void {
 		this.versionNumber = (event.target as HTMLInputElement).value;
 	}
 
-	/** Export is allowed only when BOTH the control number and version number are provided. */
+	/*
+	 * Export is always allowed; Control number and Version number are optional. When left blank they are
+	 * not written to the document (the writer skips empty values, so any existing frame value is kept).
+	 */
 	get canExport(): boolean {
-		return (this.controlNumber || '').trim() !== '' && (this.versionNumber || '').trim() !== '';
+		return true;
 	}
 
 	handleControlNumberChange(event: Event): void {

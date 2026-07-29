@@ -1,0 +1,194 @@
+/*
+ * Standalone separation form styles. Kept intentionally close to the existing panel look
+ * (dark theme, compact rows) and self-contained so it does not affect other tabs.
+ */
+.standalone-container {
+ /*
+  * The tab content area (.settingsTabContent) is fixed-height with overflow hidden, so a long
+  * page gets clipped. Bound this page to the visible tab area (viewport minus the tab bar +
+  * padding) and let it scroll internally so the Export / Generate buttons stay reachable.
+  */
+ padding: 10px 12px 24px;
+ max-height: calc(100vh - 52px);
+ overflow-y: auto;
+ box-sizing: border-box;
+}
+
+.standalone-content {
+ display: flex;
+ flex-direction: column;
+ gap: 8px;
+}
+
+.standalone-hint {
+ margin: 0 0 6px 0;
+ opacity: 0.75;
+ font-size: 12px;
+}
+
+.standalone-prefill-note {
+ margin-left: 6px;
+ font-style: italic;
+ opacity: 0.7;
+}
+
+.standalone-field {
+ display: flex;
+ align-items: center;
+ gap: 8px;
+}
+
+.standalone-label {
+ flex: 0 0 96px;
+ font-size: 12px;
+ opacity: 0.85;
+}
+
+.standalone-control {
+ flex: 1 1 auto;
+ min-width: 0;
+}
+
+.standalone-input {
+ width: 100%;
+ box-sizing: border-box;
+ background: rgba(255, 255, 255, 0.06);
+ border: 1px solid rgba(255, 255, 255, 0.18);
+ border-radius: 4px;
+ color: inherit;
+ padding: 5px 8px;
+ font-size: 12px;
+}
+
+.standalone-input:focus {
+ outline: none;
+ border-color: rgba(255, 255, 255, 0.4);
+}
+
+.standalone-readonly {
+ display: inline-block;
+ padding: 5px 2px;
+ font-size: 12px;
+}
+
+.standalone-readonly-muted {
+ opacity: 0.55;
+ font-style: italic;
+}
+
+.standalone-optional-title {
+ margin-top: 10px;
+ margin-bottom: 2px;
+ font-size: 11px;
+ letter-spacing: 0.04em;
+ text-transform: uppercase;
+ opacity: 0.55;
+}
+
+.standalone-warning {
+ margin-top: 8px;
+ padding: 6px 8px;
+ border-radius: 4px;
+ background: rgba(255, 176, 32, 0.12);
+ border: 1px solid rgba(255, 176, 32, 0.35);
+ font-size: 12px;
+}
+
+.standalone-status {
+ margin-top: 8px;
+ font-size: 12px;
+ opacity: 0.8;
+}
+
+.standalone-footer {
+ margin-top: 14px;
+ display: flex;
+ justify-content: flex-end;
+}
+
+/* Separations view shown after Export (grouped by profile). */
+.standalone-seps {
+ margin-top: 16px;
+ border-top: 1px solid rgba(255, 255, 255, 0.15);
+ padding-top: 12px;
+}
+
+.standalone-seps-title {
+ font-size: 13px;
+ font-weight: 600;
+ margin-bottom: 6px;
+}
+
+.standalone-seps-file {
+ font-size: 11px;
+ opacity: 0.65;
+ margin-bottom: 10px;
+ word-break: break-word;
+}
+
+.standalone-sep-group {
+ border: 1px solid rgba(255, 255, 255, 0.16);
+ border-radius: 4px;
+ padding: 8px 10px;
+ margin-bottom: 8px;
+}
+
+.standalone-sep-group-main {
+ display: flex;
+ align-items: center;
+ justify-content: space-between;
+ gap: 10px;
+}
+
+.standalone-sep-group-info {
+ min-width: 0;
+}
+
+.standalone-sep-profile {
+ font-size: 12px;
+ font-weight: 600;
+}
+
+.standalone-sep-styles {
+ font-size: 11px;
+ opacity: 0.7;
+}
+
+.standalone-sep-colors {
+ font-size: 11px;
+ opacity: 0.85;
+ margin-top: 4px;
+ word-break: break-word;
+}
+
+.standalone-sep-colors-empty {
+ opacity: 0.6;
+ font-style: italic;
+}
+
+/* TEMPORARY diagnostic box for the LICENSING reader output. */
+.standalone-debug {
+ margin-top: 12px;
+ border: 1px dashed rgba(255, 255, 255, 0.25);
+ border-radius: 4px;
+ padding: 6px 8px;
+}
+
+.standalone-debug-title {
+ font-size: 11px;
+ text-transform: uppercase;
+ letter-spacing: 0.04em;
+ opacity: 0.6;
+ margin-bottom: 4px;
+}
+
+.standalone-debug-pre {
+ margin: 0;
+ max-height: 220px;
+ overflow: auto;
+ font-size: 11px;
+ line-height: 1.35;
+ white-space: pre-wrap;
+ word-break: break-word;
+ opacity: 0.85;
+}
