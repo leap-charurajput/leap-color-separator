@@ -3,7 +3,6 @@ import { GraphicsComponent } from '../../pages/graphics/graphics.component';
 import { SeparationColorsComponent } from '../../pages/separation-colors/separation-colors.component';
 import { SeparationsComponent } from '../../pages/separations/separations.component';
 import { SettingsComponent } from '../../pages/settings/settings.component';
-import { StandaloneSeparationComponent } from '../../pages/standalone-separation/standalone-separation.component';
 import { ControllerService } from '../../services/controller.service';
 
 interface Tab {
@@ -12,7 +11,7 @@ interface Tab {
  materialIcon?: string;
  component: any;
  /*
-  * When true the tab is only clickable while its gate (see standaloneEnabled) is open.
+  * When true the tab is only clickable while its gate is open (see the `gated` input below).
   * Used by the Standalone tab, which stays visible but disabled until the Graphics "+"
   * button enables it.
   */
@@ -33,7 +32,11 @@ export class TabNavigatorComponent implements OnChanges {
   * Gate for the Standalone tab: false keeps it visible-but-disabled; the shell flips it true
   * when the user clicks "+" on the Graphics tab with a live selection.
   */
- @Input() standaloneEnabled = false;
+ /*
+  * Generic gate for a `gated` tab. No tab is gated today — the standalone form became a modal owned
+  * by the app shell — but the mechanism is kept for the next tab that needs it.
+  */
+ @Input() gateOpen = false;
  @Output() onTabChange = new EventEmitter<number>();
  @Output() onMenuOptionClick = new EventEmitter<string>();
  @Output() onRemoveSeparationData = new EventEmitter<void>();
@@ -48,13 +51,14 @@ export class TabNavigatorComponent implements OnChanges {
  tabs: Tab[] = [
   { title: 'Graphics', component: GraphicsComponent },
   { title: 'Separations', component: SeparationsComponent },
-  { title: 'Plates', icon: 'icon-ColorVar', component: SeparationColorsComponent },
+  { title: 'Plates', icon: 'icon-ColorVar', component: SeparationColorsComponent }
   /*
-   * Standalone (non-LEAP) separation tab. Always rendered so its position (after Plates) is
-   * stable, but gated: the user cannot activate it directly — only the Graphics "+" button
-   * enables it (see standaloneEnabled / isTabDisabled).
+   * The standalone (non-LEAP) form used to be a fourth tab here, visible but permanently disabled
+   * until the Graphics "+" enabled it. It is now a MODAL owned by the app shell: a tab the user can
+   * see but never click taught nothing, and a persistent tab holding transient form state had to
+   * defend itself against document-activation resets. The `gated` support below is left in place
+   * for any future tab that needs it.
    */
-  // { title: 'Standalone', icon: 'icon-ColorVar', component: StandaloneSeparationComponent, gated: true }
  ];
 
  menuOptions = [
@@ -86,7 +90,7 @@ export class TabNavigatorComponent implements OnChanges {
   * clickable.
   */
  isTabDisabled(tab: Tab): boolean {
-  return !!tab.gated && !this.standaloneEnabled;
+  return !!tab.gated && !this.gateOpen;
  }
 
  handleTabClick(index: number): void {

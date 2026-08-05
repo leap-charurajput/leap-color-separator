@@ -1687,6 +1687,421 @@ function bumpSeparationVersionOnVersionDoc(versionDoc, graphicName, profileName)
  return nextVersion;
 }
 
+/*
+ * ---------------------------------------------------------------------------
+ * Separation sidecar registry
+ * ---------------------------------------------------------------------------
+ * Why this exists: the separated .ai no longer has to live at the derived
+ * 09 SEPARATIONS/[League]/[Team]/[Graphic]/ path. Once it can sit at an
+ * arbitrary Export-Settings location, every flow that used to DERIVE facts
+ * from the document's folder depth breaks — "does a separation exist?",
+ * "open it", "delete it", "what version is next?", and the team-JSON lookup
+ * on reopen (which walks UP from the doc to 01 TEAMOUTS/<league>/JSON/).
+ *
+ * The fix is to stop deriving and start recording. Every separation writes the
+ * SAME descriptor to two places:
+ *
+ *   1. Beside the separated file, as "<sepBaseName>.json" — REOPEN context.
+ *      Answers "where did I come from?" for a document that may have been
+ *      moved anywhere. Read when a separation doc is opened.
+ *
+ *   2. Flat inside 09 SEPARATIONS/ — the REGISTRY. Answers "which separations
+ *      exist and where are their files?" without scanning export folders, so
+ *      the Separations tab can list/open/delete and versioning can scan one
+ *      flat folder instead of a nested tree.
+ *
+ * Both copies carry separationFilePath, so either one alone is enough to find
+ * the .ai. The registry is keyed by league+team+graphic+profile so two teams
+ * sharing a graphic name never collide.
+ *
+ * The descriptor is advisory, never authoritative: every reader treats a
+ * missing/stale sidecar as "fall back to the legacy derivation" so existing
+ * LEAP documents produced before this change keep working unchanged.
+ */
+
+var SEPARATION_REGISTRY_FOLDER_NAME = "09 SEPARATIONS";
+var SEPARATION_SIDECAR_EXTENSION = ".json";
+
+/* Flat-registry file names must survive being a single path segment. */
+function sanitizeSeparationKeyPart(value) {
+ if (value == null) {
+  return "";
+ }
+ var text = String(value).replace(/^\s+|\s+$/g, "");
+ if (!text) {
+  return "";
+ }
+ /* Whitelist: avoids putting a slash inside a regex char class, which the
+    ExtendScript regex-literal parser mishandles. */
+ return text.replace(/[^A-Za-z0-9._-]+/g, "_");
+}
+
+/*
+ * Registry key for a separation. Includes league + team so the same graphic
+ * name under two teams stays distinct, and the profile code so one graphic
+ * separated under two profiles keeps two independent entries (matching the
+ * graphic+profile identity findSeparationEntryIndex already uses for XMP).
+ */
+function buildSeparationRegistryKey(league, teamCode, graphicName, profileCode) {
+ var parts = [];
+ var leaguePart = sanitizeSeparationKeyPart(league);
+ var teamPart = sanitizeSeparationKeyPart(teamCode);
+ var graphicPart = sanitizeSeparationKeyPart(graphicName);
+ var profilePart = sanitizeSeparationKeyPart(profileCode);
+ if (leaguePart) { parts.push(leaguePart); }
+ if (teamPart) { parts.push(teamPart); }
+ if (graphicPart) { parts.push(graphicPart.toUpperCase()); }
+ if (profilePart) { parts.push(profilePart); }
+ if (!parts.length) {
+  return "";
+ }
+ return parts.join("__");
+}
+
+/*
+ * The flat registry folder: <jobRoot>/09 SEPARATIONS. Created on demand.
+ * Returns null when the root is unusable, so callers can skip the registry
+ * write without failing the separation itself.
+ */
+function getSeparationRegistryFolder(rootFolder, createIfMissing) {
+ try {
+  if (!rootFolder || !rootFolder.fsName) {
+   return null;
+  }
+  var registryFolder = new Folder(rootFolder.fsName + "/" + SEPARATION_REGISTRY_FOLDER_NAME);
+  if (!registryFolder.exists) {
+   if (!createIfMissing) {
+    return null;
+   }
+   if (!registryFolder.create()) {
+    return null;
+   }
+  }
+  return registryFolder;
+ } catch (e) {
+  return null;
+ }
+}
+
+/* Read + parse one sidecar file. Returns null on any problem (never throws). */
+function readSeparationSidecarFile(sidecarFile) {
+ try {
+  if (!sidecarFile || !sidecarFile.exists) {
+   return null;
+  }
+  sidecarFile.encoding = "UTF-8";
+  if (!sidecarFile.open("r")) {
+   return null;
+  }
+  var contents = sidecarFile.read();
+  sidecarFile.close();
+  if (!contents) {
+   return null;
+  }
+  var parsed = JSON.parse(contents);
+  if (!parsed || typeof parsed !== "object") {
+   return null;
+  }
+  return parsed;
+ } catch (e) {
+  try { sidecarFile.close(); } catch (closeErr) { }
+  return null;
+ }
+}
+
+/* Write one sidecar file. Returns true only when the bytes actually landed. */
+function writeSeparationSidecarFile(sidecarFile, data) {
+ try {
+  if (!sidecarFile) {
+   return false;
+  }
+  var parent = sidecarFile.parent;
+  if (parent && !parent.exists) {
+   if (!parent.create()) {
+    return false;
+   }
+  }
+  sidecarFile.encoding = "UTF-8";
+  if (!sidecarFile.open("w")) {
+   return false;
+  }
+  sidecarFile.write(JSON.stringify(data, null, 2));
+  sidecarFile.close();
+  return true;
+ } catch (e) {
+  try { sidecarFile.close(); } catch (closeErr) { }
+  return false;
+ }
+}
+
+/*
+ * Assemble the descriptor. `info` carries whatever the caller knows; missing
+ * fields are written as "" rather than omitted so a reader can distinguish
+ * "recorded as empty" from "written by an older build".
+ */
+function buildSeparationSidecarData(info) {
+ var src = info || {};
+ var version = parseInt(src.separationVersion, 10);
+ if (isNaN(version) || version < 1) {
+  version = 1;
+ }
+ var stamp = "";
+ try { stamp = new Date().toString(); } catch (eDate) { stamp = ""; }
+ return {
+  /* Schema marker so a future format change can be detected and migrated. */
+  sidecarVersion: 1,
+  /* --- reopen context: how to get back to the LEAP source data --- */
+  jobRoot: src.jobRoot != null ? String(src.jobRoot) : "",
+  teamoutsRoot: src.teamoutsRoot != null ? String(src.teamoutsRoot) : "",
+  separationsRoot: src.separationsRoot != null ? String(src.separationsRoot) : "",
+  teamJsonPath: src.teamJsonPath != null ? String(src.teamJsonPath) : "",
+  sourceDocumentPath: src.sourceDocumentPath != null ? String(src.sourceDocumentPath) : "",
+  /* --- identity --- */
+  league: src.league != null ? String(src.league) : "",
+  teamCode: src.teamCode != null ? String(src.teamCode) : "",
+  graphicName: src.graphicName != null ? String(src.graphicName) : "",
+  profileName: src.profileName != null ? String(src.profileName) : "",
+  profileCode: src.profileCode != null ? String(src.profileCode) : "",
+  separationVersion: version,
+  /* --- where the separated .ai actually is (the whole point) --- */
+  separationFilePath: src.separationFilePath != null ? String(src.separationFilePath) : "",
+  /*
+   * True when the file was CREATED at the Export-Settings "Separation file path" location, so the
+   * export-time copy must be skipped. This is a recorded flag rather than a source==dest path
+   * comparison because a RELATIVE template resolves against the document's own folder: once the file
+   * lives at <legacy>/<relative>, re-resolving at export time would nest it again
+   * (<legacy>/<relative>/<relative>) on every export. A separation that fell back to the legacy
+   * folder records false and still gets copied as before.
+   */
+  createdAtConfiguredPath: src.createdAtConfiguredPath === true,
+  updatedAt: stamp
+ };
+}
+
+/*
+ * Write the descriptor to BOTH locations. Best-effort by design: a separation
+ * that succeeded must not be reported as failed because a sidecar write lost a
+ * race with a locked network folder. Returns a small report so the caller can
+ * log which copies landed.
+ */
+function writeSeparationSidecar(info) {
+ var data = buildSeparationSidecarData(info);
+ var report = { data: data, besideFile: "", registryFile: "", besideWritten: false, registryWritten: false };
+
+ /* (1) Beside the separated file, same base name. */
+ try {
+  if (data.separationFilePath) {
+   var sepFile = new File(data.separationFilePath);
+   var sepBase = sepFile.name.replace(/\.[^.]+$/, "");
+   if (sepBase) {
+    var besideFile = new File(sepFile.parent.fsName + "/" + sepBase + SEPARATION_SIDECAR_EXTENSION);
+    report.besideWritten = writeSeparationSidecarFile(besideFile, data);
+    report.besideFile = besideFile.fsName;
+   }
+  }
+ } catch (eBeside) { }
+
+ /* (2) Flat in 09 SEPARATIONS/ — the discovery registry. */
+ try {
+  var registryKey = buildSeparationRegistryKey(data.league, data.teamCode, data.graphicName, data.profileCode);
+  if (registryKey) {
+   var registryFolder = null;
+   if (data.separationsRoot) {
+    registryFolder = new Folder(data.separationsRoot);
+    if (!registryFolder.exists && !registryFolder.create()) {
+     registryFolder = null;
+    }
+   }
+   if (!registryFolder && data.jobRoot) {
+    registryFolder = getSeparationRegistryFolder(new Folder(data.jobRoot), true);
+   }
+   if (registryFolder) {
+    var registryFile = new File(registryFolder.fsName + "/" + registryKey + SEPARATION_SIDECAR_EXTENSION);
+    report.registryWritten = writeSeparationSidecarFile(registryFile, data);
+    report.registryFile = registryFile.fsName;
+   }
+  }
+ } catch (eRegistry) { }
+
+ return report;
+}
+
+/* One registry entry by identity, or null when it was never recorded. */
+function readSeparationRegistryEntry(rootFolder, league, teamCode, graphicName, profileCode) {
+ try {
+  var registryFolder = getSeparationRegistryFolder(rootFolder, false);
+  if (!registryFolder) {
+   return null;
+  }
+  var registryKey = buildSeparationRegistryKey(league, teamCode, graphicName, profileCode);
+  if (!registryKey) {
+   return null;
+  }
+  return readSeparationSidecarFile(
+   new File(registryFolder.fsName + "/" + registryKey + SEPARATION_SIDECAR_EXTENSION)
+  );
+ } catch (e) {
+  return null;
+ }
+}
+
+/* Every descriptor in the flat registry. Used for listing and version scans. */
+function readAllSeparationRegistryEntries(rootFolder) {
+ var entries = [];
+ try {
+  var registryFolder = getSeparationRegistryFolder(rootFolder, false);
+  if (!registryFolder) {
+   return entries;
+  }
+  var files = registryFolder.getFiles("*" + SEPARATION_SIDECAR_EXTENSION);
+  if (!files || !files.length) {
+   return entries;
+  }
+  for (var i = 0; i < files.length; i++) {
+   /* getFiles returns Folders too when a folder name ends in .json. */
+   if (!(files[i] instanceof File)) {
+    continue;
+   }
+   var parsed = readSeparationSidecarFile(files[i]);
+   if (parsed) {
+    entries.push(parsed);
+   }
+  }
+ } catch (e) { }
+ return entries;
+}
+
+/*
+ * The descriptor for an OPEN separation document: prefer the sidecar sitting
+ * beside it (correct even after the file was moved or mailed on), and fall
+ * back to the copy the document carries in its own XMP (correct even when the
+ * sidecar was left behind). Returns null for pre-sidecar documents.
+ */
+function readSeparationSidecarForDocument(doc) {
+ if (!doc) {
+  return null;
+ }
+ try {
+  if (doc.fullName && doc.fullName.fsName) {
+   var docFile = new File(doc.fullName);
+   var base = docFile.name.replace(/\.[^.]+$/, "");
+   if (base) {
+    var beside = readSeparationSidecarFile(
+     new File(docFile.parent.fsName + "/" + base + SEPARATION_SIDECAR_EXTENSION)
+    );
+    if (beside) {
+     return beside;
+    }
+   }
+  }
+ } catch (eBeside) { }
+ try {
+  var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
+  if (xmp.isXmpCreated && xmp.doesStructFieldExist("LEAPSeparationSourceContext")) {
+   var fromXmp = xmp.getStructField("LEAPSeparationSourceContext", true);
+   if (fromXmp && typeof fromXmp === "object") {
+    return fromXmp;
+   }
+  }
+ } catch (eXmp) { }
+ return null;
+}
+
+/*
+ * Mirror the reopen context into the separated document's own XMP, so the file
+ * stays self-sufficient if it is moved or mailed without its sidecar.
+ */
+function persistSeparationSourceContextOnDoc(doc, data) {
+ try {
+  if (!doc || !data) {
+   return false;
+  }
+  var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
+  if (!xmp.isXmpCreated) {
+   return false;
+  }
+  xmp.setStructField("LEAPSeparationSourceContext", data, true, false);
+  xmp.commit();
+  return true;
+ } catch (e) {
+  return false;
+ }
+}
+
+/*
+ * LEAP source context for a document that may be a separation file living ANYWHERE.
+ *
+ * Every reopen path in the host derives league / teamCode / rootFolder by walking UP from the
+ * document and assuming …/09 SEPARATIONS/<league>/<team>/<graphic>/doc.ai. A separation written to an
+ * Export-Settings location fails that indexOf("09 SEPARATIONS") test, silently falls into the
+ * "regular team document" branch, and mis-derives every folder — which surfaces to the user as
+ * "JSON file not found or invalid for document: …".
+ *
+ * This returns whatever the sidecar/XMP recorded so callers can prefer it and keep the legacy walk as
+ * the fallback. Fields are "" / null when nothing was recorded (pre-sidecar documents), so a caller
+ * that checks `fromSidecar` behaves exactly as before for existing files.
+ */
+function resolveSeparationSourceContext(doc) {
+ var ctx = {
+  fromSidecar: false,
+  teamJsonPath: "",
+  league: "",
+  teamCode: "",
+  graphicName: "",
+  rootFolder: null,
+  leagueFolder: null
+ };
+ try {
+  var sidecar = readSeparationSidecarForDocument(doc);
+  if (!sidecar) {
+   return ctx;
+  }
+  ctx.teamJsonPath = sidecar.teamJsonPath ? String(sidecar.teamJsonPath) : "";
+  ctx.league = sidecar.league ? String(sidecar.league) : "";
+  ctx.teamCode = sidecar.teamCode ? String(sidecar.teamCode) : "";
+  ctx.graphicName = sidecar.graphicName ? String(sidecar.graphicName) : "";
+  if (sidecar.jobRoot) {
+   ctx.rootFolder = new Folder(String(sidecar.jobRoot));
+  }
+  var teamoutsRoot = sidecar.teamoutsRoot ? String(sidecar.teamoutsRoot) : "";
+  if (!teamoutsRoot && ctx.rootFolder) {
+   teamoutsRoot = ctx.rootFolder.fsName + "/01 TEAMOUTS";
+  }
+  if (teamoutsRoot && ctx.league) {
+   ctx.leagueFolder = new Folder(teamoutsRoot + "/" + ctx.league);
+  }
+  ctx.fromSidecar = !!(ctx.teamJsonPath || ctx.leagueFolder);
+ } catch (e) { }
+ return ctx;
+}
+
+/*
+ * Next version for graphic+profile, scanning the FLAT registry instead of the
+ * nested folder tree. Takes the max of the registry value and whatever the
+ * team document's XMP already recorded, so a job that predates the registry
+ * (or whose registry folder was cleared) never restarts at V1 and silently
+ * overwrites an existing separation.
+ */
+function getNextSeparationVersionFromRegistry(rootFolder, versionDoc, league, teamCode, graphicName, profileName, profileCode) {
+ var highest = 0;
+ try {
+  var entry = readSeparationRegistryEntry(rootFolder, league, teamCode, graphicName, profileCode);
+  if (entry) {
+   var fromRegistry = parseInt(entry.separationVersion, 10);
+   if (!isNaN(fromRegistry) && fromRegistry > highest) {
+    highest = fromRegistry;
+   }
+  }
+ } catch (eRegistry) { }
+ try {
+  var fromXmp = getNextSeparationVersion(versionDoc, graphicName, profileName) - 1;
+  if (fromXmp > highest) {
+   highest = fromXmp;
+  }
+ } catch (eXmp) { }
+ return highest + 1;
+}
+
 /** Find an open team version document (01 TEAMOUTS, not a separation file). */
 function findOpenVersionDocument() {
  var versionDoc = null;
@@ -1834,7 +2249,45 @@ function updateVariablesInDocument(doc, jsonData, styleCodes, profileMetadata) {
  }
 }
 
-function findAndReadJSONFile(docName, leagueFolder) {
+/*
+ * Read the team version JSON for a document.
+ *
+ * Normally the JSON is found by listing <leagueFolder>/JSON and matching a file name that CONTAINS
+ * the document name — which requires the caller to have derived leagueFolder by walking UP from the
+ * document (…/09 SEPARATIONS/<league>/<team>/<graphic>/doc.ai → 01 TEAMOUTS/<league>/JSON).
+ *
+ * That walk breaks for a separation written to an arbitrary Export-Settings location: the team JSON
+ * has not moved (it is still in 01 TEAMOUTS/<league>/JSON/), but the document no longer has a path
+ * relationship to it. So callers that know the recorded context may pass preferredJsonPath (from the
+ * separation sidecar / XMP) to read it directly. The directory scan remains the fallback, so LEAP
+ * documents and pre-sidecar files behave exactly as before.
+ *
+ * The resolved path is exposed as findAndReadJSONFile.lastResolvedPath so callers can record it in a
+ * sidecar (same convention as getTemplateFile.lastAttemptedPath).
+ */
+function findAndReadJSONFile(docName, leagueFolder, preferredJsonPath) {
+ findAndReadJSONFile.lastResolvedPath = "";
+
+ /* Recorded path first — correct even when the document sits outside the LEAP tree. */
+ if (preferredJsonPath) {
+  try {
+   var preferredFile = new File(String(preferredJsonPath));
+   if (preferredFile.exists) {
+    preferredFile.open('r');
+    var preferredContent = preferredFile.read();
+    preferredFile.close();
+    var preferredParsed = JSON.parse(preferredContent);
+    if (preferredParsed) {
+     findAndReadJSONFile.lastResolvedPath = preferredFile.fsName;
+     return preferredParsed;
+    }
+   }
+  } catch (ePreferred) { }
+ }
+
+ if (!leagueFolder || !leagueFolder.fsName) {
+  return null;
+ }
  var jsonFolder = new Folder(leagueFolder.fsName + "/JSON");
  if (!jsonFolder.exists) {
   return null;
@@ -1860,11 +2313,16 @@ function findAndReadJSONFile(docName, leagueFolder) {
  jsonFile.close();
 
  try {
-  return JSON.parse(jsonContent);
+  var parsed = JSON.parse(jsonContent);
+  if (parsed) {
+   findAndReadJSONFile.lastResolvedPath = jsonFile.fsName;
+  }
+  return parsed;
  } catch (e) {
   return null;
  }
 }
+findAndReadJSONFile.lastResolvedPath = "";
 
 function decodeURIString(str) {
  if (!str) return str;

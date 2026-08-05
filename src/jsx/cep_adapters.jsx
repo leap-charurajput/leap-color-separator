@@ -1639,14 +1639,19 @@ function applyProfileUnderbaseLayers(profileMetadata) {
  } catch (e) { }
 }
 /*
- * Resolve the separation file NAME from the Export Settings "Separation file path" pattern
- * (separationPreviewFilePath). Only the basename is used — the folder stays the standard
- * 09 SEPARATIONS/[League]/[Team]/[Graphic]/ structure. Tokens [Name] are filled from the team JSON
- * batch row (batch_excel_information / batch_excel_records) plus a few known fields (position,
- * profile). Returns "" if nothing usable resolves (caller then keeps the default name).
+ * Build the token lookup used to resolve the Export Settings "Separation file path" pattern at
+ * SEPARATION time. Values come from the team JSON batch row (batch_excel_information /
+ * batch_excel_records) plus a few known fields (position abbreviation, profile, graphic).
+ *
+ * NOTE this is deliberately a SUBSET of the panel-side getExportVariableContext vocabulary: the
+ * panel resolves export paths against a finished document, so it can also read [CONTROL] / [Version]
+ * from the CONTROL_NUMBER / VERSION_NUMBER text frames. Those frames still hold their bracketed
+ * placeholders while the separation is being built, so such tokens CANNOT resolve here. Callers must
+ * treat an unresolved token as "fall back to the legacy folder" rather than writing the literal
+ * "[CONTROL]" into a path. Confirmed with the user: separation path patterns only use tokens that are
+ * known before the separation runs.
  */
-function resolveSeparationFileNameFromPattern(pattern, jsonData, profileMetadata) {
- if (!pattern) return "";
+function buildSeparationTokenLookup(jsonData, profileMetadata, docName) {
  var meta = profileMetadata || {};
 
  var batch = {};
@@ -1680,7 +1685,33 @@ function resolveSeparationFileNameFromPattern(pattern, jsonData, profileMetadata
   "art code": meta.graphicName != null ? String(meta.graphicName) : ""
  };
 
- function lookupSepToken(name) {
+ /*
+  * League / Team Code / document-name aliases, mirroring the panel's getExportVariableContext (which
+  * resolves [League] and [Team Code] from the team JSON, not just the batch row). Without these, the
+  * natural folder pattern "/[League]/[Team Code]/…" would fail to resolve and silently fall back to
+  * the legacy tree. These tokens previously resolved to "" in the NAME resolver, so the only patterns
+  * whose output changes are ones that were producing blanks.
+  */
+ try {
+  var leagueValue = findValueInJSON(jsonData, "League");
+  if (!leagueValue) { leagueValue = batch["League_desc"] || batch["League"] || ""; }
+  if (leagueValue) { extra["league"] = String(leagueValue); }
+
+  var teamCodeValue = findValueInJSON(jsonData, "TeamCode");
+  if (!teamCodeValue) { teamCodeValue = batch["Team Code"] || batch["Lineup Org Code"] || ""; }
+  if (teamCodeValue) {
+   extra["team code"] = String(teamCodeValue);
+   extra["teamcode"] = String(teamCodeValue);
+  }
+ } catch (eIdent) { }
+
+ if (docName != null && String(docName) !== "") {
+  extra["document name"] = String(docName);
+  extra["doc name"] = String(docName);
+  extra["file name"] = String(docName);
+ }
+
+ return function lookupSepToken(name) {
   var key = String(name).replace(/^\s+|\s+$/g, "");
   var lk = key.toLowerCase();
   if (extra.hasOwnProperty(lk)) return extra[lk];
@@ -1689,7 +1720,181 @@ function resolveSeparationFileNameFromPattern(pattern, jsonData, profileMetadata
    if (batch.hasOwnProperty(bk) && String(bk).toLowerCase() === lk) return String(batch[bk]);
   }
   return "";
+ };
+}
+
+/*
+ * Sanitize one resolved token value for use inside a path segment. Mirrors the panel's
+ * sanitizeExportPathValue so a pattern resolves to the SAME folder/file name whether it was
+ * resolved here (separation time) or there (export time): runs of \ / : * ? " < > | collapse to a
+ * single "-", and spaces are preserved.
+ *
+ * Implemented as an explicit character scan instead of a regex character class, because the
+ * ExtendScript regex-literal parser mishandles a forward slash inside a class (see the 2026-07-22
+ * "Expected: )" fix).
+ */
+function sanitizeSeparationPathValue(value) {
+ var text;
+ if (value instanceof Array) {
+  text = value.join("_");
+ } else if (value && typeof value === "object") {
+  text = JSON.stringify(value);
+ } else {
+  text = String(value == null ? "" : value);
  }
+ text = text.replace(/^\s+|\s+$/g, "");
+ var illegal = "\\/:*?\"<>|";
+ var out = "";
+ var lastWasIllegal = false;
+ for (var i = 0; i < text.length; i++) {
+  var ch = text.charAt(i);
+  if (illegal.indexOf(ch) !== -1) {
+   if (!lastWasIllegal) {
+    out += "-";
+    lastWasIllegal = true;
+   }
+  } else {
+   out += ch;
+   lastWasIllegal = false;
+  }
+ }
+ return out;
+}
+
+/*
+ * Resolve the separation output FOLDER from the Export Settings "Separation file path" pattern, so
+ * the separated .ai is created where the user configured it instead of in the derived
+ * 09 SEPARATIONS/[League]/[Team]/[Graphic]/ tree.
+ *
+ * Path semantics mirror the panel's buildExportDestinationFromResolvedPath so an existing template
+ * keeps resolving to the same place it does today:
+ *   - a LEADING "/" means "relative to the 09 SEPARATIONS folder" (not an absolute POSIX path);
+ *   - "~/…" or "C:/…" is absolute and used as-is;
+ *   - anything else is relative to what would have been the separation document's own folder, i.e.
+ *     the legacy graphic folder (obtained lazily via legacyFolderFactory so the nested tree is only
+ *     created when a relative template actually needs it).
+ *
+ * Returns null when the pattern has no folder part, or when any token fails to resolve — the caller
+ * then falls back to the legacy folder rather than creating a directory literally named "[Token]".
+ */
+function resolveSeparationFolderFromPattern(pattern, jsonData, profileMetadata, rootFolder, legacyFolderFactory, docName) {
+ if (!pattern) return null;
+ try {
+  var lookupSepToken = buildSeparationTokenLookup(jsonData, profileMetadata, docName);
+
+  /* Avoid a forward slash inside a regex char class: normalize via string ops. */
+  var normalized = String(pattern).split("\\").join("/").replace(/^\s+|\s+$/g, "");
+  if (!normalized) return null;
+
+  var endsWithSlash = normalized.charAt(normalized.length - 1) === "/";
+  var segs = normalized.split("/");
+  while (segs.length > 0 && segs[segs.length - 1] === "") {
+   segs.pop();
+  }
+  if (!segs.length) return null;
+
+  var rootRelativeToSeparations = segs[0] === "";
+  if (rootRelativeToSeparations) {
+   segs.shift();
+  }
+
+  /* Drop the file name — the NAME is resolved separately by
+     resolveSeparationFileNameFromPattern. A trailing slash means it was all folders. */
+  if (!endsWithSlash && segs.length > 0) {
+   segs.pop();
+  }
+  if (!segs.length && !rootRelativeToSeparations) {
+   /* Pattern was a bare file name: no folder part, keep the legacy folder. */
+   return null;
+  }
+
+  /*
+   * A token that resolves to nothing makes the whole folder unusable — creating a directory
+   * literally named "[CONTROL]", or silently collapsing a segment, are both worse than falling
+   * back to the legacy tree. The replace closure sets this flag rather than embedding a sentinel
+   * character in the string.
+   */
+  var hasUnresolvedToken = false;
+  var resolvedSegs = [];
+  for (var i = 0; i < segs.length; i++) {
+   if (segs[i] === "") continue;
+   var seg = segs[i].replace(/\[([^\]]+)\]/g, function (m, name) {
+    var value = lookupSepToken(name);
+    if (value == null || String(value) === "") {
+     hasUnresolvedToken = true;
+     return "";
+    }
+    return sanitizeSeparationPathValue(value);
+   });
+   if (hasUnresolvedToken) {
+    return null;
+   }
+   seg = seg.replace(/^\s+|\s+$/g, "");
+   if (seg) {
+    resolvedSegs.push(seg);
+   }
+  }
+
+  var dirPath = resolvedSegs.join("/");
+  var targetPath = "";
+
+  if (rootRelativeToSeparations) {
+   if (!rootFolder || !rootFolder.fsName) return null;
+   var separationsRoot = rootFolder.fsName + "/09 SEPARATIONS";
+   targetPath = dirPath ? (separationsRoot + "/" + dirPath) : separationsRoot;
+  } else if (dirPath && isAbsoluteSeparationPath(dirPath)) {
+   targetPath = dirPath;
+  } else if (dirPath) {
+   var legacyFolder = legacyFolderFactory ? legacyFolderFactory() : null;
+   if (!legacyFolder || !legacyFolder.fsName) return null;
+   targetPath = legacyFolder.fsName + "/" + dirPath;
+  } else {
+   return null;
+  }
+
+  var targetFolder = new Folder(targetPath);
+  if (!ensureSeparationFolderExists(targetFolder)) {
+   return null;
+  }
+  return targetFolder;
+ } catch (e) {
+  return null;
+ }
+}
+
+/* "~/…", "/…" or "C:/…" — mirrors the panel's isAbsoluteExportPath. */
+function isAbsoluteSeparationPath(pathValue) {
+ var text = String(pathValue || "");
+ if (text.length > 1 && text.charAt(0) === "~" && text.charAt(1) === "/") return true;
+ if (text.charAt(0) === "/") return true;
+ if (/^[A-Za-z]:/.test(text) && (text.charAt(2) === "/" || text.charAt(2) === "\\")) return true;
+ return false;
+}
+
+/* Create a folder and every missing parent. Mirrors the panel's ensureExportFolder. */
+function ensureSeparationFolderExists(folder) {
+ try {
+  if (!folder) return false;
+  if (folder.exists) return true;
+  var parent = folder.parent;
+  if (parent && !parent.exists) {
+   if (!ensureSeparationFolderExists(parent)) return false;
+  }
+  return folder.create();
+ } catch (e) {
+  return false;
+ }
+}
+
+/*
+ * Resolve the separation file NAME from the Export Settings "Separation file path" pattern
+ * (separationPreviewFilePath). Only the basename is used here; the FOLDER is resolved separately by
+ * resolveSeparationFolderFromPattern. Returns "" if nothing usable resolves (caller then keeps the
+ * default name).
+ */
+function resolveSeparationFileNameFromPattern(pattern, jsonData, profileMetadata, docName) {
+ if (!pattern) return "";
+ var lookupSepToken = buildSeparationTokenLookup(jsonData, profileMetadata, docName);
 
  var resolved = String(pattern).replace(/\[([^\]]+)\]/g, function (m, name) {
   return lookupSepToken(name);
@@ -1850,7 +2055,8 @@ function resolveFormattedInkName(name, format) {
  if (!fmt) {
   fmt = "PANTONE ### C";
  }
- return fmt.replace(/###/g, token) + hitSuffix;
+ /* Substitute "###" and the LEGACY "XXX" token (older Profiles.json entries like "LS XXX C"). */
+ return fmt.replace(/###/g, token).replace(/XXX/g, token) + hitSuffix;
 }
 
 /**
@@ -1965,6 +2171,9 @@ function handlePerformSeparation(params_string) {
     error: "JSON file not found or invalid for document: " + docName
    });
   }
+  /* Captured immediately: later findAndReadJSONFile calls overwrite lastResolvedPath. Recorded in the
+     sidecar so a reopened separation finds its team JSON without walking up from its own path. */
+  var teamJsonPath = findAndReadJSONFile.lastResolvedPath || "";
   var league = findValueInJSON(jsonData, "League");
   var teamCode = findValueInJSON(jsonData, "TeamCode");
   if (!league || !teamCode) {
@@ -1981,7 +2190,21 @@ function handlePerformSeparation(params_string) {
   var profileNameForVersion = profileMetadata.profileName != null
    ? String(profileMetadata.profileName)
    : "";
-  var nextSeparationVersion = getNextSeparationVersion(activeDoc, graphicName, profileNameForVersion);
+  /*
+   * Version basis is the FLAT sidecar registry, max'd with the team document's XMP. The old
+   * XMP-only basis was fine while every separation lived at a derived path, but a separation written
+   * to an arbitrary Export-Settings location is no longer discoverable that way — without the
+   * registry a re-separation would restart at V1 and overwrite the previous file.
+   */
+  var nextSeparationVersion = getNextSeparationVersionFromRegistry(
+   rootFolder,
+   activeDoc,
+   league,
+   teamCode,
+   graphicName,
+   profileNameForVersion,
+   profileMetadata.profileCode
+  );
   profileMetadata.separationVersion = nextSeparationVersion;
   appendLeapSepLog(
    "Separation version for this run: " + formatSeparationVersionLabel(nextSeparationVersion)
@@ -1994,16 +2217,54 @@ function handlePerformSeparation(params_string) {
     bodyColorFromXMP = origXmp.getStructField("BodyColor", true);
    }
   } catch (e) { }
-  var graphicNameFolder = createSeparationsFolders(rootFolder, league, teamCode, graphicName);
-  /* Separation file NAME from the Export Settings "Separation file path" pattern (basename only);
-     folder stays the 09 SEPARATIONS structure above. Falls back to the default name if unresolved. */
+  /*
+   * Separation output location. BOTH the folder and the name now come from the Export Settings
+   * "Separation file path" pattern, so the separated .ai is created where the user configured it
+   * and no duplicate copy is needed at export time.
+   *
+   * The legacy 09 SEPARATIONS/[League]/[Team]/[Graphic]/ tree is built LAZILY: only when a relative
+   * pattern needs it as its base, or when folder resolution fails and we fall back to it. That keeps
+   * empty derived folders from being created for jobs that write elsewhere.
+   */
+  var legacyGraphicFolder = null;
+  function getLegacyGraphicFolder() {
+   if (!legacyGraphicFolder) {
+    legacyGraphicFolder = createSeparationsFolders(rootFolder, league, teamCode, graphicName);
+   }
+   return legacyGraphicFolder;
+  }
+
   var separationFileName = "";
   try {
    if (profileMetadata && profileMetadata.separationFileNamePattern) {
-    separationFileName = resolveSeparationFileNameFromPattern(profileMetadata.separationFileNamePattern, jsonData, profileMetadata);
+    separationFileName = resolveSeparationFileNameFromPattern(profileMetadata.separationFileNamePattern, jsonData, profileMetadata, docName);
    }
   } catch (eSepName) { separationFileName = ""; }
-  var sepDoc = copyAndPrepareSEPDocument(templateFile, graphicNameFolder, docName, jsonData, styleCodes, profileMetadata, bodyColorFromXMP, separationFileName);
+
+  var separationTargetFolder = null;
+  try {
+   if (profileMetadata && profileMetadata.separationFileNamePattern) {
+    separationTargetFolder = resolveSeparationFolderFromPattern(
+     profileMetadata.separationFileNamePattern,
+     jsonData,
+     profileMetadata,
+     rootFolder,
+     getLegacyGraphicFolder,
+     docName
+    );
+   }
+  } catch (eSepFolder) { separationTargetFolder = null; }
+  /* Remembered so the sidecar can tell the export-time copy to stand down. */
+  var createdAtConfiguredPath = !!separationTargetFolder;
+  if (!separationTargetFolder) {
+   separationTargetFolder = getLegacyGraphicFolder();
+  }
+  appendLeapSepLog(
+   "Separation output folder: " + separationTargetFolder.fsName +
+   (createdAtConfiguredPath ? " (from Export Settings pattern)" : " (legacy structure)")
+  );
+
+  var sepDoc = copyAndPrepareSEPDocument(templateFile, separationTargetFolder, docName, jsonData, styleCodes, profileMetadata, bodyColorFromXMP, separationFileName);
   if (!sepDoc) {
    return JSON.stringify({
     success: false,
@@ -2298,6 +2559,48 @@ function handlePerformSeparation(params_string) {
    savePathsDebug.push("Error saving separation path: " + e.message);
   }
 
+  /*
+   * Record the separation in the sidecar registry: one descriptor written beside the separated file
+   * (reopen context) and flat inside 09 SEPARATIONS (discovery + version scan), plus a copy in the
+   * separated document's own XMP so it survives being moved without its sidecar. Best-effort — a
+   * completed separation is never reported as failed because a sidecar write lost a race with a
+   * locked network folder.
+   */
+  var separationSidecar = null;
+  try {
+   var sidecarReport = writeSeparationSidecar({
+    jobRoot: rootFolder && rootFolder.fsName ? rootFolder.fsName : "",
+    teamoutsRoot: teamOutsFolder && teamOutsFolder.fsName ? teamOutsFolder.fsName : "",
+    separationsRoot: rootFolder && rootFolder.fsName ? (rootFolder.fsName + "/09 SEPARATIONS") : "",
+    teamJsonPath: teamJsonPath,
+    sourceDocumentPath: originalDocFile && originalDocFile.fsName ? originalDocFile.fsName : "",
+    league: league,
+    teamCode: teamCode,
+    graphicName: graphicName,
+    profileName: profileMetadata ? profileMetadata.profileName : "",
+    profileCode: profileMetadata ? profileMetadata.profileCode : "",
+    separationVersion: nextSeparationVersion,
+    separationFilePath: sepDocPath,
+    createdAtConfiguredPath: createdAtConfiguredPath
+   });
+   if (sidecarReport) {
+    separationSidecar = {
+     besideFile: sidecarReport.besideFile,
+     registryFile: sidecarReport.registryFile,
+     besideWritten: sidecarReport.besideWritten,
+     registryWritten: sidecarReport.registryWritten
+    };
+    persistSeparationSourceContextOnDoc(sepDoc, sidecarReport.data);
+    appendLeapSepLog(
+     "Separation sidecar: beside=" + (sidecarReport.besideWritten ? "ok" : "FAILED") +
+     " registry=" + (sidecarReport.registryWritten ? "ok" : "FAILED") +
+     " (" + sidecarReport.registryFile + ")"
+    );
+   }
+  } catch (eSidecar) {
+   appendLeapSepLog("Separation sidecar write error: " + (eSidecar.message || eSidecar.toString()));
+  }
+
   try {
    app.activeDocument = sepDoc;
   } catch (e) {
@@ -2310,6 +2613,9 @@ function handlePerformSeparation(params_string) {
    aiFilePath: aiFilePath,
    separatedDocumentPath: sepDocPath
   };
+  if (separationSidecar) {
+   response.separationSidecar = separationSidecar;
+  }
   if (savePathsDebug && savePathsDebug.length > 0) {
    response.savePathsDebug = savePathsDebug;
   }
@@ -3321,8 +3627,13 @@ function handleGetTemplateInfo(params_string) {
   var docFile = new File(activeDoc.fullName);
   var docName = docFile.name.replace(/\.[^\.]+$/, '');
   var docPath = docFile.fsName;
+  /* Recorded context first: a separation may live outside 09 SEPARATIONS, where the path walk below
+     cannot reach 01 TEAMOUTS. Falls through to the legacy derivation for pre-sidecar documents. */
+  var sepContext = resolveSeparationSourceContext(activeDoc);
   var leagueFolder;
-  if (docPath.indexOf("09 SEPARATIONS") !== -1) {
+  if (sepContext.leagueFolder) {
+   leagueFolder = sepContext.leagueFolder;
+  } else if (docPath.indexOf("09 SEPARATIONS") !== -1) {
    var graphicFolder = docFile.parent;
    var teamCodeFolder = graphicFolder.parent;
    var leagueSepFolder = teamCodeFolder.parent;
@@ -3335,7 +3646,7 @@ function handleGetTemplateInfo(params_string) {
    var aiFolder = docFile.parent;
    leagueFolder = aiFolder.parent;
   }
-  var jsonData = findAndReadJSONFile(docName, leagueFolder);
+  var jsonData = findAndReadJSONFile(docName, leagueFolder, sepContext.teamJsonPath);
   if (!jsonData) {
    return JSON.stringify({
     success: false,
@@ -3822,7 +4133,16 @@ function handleGetGraphicSwatches(params_string) {
   }
 
   // Fallback to Graphics JSON file approach for non-separated documents or if SeparatedLayerNames not found
-  if (docPath.indexOf("09 SEPARATIONS") !== -1) {
+  /* Recorded context first: a separation written to an Export-Settings location has no path
+     relationship to 02 GRAPHICS / 01 TEAMOUTS, so neither walk below can resolve it. The legacy
+     branches stay unchanged for pre-sidecar documents. */
+  var sepContext = resolveSeparationSourceContext(activeDoc);
+  if (sepContext.rootFolder && sepContext.league && sepContext.teamCode) {
+   rootFolder = sepContext.rootFolder;
+   league = sepContext.league;
+   teamCode = sepContext.teamCode;
+   leagueFolder = sepContext.leagueFolder;
+  } else if (docPath.indexOf("09 SEPARATIONS") !== -1) {
    var graphicFolder = docFile.parent;
    var teamCodeFolder = graphicFolder.parent;
    var leagueSepFolder = teamCodeFolder.parent;
@@ -3835,7 +4155,7 @@ function handleGetGraphicSwatches(params_string) {
    leagueFolder = aiFolder.parent;
    var teamOutsFolder = leagueFolder.parent;
    rootFolder = teamOutsFolder.parent;
-   var jsonData = findAndReadJSONFile(docName, leagueFolder);
+   var jsonData = findAndReadJSONFile(docName, leagueFolder, sepContext.teamJsonPath);
    if (!jsonData) {
     return JSON.stringify({
      success: false,
@@ -4979,6 +5299,187 @@ function handleLoadSeparationPaths(params_string) {
   });
  }
 }
+/*
+ * ---------------------------------------------------------------------------
+ * Standalone job metadata on the SOURCE document (XMP)
+ * ---------------------------------------------------------------------------
+ * The standalone (non-LEAP) flow has no team JSON and no version document, so the form values the
+ * user typed have nowhere to live except a sidecar next to the exported ASSETS .ai. That sidecar is
+ * keyed by the EXPORT location, which means the source document itself carries no record that a
+ * standalone job exists for it — the Separations tab therefore cannot show a standalone job the way
+ * it shows a LEAP one (which it reads from the version document's XMP).
+ *
+ * These handlers stamp the job onto the SOURCE document instead, mirroring how the LEAP flow persists
+ * to the version document. The sidecar is still written: XMP travels inside the document (survives the
+ * file being moved or re-saved elsewhere), the sidecar survives XMP being stripped and is readable
+ * without opening Illustrator.
+ *
+ * SAFETY: this uses its OWN XMP struct field, "LEAPStandaloneJobs", and never reads or writes any
+ * field the LEAP path uses (LEAPSeparationProfileData, SeparationProfileMetadata, SeparatedLayerNames,
+ * DocumentType, BodyColor, LEAPSeparationSourceContext). Both handlers are new; no existing handler,
+ * and nothing in handlePerformSeparation, is touched.
+ */
+
+var STANDALONE_JOBS_XMP_FIELD = "LEAPStandaloneJobs";
+
+/* The open document at documentPath, or the active document when no path is given / not found. */
+function findOpenDocumentByPath(documentPath) {
+ try {
+  if (documentPath) {
+   var wanted = String(documentPath).split("\\").join("/").toLowerCase();
+   for (var d = 0; d < app.documents.length; d++) {
+    var doc = app.documents[d];
+    if (!doc || !doc.fullName || !doc.fullName.fsName) continue;
+    if (String(doc.fullName.fsName).split("\\").join("/").toLowerCase() === wanted) {
+     return doc;
+    }
+   }
+  }
+ } catch (e) { }
+ try {
+  return app.documents.length ? app.activeDocument : null;
+ } catch (e2) {
+  return null;
+ }
+}
+
+function readStandaloneJobsFromDoc(doc) {
+ var jobs = [];
+ try {
+  var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
+  if (xmp.isXmpCreated && xmp.doesStructFieldExist(STANDALONE_JOBS_XMP_FIELD)) {
+   var existing = xmp.getStructField(STANDALONE_JOBS_XMP_FIELD, true);
+   if (existing instanceof Array) {
+    jobs = existing;
+   }
+  }
+ } catch (e) { }
+ return jobs;
+}
+
+/*
+ * Upsert one standalone job onto the source document, keyed by exportedFilePath so re-exporting the
+ * same selection replaces its entry instead of stacking duplicates. A source document can legitimately
+ * hold several jobs (different positions / selections), hence an array.
+ */
+function handleWriteStandaloneJobToXmp(params_string) {
+ try {
+  var params = JSON.parse(params_string);
+  var job = params.job;
+  if (!job || typeof job !== "object") {
+   return JSON.stringify({ success: false, error: "job is required" });
+  }
+  var doc = findOpenDocumentByPath(params.documentPath);
+  if (!doc) {
+   return JSON.stringify({ success: false, error: "Source document is not open" });
+  }
+  /*
+   * Refuse an UNSAVED document. XMP written to a document with no file on disk cannot be persisted
+   * (there is nothing to save into, and forcing a save would throw a Save As dialog at the user), so
+   * the stamp would look like it succeeded and then silently vanish. The panel blocks the "+" entry
+   * for an unsaved document too; this is the backstop.
+   */
+  if (!doc.fullName || !doc.fullName.fsName) {
+   return JSON.stringify({
+    success: false,
+    unsaved: true,
+    error: "The document must be saved before a standalone job can be recorded on it."
+   });
+  }
+  var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
+  if (!xmp.isXmpCreated) {
+   return JSON.stringify({ success: false, error: "Could not initialize XMP on the source document" });
+  }
+
+  var jobs = readStandaloneJobsFromDoc(doc);
+  /*
+   * Identity = exported file + PROFILE. Re-exporting the same selection under the same profile
+   * replaces its entry; the same graphic under a DIFFERENT profile is a new entry, which is what
+   * "Add Separation" produces (one exported .ai, several profile/style combinations) — mirroring the
+   * LEAP list, where a graphic can carry several profile rows.
+   */
+  var key = job.exportedFilePath != null ? String(job.exportedFilePath) : "";
+  var keyProfile = job.profileName != null ? String(job.profileName) : "";
+  var replacedAt = -1;
+  if (key) {
+   for (var i = 0; i < jobs.length; i++) {
+    var existingKey = jobs[i] && jobs[i].exportedFilePath != null ? String(jobs[i].exportedFilePath) : "";
+    var existingProfile = jobs[i] && jobs[i].profileName != null ? String(jobs[i].profileName) : "";
+    if (existingKey === key && existingProfile === keyProfile) { replacedAt = i; break; }
+   }
+  }
+  if (replacedAt >= 0) {
+   jobs[replacedAt] = job;
+  } else {
+   jobs.push(job);
+  }
+
+  xmp.setStructField(STANDALONE_JOBS_XMP_FIELD, jobs, true, false);
+  xmp.commit();
+  /* Safe: the unsaved case was rejected above, so this can never raise a Save As dialog. */
+  var saved = false;
+  try {
+   doc.save();
+   saved = true;
+  } catch (saveErr) { }
+
+  return JSON.stringify({
+   success: true,
+   documentPath: doc.fullName.fsName,
+   jobCount: jobs.length,
+   replaced: replacedAt >= 0,
+   documentSaved: saved
+  });
+ } catch (e) {
+  return JSON.stringify({ success: false, error: e.message || e.toString() });
+ }
+}
+
+/*
+ * Has the active document been saved to disk?
+ *
+ * NOTE `activeDocument.fullName` is not a reliable test: for an unsaved document Illustrator still
+ * returns a NOTIONAL path (e.g. ".../Untitled-1"), so the path is non-empty even though no file
+ * exists. The only dependable check is whether that file is actually on disk.
+ */
+function handleIsActiveDocumentSaved(params_string) {
+ try {
+  if (!app.documents.length) {
+   return JSON.stringify({ success: false, error: "No active document", saved: false });
+  }
+  var activeDoc = app.activeDocument;
+  var docFile = null;
+  try { docFile = new File(activeDoc.fullName); } catch (eFile) { docFile = null; }
+  var onDisk = !!(docFile && docFile.exists);
+  return JSON.stringify({
+   success: true,
+   saved: onDisk,
+   documentPath: onDisk ? docFile.fsName : ""
+  });
+ } catch (e) {
+  return JSON.stringify({ success: false, error: e.message || e.toString(), saved: false });
+ }
+}
+
+/* Read the standalone jobs recorded on a document. Empty array for any non-standalone document. */
+function handleReadStandaloneJobsFromXmp(params_string) {
+ try {
+  var params = params_string ? JSON.parse(params_string) : {};
+  var doc = findOpenDocumentByPath(params.documentPath);
+  if (!doc) {
+   return JSON.stringify({ success: true, jobs: [], hasDocument: false });
+  }
+  return JSON.stringify({
+   success: true,
+   hasDocument: true,
+   documentPath: doc.fullName && doc.fullName.fsName ? doc.fullName.fsName : "",
+   jobs: readStandaloneJobsFromDoc(doc)
+  });
+ } catch (e) {
+  return JSON.stringify({ success: false, error: e.message || e.toString(), jobs: [] });
+ }
+}
+
 function handleOpenSeparationDocument(params_string) {
  try {
   var params = JSON.parse(params_string);
@@ -5069,6 +5570,16 @@ function handleDeleteSeparationFile(params_string) {
   var entry = separations[idx];
   var pathToRemove = filePath;
   var _separtionFile = File(entry.separatedDocumentPath);
+  /* Read the sidecar BEFORE deleting the .ai — it names the flat registry entry to clear. */
+  var sidecarForDelete = null;
+  try {
+   var sidecarBaseName = _separtionFile.name.replace(/\.[^.]+$/, "");
+   if (sidecarBaseName) {
+    sidecarForDelete = readSeparationSidecarFile(
+     new File(_separtionFile.parent.fsName + "/" + sidecarBaseName + ".json")
+    );
+   }
+  } catch (eReadSidecar) { }
   if (_separtionFile.exists) {
    try {
     _separtionFile.remove();
@@ -5079,6 +5590,38 @@ function handleDeleteSeparationFile(params_string) {
     });
    }
   }
+  /*
+   * Clear both sidecar copies. Leaving them behind would keep a deleted separation "existing" for
+   * discovery and, worse, keep its version counted by the registry scan — so the next separation would
+   * skip a version number instead of reusing the freed one. Best-effort: never fails the delete.
+   */
+  try {
+   var sidecarBaseName2 = _separtionFile.name.replace(/\.[^.]+$/, "");
+   if (sidecarBaseName2) {
+    var besideSidecar = new File(_separtionFile.parent.fsName + "/" + sidecarBaseName2 + ".json");
+    if (besideSidecar.exists) {
+     besideSidecar.remove();
+    }
+   }
+  } catch (eDelBeside) { }
+  try {
+   if (sidecarForDelete && sidecarForDelete.separationsRoot) {
+    var registryKeyToDelete = buildSeparationRegistryKey(
+     sidecarForDelete.league,
+     sidecarForDelete.teamCode,
+     sidecarForDelete.graphicName,
+     sidecarForDelete.profileCode
+    );
+    if (registryKeyToDelete) {
+     var registryEntryFile = new File(
+      String(sidecarForDelete.separationsRoot) + "/" + registryKeyToDelete + ".json"
+     );
+     if (registryEntryFile.exists) {
+      registryEntryFile.remove();
+     }
+    }
+   }
+  } catch (eDelRegistry) { }
 
   var newEntry = {
    graphicName: entry.graphicName,
@@ -5397,8 +5940,13 @@ function handleGetBodyColor(params_string) {
    }
   } catch (xmpCheckError) {
   }
+  /* Recorded context first — see resolveSeparationSourceContext: a relocated separation cannot reach
+     01 TEAMOUTS by walking up its own path. Legacy derivation stays as the fallback. */
+  var sepContext = resolveSeparationSourceContext(activeDoc);
   var leagueFolder;
-  if (docPath.indexOf("09 SEPARATIONS") !== -1) {
+  if (sepContext.leagueFolder) {
+   leagueFolder = sepContext.leagueFolder;
+  } else if (docPath.indexOf("09 SEPARATIONS") !== -1) {
    var graphicFolder = docFile.parent;
    var teamCodeFolder = graphicFolder.parent;
    var leagueSepFolder = teamCodeFolder.parent;
@@ -5411,7 +5959,7 @@ function handleGetBodyColor(params_string) {
    var aiFolder = docFile.parent;
    leagueFolder = aiFolder.parent;
   }
-  var jsonData = findAndReadJSONFile(docName, leagueFolder);
+  var jsonData = findAndReadJSONFile(docName, leagueFolder, sepContext.teamJsonPath);
   if (!jsonData) {
    return JSON.stringify({
     success: false,

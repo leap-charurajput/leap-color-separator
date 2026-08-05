@@ -1091,14 +1091,18 @@ async function getStylesCatalogFromExcel(explicitBasePath) {
  * @param {string} colorCode - Code to look up (e.g. "0042", "006R")
  * @returns {Promise<{ success: boolean, color?: { hex, colorName, cmyk, rgb }, error?: string }>}
  */
-async function getColorByCodeFromLookup(colorCode) {
+async function getColorByCodeFromLookup(colorCode, basePath) {
  try {
   if (!colorCode || String(colorCode).trim() === '') {
    return { success: false, error: 'Color code is required' };
   }
 
   const code = String(colorCode).trim();
-  const serverBasePath = await getServerBasePathWithRetry();
+  /* basePath: panel-resolved override (same cloud-drive workaround as getProfileInformation). */
+  const serverBasePath =
+   basePath && String(basePath).trim() !== ''
+    ? String(basePath).trim()
+    : await getServerBasePathWithRetry();
   if (!serverBasePath) {
    return { success: false, error: 'Server base path not found' };
   }
@@ -1398,7 +1402,16 @@ async function getProfileInformation(profileCode, options) {
    throw new Error('Profile code is required');
   }
 
-  const serverBasePath = await getServerBasePathWithRetry();
+  /*
+   * options.basePath: explicit LEAP Data base path resolved by the PANEL (CEP) resolver — same
+   * workaround as getProfileNamesFromExcelAtPath. The Node-side existsSync gate below fails
+   * persistently on some cloud/network drives; standalone passes the panel-resolved path so
+   * profile underbase/blocker config still loads there.
+   */
+  const serverBasePath =
+   options && options.basePath && String(options.basePath).trim() !== ''
+    ? String(options.basePath).trim()
+    : await getServerBasePathWithRetry();
   if (!serverBasePath) {
    throw new Error('Server base path not found');
   }

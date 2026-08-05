@@ -15,18 +15,17 @@ import { flareInit } from './services/flare';
 export class AppComponent implements OnInit, OnDestroy {
  private readonly panelVersion = '1.0.1';
  /** Bump this string when you ship a new build (same format as before: "Mon DD, YYYY"). */
- private readonly panelDeployDate = 'July 29, 2026';
+ private readonly panelDeployDate = 'August 05, 2025';
  activeTab: number | null = 0;
  selectedMenuOption: string | null = null;
  documentRefreshKey = 0;
  /*
-  * Gate for the Standalone (non-LEAP) tab (index 3). It stays visible-but-disabled in the tab
-  * bar and can only be opened via the Graphics "+" button, which calls openStandaloneSeparation().
-  * Navigating to any other tab re-disables it, so it is never reachable directly.
+  * The standalone (non-LEAP) separation form is a MODAL opened by the Graphics "+" button, not a
+  * tab. `pendingStandaloneJob` pre-fills it from a job already recorded on the document (used when
+  * Generate is pressed on a Separations-tab row); null means a fresh form.
   */
- standaloneEnabled = false;
- /** Fixed tab index for the Standalone tab (kept in one place for the guards below). */
- private readonly standaloneTabIndex = 3;
+ standaloneOpen = false;
+ pendingStandaloneJob: any = null;
  private documentActivateListener: any;
  private flyoutMenuListener: any;
  showConfirmDialog = false;
@@ -74,10 +73,21 @@ export class AppComponent implements OnInit, OnDestroy {
      navigateToTab: (index: number) => {
       this.onTabChange(index);
      },
-     /* Enables and jumps to the Standalone tab (used by the Graphics "+" button). */
+     /* Opens the standalone form modal (used by the Graphics "+" button). */
      openStandalone: () => {
       this.openStandaloneSeparation();
      }
+    };
+    /* Opens the standalone form pre-filled from a job already recorded on the document — used by
+       the Generate button on a Separations-tab standalone row. */
+    (window as any).__LEAP_STANDALONE__ = {
+     openWithJob: (job: any) => {
+      this.openStandaloneSeparation(job);
+     }
+    };
+    /* Called by the form itself once Export has handed over to the Separations tab. */
+    (window as any).__LEAP_STANDALONE_CLOSE__ = () => {
+     this.closeStandaloneSeparation();
     };
    })
    .catch((err) => {
@@ -86,10 +96,21 @@ export class AppComponent implements OnInit, OnDestroy {
      navigateToTab: (index: number) => {
       this.onTabChange(index);
      },
-     /* Enables and jumps to the Standalone tab (used by the Graphics "+" button). */
+     /* Opens the standalone form modal (used by the Graphics "+" button). */
      openStandalone: () => {
       this.openStandaloneSeparation();
      }
+    };
+    /* Opens the standalone form pre-filled from a job already recorded on the document — used by
+       the Generate button on a Separations-tab standalone row. */
+    (window as any).__LEAP_STANDALONE__ = {
+     openWithJob: (job: any) => {
+      this.openStandaloneSeparation(job);
+     }
+    };
+    /* Called by the form itself once Export has handed over to the Separations tab. */
+    (window as any).__LEAP_STANDALONE_CLOSE__ = () => {
+     this.closeStandaloneSeparation();
     };
    });
  }
@@ -152,24 +173,20 @@ export class AppComponent implements OnInit, OnDestroy {
    this.flyoutMenuListener();
   }
   delete (window as any).__LEAP_TAB_NAVIGATION__;
+  delete (window as any).__LEAP_STANDALONE__;
+  delete (window as any).__LEAP_STANDALONE_CLOSE__;
   delete (window as any).__LEAP_DOCUMENT_EVENT__;
   delete (window as any)._LEAP_FLYOUT_MENU_EVENT__;
  }
 
  onTabChange(index: number): void {
-  const tabNames = ['Graphics', 'Separations', 'Plates', 'Standalone'];
+  const tabNames = ['Graphics', 'Separations', 'Plates'];
   this.leapSepsLog.logClick('Tab: ' + (tabNames[index] ?? String(index)), { index });
   this.activeTab = index;
   this.selectedMenuOption = null;
   /*
-   * Re-disable the Standalone tab whenever the user moves to a different tab, so it can only be
-   * reopened through the Graphics "+" button. The tab's component instance (and any in-progress
-   * form values) is preserved because the tab content is rendered with *ngIf on the loop index,
-   * not on the active tab.
+   * Tab switching no longer has to manage the standalone form — it lives in a modal now.
    */
-  if (index !== this.standaloneTabIndex) {
-   this.standaloneEnabled = false;
-  }
   // Refetch document/XMP when switching to Separations (1) or Plates (2) so the UI reflects the
   // current front document — e.g. the standalone separation lands on Plates and must read the new
   // separated document's plate list.
@@ -180,24 +197,50 @@ export class AppComponent implements OnInit, OnDestroy {
  }
 
  /*
-  * Enable and open the Standalone (non-LEAP) separation tab. Invoked from the Graphics "+"
-  * button via window.__LEAP_TAB_NAVIGATION__.openStandalone(). Enabling first, then routing
-  * through onTabChange, keeps the gate open for index 3 while the same call re-disables it for
-  * any other destination.
+  * Open the standalone (non-LEAP) separation form as a MODAL. Invoked from the Graphics "+" button
+  * via window.__LEAP_TAB_NAVIGATION__.openStandalone(), and from a Separations-tab row via
+  * window.__LEAP_STANDALONE__.openWithJob(job) — in which case the form is pre-filled from the job
+  * that was recorded on the document at Export.
   */
- openStandaloneSeparation(): void {
-  this.standaloneEnabled = true;
-  this.onTabChange(this.standaloneTabIndex);
+ openStandaloneSeparation(job?: any): void {
+  this.pendingStandaloneJob = job || null;
+  this.standaloneOpen = true;
+  /*
+   * The form lives INLINE on the Graphics tab, so making it VISIBLE means routing there. Skipped for
+   * an autoGenerate job: that runs headlessly and finishes on Plates, so yanking the user to Graphics
+   * on the way would just be a flash of the wrong tab. Tab contents stay mounted either way, so the
+   * form can still do its work while another tab is in front.
+   */
+  if (!job || !job.autoGenerate) {
+   this.onTabChange(0);
+  }
+  const openInline = (window as any).__LEAP_GRAPHICS_STANDALONE__;
+  if (openInline && typeof openInline.open === 'function') {
+   openInline.open(job || null);
+  }
   this.cdr.detectChanges();
   /*
-   * Ask the Standalone page to (re)prefill its fields from the active document's LICENSING
-   * sheet. The page registers this hook in its ngOnInit; guarded so nothing breaks if the page
-   * has not initialised yet (it also prefills itself on first load).
+   * Ask the form to (re)prefill from the active document's LICENSING sheet. Skipped when a stored
+   * job was supplied — those values win and a LICENSING read would overwrite them. The hook is
+   * registered by the form in its ngOnInit; guarded because it has only just been created.
    */
-  const prefill = (window as any).__LEAP_STANDALONE_PREFILL__;
-  if (typeof prefill === 'function') {
-   prefill();
+  if (!job) {
+   const prefill = (window as any).__LEAP_STANDALONE_PREFILL__;
+   if (typeof prefill === 'function') {
+    prefill();
+   }
   }
+ }
+
+ /* Close the inline form. *ngIf destroys it, so its state is discarded — reopening starts clean. */
+ closeStandaloneSeparation(): void {
+  this.standaloneOpen = false;
+  this.pendingStandaloneJob = null;
+  const openInline = (window as any).__LEAP_GRAPHICS_STANDALONE__;
+  if (openInline && typeof openInline.close === 'function') {
+   openInline.close();
+  }
+  this.cdr.detectChanges();
  }
 
  onMenuOptionClick(title: string): void {
@@ -246,13 +289,20 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   /*
-   * Standalone flow: while the user is on the Standalone tab, do NOT auto-switch away when a
-   * document activates. The Export action opens the exported ASSETS file (which activates it and
-   * would otherwise route to Graphics/Separations); we keep the user on Standalone so the
-   * profile-grouped Separations view stays in front.
+   * While the standalone form is open, do NOT auto-switch tabs when a document activates: the
+   * Export/Generate actions open and close documents themselves, and re-routing underneath the form
+   * would move the user away mid-entry.
    */
-  if (this.activeTab === this.standaloneTabIndex) {
-   this.standaloneEnabled = true;
+  if (this.standaloneOpen) {
+   return;
+  }
+  /*
+   * Also stay put during the export handover. Export closes the exported document and re-activates
+   * the source one; without this the resulting activation would route the user to Graphics and undo
+   * the navigation to the Separations tab that the handover just performed.
+   */
+  const handoverUntil = (window as any).__LEAP_STANDALONE_HANDOVER_UNTIL__;
+  if (typeof handoverUntil === 'number' && Date.now() < handoverUntil) {
    return;
   }
 
@@ -274,7 +324,9 @@ export class AppComponent implements OnInit, OnDestroy {
    ) {
     this.selectTabByName('Separations');
    } else {
-    // Team version without organization data -> default to Graphics
+    // Team version without organization data -> default to Graphics. (Non-LEAP docs also land
+    // here; the Graphics tab itself auto-opens the inline standalone form for them — see
+    // graphics.component maybeAutoOpenStandaloneForm.)
     this.selectTabByName('Graphics');
    }
   } catch (err) {
@@ -420,6 +472,12 @@ export class AppComponent implements OnInit, OnDestroy {
    this.showConfirmDialog = false;
 
    if (result?.success) {
+    /*
+     * The XMP wipe covers LEAPStandaloneJobs (same ColorSeparator namespace), but the standalone
+     * SIDECAR JSONs live on disk and would silently restore the form on the next open — making
+     * the remove look like it failed. Delete this document's sidecars too (doc-specific match).
+     */
+    await this.deleteStandaloneSidecarsForActiveDoc();
     this.documentRefreshKey++;
     this.graphicsDataService.resetData();
     if ((window as any).__LEAP_DOCUMENT_EVENT__?.handler) {
@@ -438,6 +496,45 @@ export class AppComponent implements OnInit, OnDestroy {
    this.showConfirmDialog = true;
   } finally {
    this.cdr.detectChanges();
+  }
+ }
+
+ /*
+  * Companion cleanup for "Remove Seps data": delete the ACTIVE document's standalone sidecar JSONs
+  * (<docFolder>/ASSETS/*.json whose sourceDocumentPath is this document). Without this, the sidecar
+  * restore layer silently re-fills the standalone form on the next open even though the XMP was
+  * wiped. Doc-specific match only — sidecars belonging to OTHER source documents in a shared
+  * ASSETS folder are left untouched. Best-effort: a cleanup failure never fails the remove.
+  */
+ private async deleteStandaloneSidecarsForActiveDoc(): Promise<void> {
+  try {
+   const req = (window as any).cep_node?.require;
+   if (!req || typeof this.controller.getActiveDocumentPath !== 'function') return;
+   const docPath = String((await this.controller.getActiveDocumentPath()) || '').trim();
+   if (!docPath) return;
+
+   const fs = req('fs');
+   const path = req('path');
+   const norm = (p: any) => String(p || '').split('\\').join('/').trim().toLowerCase();
+   const docNorm = norm(docPath);
+   const assetsDir = path.join(path.dirname(docPath), 'ASSETS');
+   if (!fs.existsSync(assetsDir)) return;
+
+   for (const f of fs.readdirSync(assetsDir)) {
+    if (!/\.json$/i.test(String(f))) continue;
+    const jp = path.join(assetsDir, f);
+    try {
+     const sc = JSON.parse(fs.readFileSync(jp, 'utf8'));
+     if (sc && norm(sc.sourceDocumentPath) === docNorm) {
+      fs.unlinkSync(jp);
+      console.log('[APP] Removed standalone sidecar:', jp);
+     }
+    } catch (e) {
+     /* unreadable/foreign sidecar — leave it */
+    }
+   }
+  } catch (e) {
+   console.warn('[APP] Standalone sidecar cleanup failed (non-fatal):', e);
   }
  }
 }

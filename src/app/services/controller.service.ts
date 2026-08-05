@@ -203,6 +203,7 @@ export class ControllerService {
   jsonData: any;
   sepsTemplateFileName?: string;
   exportedFilePath: string;
+  cadPngPath?: string;
  }): Promise<any> {
   this.log('generateStandaloneSeparation called');
   return this.ensureSession().then(() => runStandaloneSeparation(payload));
@@ -1994,6 +1995,48 @@ export class ControllerService {
   });
  }
 
+ /*
+  * Record a standalone (non-LEAP) job on the SOURCE document's XMP, so the document itself carries
+  * the fact that a standalone separation exists for it — the same way a LEAP version document carries
+  * LEAPSeparationProfileData. Uses its own XMP field and never touches any LEAP field.
+  * Best-effort by the caller: a failure here must not fail the export.
+  */
+ writeStandaloneJobToXmp(job: any, documentPath?: string): Promise<any> {
+  this.log('writeStandaloneJobToXmp called');
+  return this.ensureSession().then(() => {
+   const params = { job: job, documentPath: documentPath || '' };
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleWriteStandaloneJobToXmp', params)
+    .then((res: string) => JSON.parse(res));
+  });
+ }
+
+ /*
+  * Is the active document saved to disk? Needed because getActiveDocumentPath() returns a NOTIONAL
+  * path for an unsaved document, so a non-empty path does not mean the file exists.
+  */
+ isActiveDocumentSaved(): Promise<{ success: boolean; saved: boolean; documentPath?: string; error?: string }> {
+  return this.ensureSession().then(() => {
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleIsActiveDocumentSaved', {})
+    .then((res: string) => JSON.parse(res));
+  });
+ }
+
+ /* Standalone jobs recorded on a document; empty array for any document that has none. */
+ readStandaloneJobsFromXmp(documentPath?: string): Promise<any> {
+  this.log('readStandaloneJobsFromXmp called');
+  return this.ensureSession().then(() => {
+   const params = { documentPath: documentPath || '' };
+   return (window as any).leap
+    .scriptLoader()
+    .evalScript('handleReadStandaloneJobsFromXmp', params)
+    .then((res: string) => JSON.parse(res));
+  });
+ }
+
  openSeparationDocument(filePath: string): Promise<any> {
   this.log('openSeparationDocument called for: ' + filePath);
 
@@ -2232,9 +2275,32 @@ function getOriginalDocBaseName(docFile) {
  return aiName.replace(/\\.[^\\.]+$/, "");
 }
 
+/*
+ * Team JSON for export-path token resolution.
+ *
+ * The derivation below only works while the separation lives inside the nested tree. For a separation
+ * created at the configured "Separation file path" it returned null, so [League] / [Team Code] and every
+ * batch-row token in a Print Guide / PostScript template resolved to nothing — and an unresolved token
+ * is left as literal text, producing folders named "[League]". The sidecar records the team JSON path,
+ * so fall back to it. The JSON itself has not moved; only the way it is found changed.
+ */
 function getExportJsonData(docFile) {
  try {
   if (typeof findAndReadJSONFile !== "function") return null;
+  /* Recorded context wins — same depth problem as getSeparationsFolderFromDocFile. */
+  var sidecar = readExportSeparationSidecar(docFile);
+  if (sidecar && (sidecar.teamJsonPath || (sidecar.teamoutsRoot && sidecar.league))) {
+   var recordedLeagueFolder = null;
+   if (sidecar.teamoutsRoot && sidecar.league) {
+    recordedLeagueFolder = new Folder(String(sidecar.teamoutsRoot) + "/" + String(sidecar.league));
+   }
+   var recordedJson = findAndReadJSONFile(
+    getOriginalDocBaseName(docFile),
+    recordedLeagueFolder,
+    sidecar.teamJsonPath ? String(sidecar.teamJsonPath) : ""
+   );
+   if (recordedJson) return recordedJson;
+  }
   var docPath = docFile.fsName || "";
   if (docPath.indexOf("09 SEPARATIONS") === -1) return null;
   var graphicFolder = docFile.parent;
@@ -2301,7 +2367,13 @@ function getExportVariableContext(doc) {
  var teamCodeFromPath = "";
  var leagueFromPath = "";
  try {
-  if ((docFile.fsName || "").indexOf("09 SEPARATIONS") !== -1) {
+  /* Recorded values win: the folder-name reads below assume the exact nested depth and would pick up
+     unrelated folder names for a separation created at a configured path. */
+  var pathSidecar = readExportSeparationSidecar(docFile);
+  if (pathSidecar && (pathSidecar.teamCode || pathSidecar.league)) {
+   if (pathSidecar.teamCode) teamCodeFromPath = String(pathSidecar.teamCode);
+   if (pathSidecar.league) leagueFromPath = String(pathSidecar.league);
+  } else if ((docFile.fsName || "").indexOf("09 SEPARATIONS") !== -1) {
    teamCodeFromPath = docFile.parent.parent.name;
    leagueFromPath = docFile.parent.parent.parent.name;
   }
@@ -2427,8 +2499,53 @@ function joinExportPath(basePath, segment) {
  return base + "/" + part;
 }
 
+/* Read the separation sidecar sitting beside a document, or null. */
+function readExportSeparationSidecar(docFile) {
+ try {
+  if (!docFile) return null;
+  var base = String(docFile.name || "").replace(/\\.[^\\.]+$/, "");
+  if (!base) return null;
+  var sidecarFile = new File(docFile.parent.fsName + "/" + base + ".json");
+  if (!sidecarFile.exists) return null;
+  sidecarFile.encoding = "UTF-8";
+  if (!sidecarFile.open("r")) return null;
+  var text = sidecarFile.read();
+  sidecarFile.close();
+  if (!text) return null;
+  var parsed = JSON.parse(text);
+  return (parsed && typeof parsed === "object") ? parsed : null;
+ } catch (e) {
+  return null;
+ }
+}
+
+/*
+ * The "09 SEPARATIONS" folder that a leading "/" in an export path template is relative to.
+ *
+ * Historically this was DERIVED by walking up from the document, which only works while the
+ * separation physically lives at 09 SEPARATIONS/<league>/<team>/<graphic>/. Separations are now
+ * created at the configured "Separation file path", so that walk fails and every root-relative
+ * template (Print Guide, PostScript, Seps Preview PDF) silently fell back to the document's own
+ * folder — landing the exports next to the .ai instead of inside 09 SEPARATIONS.
+ *
+ * The separation records separationsRoot in its sidecar, so fall back to that. Legacy documents still
+ * inside the nested tree keep using the derived walk and are unaffected.
+ */
 function getSeparationsFolderFromDocFile(docFile) {
  try {
+  /*
+   * RECORDED ROOT WINS. The walk below is not a "is it under 09 SEPARATIONS" test — it assumes an
+   * EXACT depth (09 SEPARATIONS/<league>/<team>/<graphic>/doc.ai) and blindly goes up four levels.
+   * A separation created at a configured path like "/SEPS/name.ai" is still inside 09 SEPARATIONS but
+   * only one level deep, so the walk overshoots and returns the folder ABOVE the job root — sending
+   * every root-relative export outside the job entirely. Checking the sidecar first avoids depending
+   * on depth at all.
+   */
+  var sidecar = readExportSeparationSidecar(docFile);
+  if (sidecar && sidecar.separationsRoot) {
+   var recorded = new Folder(String(sidecar.separationsRoot));
+   if (recorded.exists) return recorded;
+  }
   var docPath = docFile.fsName || "";
   if (docPath.indexOf("09 SEPARATIONS") === -1) return null;
   var graphicFolder = docFile.parent;
@@ -2473,6 +2590,11 @@ function buildExportDestinationFromResolvedPath(resolvedPath, defaultFile, exten
   fileName = ensureExportFileNameExtension(fileName, extension);
  }
 
+ /*
+  * A leading "/" anchors at the 09 SEPARATIONS folder; anything else stays relative to the document's
+  * own folder, unchanged. getSeparationsFolderFromDocFile now resolves that anchor from the sidecar,
+  * so it is correct wherever the separation was created.
+  */
  var basePath = defaultFile.parent.fsName;
  if (rootRelativeToSeparations) {
   var separationsFolder = getSeparationsFolderFromDocFile(defaultFile);
@@ -3422,6 +3544,26 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
       return JSON.stringify({ success: false, error: "Separation .ai file not found on disk: " + srcFile.fsName });
     }
 
+    /*
+     * Separations created directly at the configured "Separation file path" need no copy — the file is
+     * already the deliverable. Its sidecar records createdAtConfiguredPath, which is checked instead of
+     * comparing source to a re-resolved destination: a RELATIVE template resolves against the
+     * document's own folder, so re-resolving here would nest the file one level deeper on every export.
+     */
+    try {
+      var sidecarBase = srcFile.name.replace(/\\.[^\\.]+$/, "");
+      var sidecarFile = new File(srcFile.parent.fsName + "/" + sidecarBase + ".json");
+      sidecarFile.encoding = "UTF-8";
+      if (sidecarFile.exists && sidecarFile.open("r")) {
+        var sidecarText = sidecarFile.read();
+        sidecarFile.close();
+        var sidecarData = sidecarText ? JSON.parse(sidecarText) : null;
+        if (sidecarData && sidecarData.createdAtConfiguredPath === true) {
+          return JSON.stringify({ success: true, skipped: true, filePath: srcFile.fsName });
+        }
+      }
+    } catch (eSidecar) { }
+
     var docFolder = srcFile.parent;
     var docName = srcFile.name.replace(/\\.[^\\.]+$/, "");
     var defaultAiFile = new File(docFolder.fsName + "/" + docName + ".ai");
@@ -4224,7 +4366,9 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
  /**
   * Look up body color (Hex/CMYK/RGB) by code from COLOR_CODE_LOOKUP.xlsx (same folder as Styles.xlsx).
   */
- getColorByCodeFromLookup(colorCode: string): Promise<{
+ /* basePath (optional): panel-resolved LEAP Data path override — the leap bundle's Node-side
+  * resolver fails persistently on some cloud/network drives (same workaround as getProfileInformation). */
+ getColorByCodeFromLookup(colorCode: string, basePath?: string): Promise<{
   success: boolean;
   color?: {
    hex: string;
@@ -4238,7 +4382,7 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
   if (!win.leap) {
    return Promise.reject(new Error('leap not available'));
   }
-  return this.ensureSession().then(() => win.leap.getColorByCodeFromLookup(colorCode));
+  return this.ensureSession().then(() => win.leap.getColorByCodeFromLookup(colorCode, basePath));
  }
 
  removeSeparationData(): Promise<any> {
@@ -4706,6 +4850,15 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
   } catch (_) {
    return '';
   }
+ }
+
+ /*
+  * Public: the active document's on-disk path ('' when none / on error). The Standalone tab uses
+  * this to detect a REAL document switch (vs. an unrelated refresh) so it re-prefills from the new
+  * document instead of showing the previous document's values.
+  */
+ getActiveDocumentPath(): Promise<string> {
+  return this.getActiveDocumentPathForClient();
  }
 
  private getBatchExcelColumnNames(documentPath: string): string[] {

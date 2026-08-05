@@ -2709,7 +2709,8 @@ private getProfileBlockerMesh(profileInfo?: any): string {
   const withoutPrefix = pantoneBase.replace(/^PANTONE\s+/i, '');
   const tokenMatch = withoutPrefix.match(/^(.*?)\s+[A-Z]{1,3}P?$/);
   const token = tokenMatch ? tokenMatch[1].trim() : withoutPrefix.trim();
-  return format.replace(/###/g, token) + hitSuffix;
+  /* Substitute "###" and the LEGACY "XXX" token (older Profiles.json formats like "LS XXX C"). */
+  return format.replace(/###/g, token).replace(/XXX/g, token) + hitSuffix;
  }
 
  updateSepTableInDocument(): void {

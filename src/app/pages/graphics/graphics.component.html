@@ -1,8 +1,13 @@
 <div class="organize-graphics-container">
+ <!--
+  One tab, two mutually exclusive modes: a LEAP file gets "Organize Graphics", a standalone
+  (non-LEAP) job gets the standalone form. Never both — showing an empty graphics list above a
+  standalone form was confusing.
+ -->
  <div class="panelTitle mb-5 d-flex align-center justify-between">
-  <span>Organize Graphics</span>
-  <div class="organize-graphics-actions">
-   <!-- <button
+  <span>{{ standaloneFormOpen ? 'Standalone separation' : 'Organize Graphics' }}</span>
+  <div class="organize-graphics-actions" *ngIf="!standaloneFormOpen">
+   <button
     *ngIf="showCreateGraphicActions"
     (click)="openStandaloneSeparation()"
     class="separation-action-btn create-graphic-btn"
@@ -13,7 +18,7 @@
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="20" height="20">
      <path fill="currentColor" d="M8 3.5a.5.5 0 0 1 .5.5v3.5H12a.5.5 0 0 1 0 1H8.5V12a.5.5 0 0 1-1 0V8.5H4a.5.5 0 0 1 0-1h3.5V4a.5.5 0 0 1 .5-.5z"/>
     </svg>
-   </button> -->
+   </button>
    <button
     (click)="loadGraphicsList()"
     class="separation-action-btn"
@@ -29,6 +34,8 @@
   </div>
  </div>
 
+ <!-- Organize Graphics (LEAP) mode — hidden entirely while a standalone job is being worked on. -->
+ <ng-container *ngIf="!standaloneFormOpen">
  <div *ngIf="isSeparatedDoc" class="organize-graphics-content">
   <div class="panelTitle mx-5" style="text-align: center; padding: 40px 20px">
    <ng-container *ngIf="separatedDocInfo.teamVersionName || separatedDocInfo.leapTemplateName">
@@ -221,4 +228,17 @@
   (cancel)="closeCreateGraphicModal()"
   (confirm)="handleCreateGraphicConfirm($event)"
  ></app-create-graphic-modal>
+ </ng-container>
+
+ <!--
+  Standalone (non-LEAP) separation form, shown INLINE on this tab. Inline rather than a modal: the
+  form is long and a narrow CEP panel leaves a modal very little room, and the user is already here.
+  NO close control by design — while a standalone job is in progress this IS the tab's content, and
+  there is nothing meaningful to fall back to (the graphics list is empty for a non-LEAP file). The
+  form closes itself after Export, when it hands over to the Separations tab.
+ -->
+ <div *ngIf="standaloneFormOpen" class="standalone-inline">
+  <app-standalone-separation [documentRefreshKey]="documentRefreshKey" [presetJob]="standalonePresetJob">
+  </app-standalone-separation>
+ </div>
 </div>

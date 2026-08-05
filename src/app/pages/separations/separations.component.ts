@@ -59,6 +59,11 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
  isCheckingFolderMap: { [key: string]: boolean } = {};
  hasVersionDocument = false;
  isCheckingDocument = false;
+ /*
+  * Standalone (non-LEAP) jobs recorded on the active document's XMP at Export. Deliberately a
+  * SEPARATE list from `separations` (the LEAP list) so neither flow can affect the other.
+  */
+ standaloneJobs: any[] = [];
  hasGraphicsPositions = false;
  isSeparatedDoc = false;
  /** Profile names from Profiles.json (Separation Profile Settings); used to disable Generate when profile file missing. */
@@ -332,6 +337,17 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
     this.hasVersionDocument = !!isVersionFile;
     this.versionDocumentPath = result.documentPath || null;
 
+    /*
+     * Standalone (non-LEAP) jobs recorded on THIS document at Export. Only looked up when the
+     * document is not a LEAP version document, so the LEAP path never pays for it and can never be
+     * influenced by it.
+     */
+    if (!this.hasVersionDocument) {
+     await this.loadStandaloneJobs();
+    } else {
+     this.standaloneJobs = [];
+    }
+
     if (this.hasVersionDocument) {
      await this.loadProfileNamesFromSettings();
      await this.loadInkInfoProfileCodes();
@@ -349,6 +365,12 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
     this.graphicsData = [];
     this.separationPaths = {};
     this.hasGraphicsPositions = false;
+    /*
+     * getTemplateInfo FAILS for a non-LEAP document ("JSON file not found…") — which is exactly the
+     * case where standalone jobs live. Clearing the list here made the tab fall back to
+     * "Please open the version document" straight after an export, so load them in this branch too.
+     */
+    await this.loadStandaloneJobs();
    }
   } catch (err) {
    console.error('[Separations] checkVersionDocument error:', err);
@@ -697,6 +719,140 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
    });
   });
   return merged;
+ }
+
+ /*
+  * Standalone (non-LEAP) jobs recorded on the active document's XMP at Export
+  * (`LEAPStandaloneJobs`, written by writeStandaloneJobToXmp).
+  *
+  * A source document can hold SEVERAL jobs — one per selection/position the user exported — so they
+  * are listed one row per job, mirroring how the LEAP tab lists a row per graphic position. Newest
+  * last, as recorded.
+  *
+  * Entirely separate from `separations` (the LEAP list, driven by teamCode + Styles.xlsx): keeping
+  * the two lists apart is what guarantees a standalone document cannot alter LEAP behaviour, and vice
+  * versa. Best-effort — an older host build without the handler simply yields no rows.
+  */
+ private async loadStandaloneJobs(): Promise<void> {
+  this.standaloneJobs = [];
+  try {
+   if (this.isRunningInBrowser || typeof this.controller.readStandaloneJobsFromXmp !== 'function') {
+    return;
+   }
+   const res: any = await this.controller.readStandaloneJobsFromXmp();
+   if (res && res.success && Array.isArray(res.jobs)) {
+    this.standaloneJobs = res.jobs.filter((j: any) => j && typeof j === 'object');
+   }
+  } catch (err) {
+   console.warn('[Separations] Could not read standalone jobs from XMP:', err);
+   this.standaloneJobs = [];
+  }
+ }
+
+ /*
+  * Generate the separation for a recorded standalone job. Opens the standalone form modal
+  * pre-filled from the job (the artwork was already exported when the job was created, so only
+  * Generate remains). Routed through the shell hook so the generate pipeline stays in ONE place
+  * rather than being duplicated here.
+  */
+ /*
+  * The standalone job the Add Separation dialog was opened for; null when the dialog belongs to the
+  * LEAP flow. Set so confirmAddSeparationDialog can branch without duplicating the whole handler.
+  */
+ private addSeparationStandaloneJob: any = null;
+
+ /*
+  * Add Separation for a standalone job: the SAME exported .ai separated under another profile/style.
+  * Reuses the LEAP dialog — only the persistence differs (a new LEAPStandaloneJobs entry rather than
+  * a LEAPSeparationProfileData row).
+  */
+ async handleAddStandaloneSeparation(job: any): Promise<void> {
+  if (!job) return;
+  /*
+   * Open FIRST, load the style catalogue after.
+   *
+   * ensureStyleCatalogOptionsLoaded() was awaited before opening, so anything it threw — or its
+   * fallback path, which needs a teamCode that a non-LEAP document does not have — left the dialog
+   * unopened and the click looking dead. The catalogue only populates a picker inside the dialog, so
+   * it is not a precondition for showing it.
+   */
+  this.addSeparationStandaloneJob = job;
+  this.addSeparationDialogGraphicName = this.getStandaloneJobTitle(job);
+  this.addSeparationDialogOpen = true;
+  this.cdr.detectChanges();
+  try {
+   await this.ensureStyleCatalogOptionsLoaded();
+  } catch (err) {
+   console.warn('[Separations] Style catalog load failed for standalone Add Separation:', err);
+  } finally {
+   /* Never leave the dialog stuck in its loading state if the loader bailed early. */
+   this.isLoadingAddSeparationDialog = false;
+   this.cdr.detectChanges();
+  }
+ }
+
+ generateStandaloneJob(job: any): void {
+  const hook = (window as any).__LEAP_STANDALONE__;
+  if (hook && typeof hook.openWithJob === 'function') {
+   /*
+    * autoGenerate: run the separation immediately rather than showing the form. The user pressed
+    * Generate, not Edit — they expect it to run and land on Plates, exactly like the LEAP button.
+    * The form component stays mounted (tab contents are kept alive), so this needs no tab switch.
+    */
+   hook.openWithJob({ ...job, autoGenerate: true });
+  }
+ }
+
+ /*
+  * Standalone jobs grouped by exported GRAPHIC, mirroring the LEAP list's shape: a graphic section
+  * header (carrying one "Add Separation..." link) with its profile rows underneath. Grouping by
+  * exportedFilePath because that is the graphic — several jobs can share one exported .ai when the
+  * same artwork is separated under more than one profile.
+  */
+ get standaloneJobGroups(): Array<{ key: string; title: string; jobs: any[] }> {
+  const groups: Array<{ key: string; title: string; jobs: any[] }> = [];
+  const byKey: { [key: string]: { key: string; title: string; jobs: any[] } } = {};
+  for (const job of this.standaloneJobs) {
+   const key = String((job && job.exportedFilePath) || (job && job.position) || '').trim() || '(unknown)';
+   if (!byKey[key]) {
+    byKey[key] = {
+     key,
+     title: String((job && job.exportedFileName) || this.getStandaloneJobTitle(job) || 'Graphic'),
+     jobs: []
+    };
+    groups.push(byKey[key]);
+   }
+   byKey[key].jobs.push(job);
+  }
+  return groups;
+ }
+
+ /** Row label for a standalone job: the position is its identity, as in the LEAP flow. */
+ getStandaloneJobTitle(job: any): string {
+  const pos = (job && job.position ? String(job.position) : '').trim();
+  return pos || (job && job.exportedFileName ? String(job.exportedFileName) : 'Standalone graphic');
+ }
+
+ /*
+  * Garment colour CODES for the row's "Colors:" line — the same thing the LEAP list shows there
+  * (getGraphicColors returns codes, e.g. "127A", not ink names).
+  *
+  * A standalone job stores them in `garmentColors`, taken from the LICENSING sheet's "Color" field,
+  * which carries codes ("0484, 0042"). Falls back to the single resolved garmentColorCode.
+  * NOTE this is deliberately NOT `job.colors` — those are the decoration INK names extracted from the
+  * artwork (e.g. "PANTONE 1235 C"), which is a different thing and belongs to the plate list.
+  */
+ getStandaloneJobColors(job: any): string[] {
+  if (!job) return [];
+  const raw = job.garmentColors != null ? String(job.garmentColors).trim() : '';
+  if (raw) {
+   return raw
+    .split(/[,/]+/)
+    .map((c: string) => c.trim())
+    .filter((c: string) => c.length > 0);
+  }
+  const single = job.garmentColorCode != null ? String(job.garmentColorCode).trim() : '';
+  return single ? [single] : [];
  }
 
  private buildSeparationsFromXmpGroups(): Separation[] {
@@ -1139,6 +1295,14 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
    });
  }
 
+ /*
+  * Open a previously generated separation from its RECORDED absolute path.
+  *
+  * The path is whatever the separation wrote down (XMP entry / sidecar), so it is correct wherever the
+  * file was created. It can still go stale: the user may move, rename or delete the .ai outside the
+  * panel. That used to fail silently — the click did nothing and no message appeared — so a missing
+  * file now says so and offers the fix (re-generate), which is the agreed stale-sidecar behaviour.
+  */
  handleOpenSeparation(filePath: string): void {
   this.controller
    .openSeparationDocument(filePath)
@@ -1156,10 +1320,21 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
        }, 500);
       }
      }, 500);
-    } else {
+     return;
     }
+    const message =
+     'Separation file not found:\n' +
+     (filePath || '(no path recorded)') +
+     '\n\nIt may have been moved, renamed or deleted. Generate the separation again to recreate it.';
+    this.leapSepsLog.logError('Separations', message, result);
+    console.error('[SEPARATIONS] openSeparationDocument failed:', result);
+    alert(message);
    })
-   .catch((err) => { });
+   .catch((err) => {
+    this.leapSepsLog.logError('Separations', err);
+    console.error('[SEPARATIONS] openSeparationDocument error:', err);
+    alert(err?.message || String(err));
+   });
  }
 
  handleSeparationMenuClick(item: string, separationId: number, graphicName: string): void {
@@ -1213,9 +1388,68 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
   this.cdr.detectChanges();
  }
 
+ /*
+  * Write one new standalone job per chosen style code: a clone of the source job carrying the new
+  * profile/style, keyed on exportedFilePath + profileName so it ADDS rather than replaces. The
+  * exported .ai is shared — only the separation settings differ.
+  */
+ private async addStandaloneSeparationEntries(
+  sourceJob: any,
+  profileName: string,
+  styleCodes: string[]
+ ): Promise<void> {
+  if (this.isRunningInBrowser || typeof this.controller.writeStandaloneJobToXmp !== 'function') {
+   console.warn('[Separations] Cannot add standalone separation - controller method unavailable');
+   return;
+  }
+  this.isLoadingAddSeparationDialog = true;
+  this.cdr.detectChanges();
+  try {
+   /*
+    * ONE job for the profile, carrying ALL its style codes — mirroring the LEAP list, where a profile
+    * is a single row listing every style that resolved to it.
+    *
+    * Writing one job PER style code was wrong: they all share the upsert key
+    * (exportedFilePath + profileName), so each overwrote the previous one and 16 codes produced a
+    * single surviving entry.
+    */
+   const job = {
+    ...sourceJob,
+    profileName: profileName,
+    styleCode: styleCodes.join(', ')
+   };
+   delete job.autoGenerate;
+   const docPath = job.sourceDocumentPath || '';
+   console.log('[Separations] Adding standalone separation', {
+    profileName,
+    styleCodes,
+    exportedFilePath: job.exportedFilePath,
+    sourceDocumentPath: docPath || '(active document)'
+   });
+   const res: any = await this.controller.writeStandaloneJobToXmp(job, docPath);
+   console.log('[Separations] writeStandaloneJobToXmp response', res);
+   if (!res || !res.success) {
+    const msg = (res && res.error) || 'Unknown error';
+    console.error('[Separations] Could not add standalone separation:', msg);
+    alert('Could not add the separation:\n\n' + msg);
+    return;
+   }
+   /* Re-read so the list reflects exactly what is now recorded on the document. */
+   await this.loadStandaloneJobs();
+   console.log('[Separations] Standalone jobs after add:', this.standaloneJobs.length);
+  } catch (err: any) {
+   console.error('[Separations] Add standalone separation failed:', err);
+   alert('Could not add the separation:\n\n' + ((err && err.message) || String(err)));
+  } finally {
+   this.isLoadingAddSeparationDialog = false;
+   this.cdr.detectChanges();
+  }
+ }
+
  cancelAddSeparationDialog(): void {
   this.addSeparationDialogOpen = false;
   this.addSeparationDialogGraphicName = '';
+  this.addSeparationStandaloneJob = null;
   this.cdr.detectChanges();
  }
 
@@ -1233,6 +1467,13 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
     profileName,
     styleCodes
    });
+   this.cancelAddSeparationDialog();
+   return;
+  }
+
+  /* Standalone: persist as another LEAPStandaloneJobs entry, not a LEAP XMP row. */
+  if (this.addSeparationStandaloneJob) {
+   await this.addStandaloneSeparationEntries(this.addSeparationStandaloneJob, profileName, styleCodes);
    this.cancelAddSeparationDialog();
    return;
   }

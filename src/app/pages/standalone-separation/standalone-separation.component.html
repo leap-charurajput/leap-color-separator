@@ -5,9 +5,9 @@
  separation process as the Separations tab (backend wired in Increment B).
 -->
 <div class="standalone-container">
- <div class="panelTitle mb-5">
+ <!-- <div class="panelTitle mb-5">
   <span>Standalone Separation</span>
- </div>
+ </div> -->
 
  <div *ngIf="isRunningInBrowser" class="standalone-content">
   <div class="panelTitle mx-5" style="text-align: center; padding: 40px 20px">
@@ -77,10 +77,6 @@
   </div>
 
   <div *ngIf="profileResolveWarning" class="standalone-warning">{{ profileResolveWarning }}</div>
-  <div *ngIf="showLicensingDebug && profileLookupDebug" class="standalone-debug">
-   <div class="standalone-debug-title">Profile lookup (debug)</div>
-   <pre class="standalone-debug-pre">{{ profileLookupDebug }}</pre>
-  </div>
 
   <!-- Optional SEP-grid token fields -->
   <div class="standalone-optional-title">Optional (SEP grid tokens)</div>
@@ -99,6 +95,7 @@
    </div>
   </div>
 
+  <!-- Full code string from the LICENSING sheet; printed as the [Garm Colors] token. -->
   <div class="standalone-field">
    <label class="standalone-label">Garment Colors</label>
    <div class="standalone-control">
@@ -111,14 +108,24 @@
    </div>
   </div>
 
+  <!-- Garment color CODE -> COLOR_CODE_LOOKUP.xlsx sets the GARMENT (body) swatch (blank = default gray). -->
+  <div class="standalone-field">
+   <label class="standalone-label">Garment Color Code</label>
+   <div class="standalone-control">
+    <input
+     type="text"
+     class="standalone-input"
+     [(ngModel)]="garmentColorCode"
+     placeholder="e.g. 0484 (sets body swatch)"
+    />
+   </div>
+  </div>
+
+  <!-- Graphic Name / Graphic Code inputs removed: [Graphic Name]/[Art Code] auto-fill from
+       Position (same value the pipeline uses as graphicName); [Graphic Code] is blanked. -->
+
   <div *ngIf="warningMessage" class="standalone-warning">{{ warningMessage }}</div>
   <div *ngIf="statusMessage" class="standalone-status">{{ statusMessage }}</div>
-
-  <!-- TEMPORARY diagnostic: shows exactly what the LICENSING reader returned. Remove later. -->
-  <div *ngIf="showLicensingDebug && licensingDebug" class="standalone-debug">
-   <div class="standalone-debug-title">LICENSING read (debug)</div>
-   <pre class="standalone-debug-pre">{{ licensingDebug }}</pre>
-  </div>
 
   <div class="standalone-footer">
    <app-button
@@ -129,41 +136,44 @@
    >
     {{ isExporting ? 'Exporting…' : 'Export' }}
    </app-button>
-  </div>
-
-  <!-- Separations view (shown after Export), grouped by profile — like the Separations tab. -->
-  <div *ngIf="exported && separationGroups.length > 0" class="standalone-seps">
-   <div class="standalone-seps-title">Separations</div>
-   <div *ngIf="exportedFileName" class="standalone-seps-file">
-    Exported file: {{ exportedFileName }}
+   <!-- Say WHY the button is disabled, rather than leaving the user guessing. -->
+   <div *ngIf="!exported && !hasSelection && !isRunningInBrowser" class="standalone-hint">
+    Select the artwork to export.
    </div>
-
-   <div *ngFor="let group of separationGroups" class="standalone-sep-group">
-    <div class="standalone-sep-group-main">
-     <div class="standalone-sep-group-info">
-      <div class="standalone-sep-profile">{{ group.profileName }}</div>
-      <div class="standalone-sep-styles">{{ group.styleCodes.join(', ') }}</div>
-      <div *ngIf="group.colors.length > 0" class="standalone-sep-colors">
-       Colors: {{ group.colors.join(', ') }}
-      </div>
-      <div class="standalone-sep-colors">
-       Garment Colors:
-       <span *ngIf="group.garmentColors">{{ group.garmentColors }}</span>
-       <span *ngIf="!group.garmentColors" class="standalone-sep-colors-empty">—</span>
-      </div>
-     </div>
-     <app-button
-      variant="primary"
-      size="small"
-      [disabled]="group.isGenerating"
-      (onClick)="generateGroup(group)"
-     >
-      {{ group.isGenerating ? 'Generating…' : 'Generate Separation' }}
-     </app-button>
-    </div>
-    <div *ngIf="group.status" class="standalone-status">{{ group.status }}</div>
-    <div *ngIf="group.error" class="standalone-warning">{{ group.error }}</div>
+   <div *ngIf="!exported && hasSelection && !isSourceDocSaved && !isRunningInBrowser" class="standalone-hint">
+    Save the document first.
    </div>
   </div>
+
+  <!--
+   The separations list is NOT rendered here. Separations belong on the Separations tab, which lists
+   every standalone job recorded on the document — showing a second copy on Graphics duplicated it and
+   put separations on a tab that is about organising graphics.
+   `separationGroups` is still maintained in code: generateGroup() runs against it, both for the
+   Generate button on a Separations row and for the "no spot inks" case below, where the form stays
+   open so the warning remains visible.
+  -->
+  <div *ngIf="exported && exportedFileName" class="standalone-seps-file">
+   Exported file: {{ exportedFileName }}
+  </div>
+
+  <!--
+   TEMPORARY diagnostics — collapsed at the very bottom of the page, out of the working UI.
+   Development only; remove (or set showLicensingDebug = false) before release.
+  -->
+  <details
+   *ngIf="showLicensingDebug && (licensingDebug || profileLookupDebug)"
+   class="standalone-debug-section"
+  >
+   <summary class="standalone-debug-summary">Debug (temporary)</summary>
+   <div *ngIf="profileLookupDebug" class="standalone-debug">
+    <div class="standalone-debug-title">Profile lookup</div>
+    <pre class="standalone-debug-pre">{{ profileLookupDebug }}</pre>
+   </div>
+   <div *ngIf="licensingDebug" class="standalone-debug">
+    <div class="standalone-debug-title">LICENSING read</div>
+    <pre class="standalone-debug-pre">{{ licensingDebug }}</pre>
+   </div>
+  </details>
  </div>
 </div>

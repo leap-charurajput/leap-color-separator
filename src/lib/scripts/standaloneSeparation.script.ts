@@ -9,11 +9,13 @@ export interface StandaloneSeparationRunInput {
 	jsonData: any;
 	sepsTemplateFileName?: string;
 	exportedFilePath: string;
+	/* CAD reference PNG resolved panel-side (PNG folder near the source doc); placed on the SEP doc. */
+	cadPngPath?: string;
 }
 
 /*
  * Run the standalone separation. Reuses the loaded separation engine (splitColors, generateUnderbase,
- * copyAndPrepareSEPDocument, etc.) via global calls; writes the separated file to a flat SEPARATIONS
+ * copyAndPrepareSEPDocument, etc.) via global calls; writes the separated file to a flat SEPS
  * folder next to ASSETS and leaves it open. Returns { success, separatedDocumentPath, layerNames, ... }.
  */
 export async function runStandaloneSeparation(payload: StandaloneSeparationRunInput): Promise<any> {

@@ -116,6 +116,14 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
  }
 
  ngOnInit(): void {
+  /*
+   * Bridge the shell uses to show/hide the inline standalone form on this tab (from the "+" button
+   * and from a Separations-tab row's Generate). Same global-hook pattern as __LEAP_TAB_NAVIGATION__.
+   */
+  (window as any).__LEAP_GRAPHICS_STANDALONE__ = {
+   open: (job: any) => this.openStandaloneForm(job),
+   close: () => this.closeStandaloneForm()
+  };
   this.startSelectionPolling();
   this.checkVersionDocument().then(() => {
    if (this.hasVersionDocument) {
@@ -126,6 +134,7 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
    } else if (this.hasActiveDocument) {
     this.loadPositionOptions();
    }
+   this.maybeAutoOpenStandaloneForm();
   });
  }
 
@@ -141,6 +150,8 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
      } else if (this.hasActiveDocument) {
       this.loadPositionOptions();
      }
+     /* A different document may carry its own recorded jobs — offer them too. */
+     this.maybeAutoOpenStandaloneForm();
     });
    }, 200);
   }
@@ -594,6 +605,7 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
  }
 
  ngOnDestroy(): void {
+  try { delete (window as any).__LEAP_GRAPHICS_STANDALONE__; } catch (e) { }
   this.isMounted = false;
   if (this.teamCodeCheckInterval) {
    clearInterval(this.teamCodeCheckInterval);
@@ -877,12 +889,165 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
   * metadata and runs "Generate Separate". The legacy create-graphic modal (openCreateGraphicModal)
   * is intentionally left intact and unused so the previous behavior can be restored trivially.
   */
+ /*
+  * Inline standalone (non-LEAP) form, shown on THIS tab under the graphics list when "+" is pressed.
+  * Inline rather than a modal or a separate tab: the form is long and a narrow CEP panel gives a
+  * modal very little room, and the user is already on Graphics when they press "+".
+  * *ngIf, so closing discards the form state and reopening starts clean.
+  */
+ standaloneFormOpen = false;
+ standalonePresetJob: any = null;
+
+ /*
+  * Document (normalized path) the form was already auto-opened for. Auto-open happens at most ONCE
+  * per document: if the user closes the form, reopening it is their choice — re-showing it on every
+  * refresh would fight them.
+  */
+ private autoOpenedForDocKey: string | null = null;
+ /* Document the inline form currently belongs to, so a switch to another document can close it. */
+ private standaloneFormDocKey: string | null = null;
+ /* Most recent document key seen by the auto-open check; used to stamp a manually opened form. */
+ private lastKnownDocKey: string | null = null;
+
+ /*
+  * A document that already carries standalone jobs in its XMP (LEAPStandaloneJobs) has been through
+  * this flow before, so reopening it brings the form straight back — pre-filled from the most recent
+  * job, and already in the post-Export state (the artwork was exported when that job was created, so
+  * only Generate remains). The user does not have to press "+" again to see what they entered.
+  *
+  * Safe for the LEAP flow: a LEAP version document has no LEAPStandaloneJobs field, so this reads an
+  * empty list and does nothing.
+  */
+ private async maybeAutoOpenStandaloneForm(): Promise<void> {
+  try {
+   if (this.isRunningInBrowser) return;
+   if (typeof this.controller.readStandaloneJobsFromXmp !== 'function') return;
+   const res: any = await this.controller.readStandaloneJobsFromXmp();
+   const docKey = String((res && res.documentPath) || '').trim().toLowerCase();
+   /*
+    * Landing on a DIFFERENT document invalidates the once-per-document auto-open memo — it belongs
+    * to the previous document. Without this, switching away (which auto-closes the form) and back
+    * left the non-LEAP document showing a blank Graphics UI: the memo still matched, so the form
+    * never reopened. A form the USER closed still stays closed while they remain on that document.
+    */
+   const prevDocKey = this.lastKnownDocKey;
+   this.lastKnownDocKey = docKey || null;
+   if (prevDocKey && docKey && prevDocKey !== docKey) {
+    this.autoOpenedForDocKey = null;
+   }
+   const rawJobs = res && res.success && Array.isArray(res.jobs) ? res.jobs : [];
+   /*
+    * Trust only jobs recorded for THIS document. XMP travels INSIDE the file, so a duplicated /
+    * Save-As'd .ai carries the ORIGINAL document's jobs — restoring one put the wrong Team Code /
+    * Style Code on the form. Same doc-specific rule as the sidecar restore: a job must name this
+    * document as its source; jobs without the field are treated as foreign and ignored.
+    */
+   const normalizeJobPath = (p: any) =>
+    String(p || '').split('\\').join('/').trim().toLowerCase();
+   const docNorm = normalizeJobPath(res && res.documentPath);
+   const jobs = docNorm
+    ? rawJobs.filter((j: any) => j && normalizeJobPath(j.sourceDocumentPath) === docNorm)
+    : [];
+
+   /*
+    * A LEAP version document must show Organize Graphics. Close a form left open by a PREVIOUS
+    * document — the form hides the whole LEAP UI, so leaving it up meant opening a LEAP file and
+    * being shown standalone fields instead. Only closed when the document actually differs, so a
+    * form the user is filling in on THIS document is never yanked away mid-entry.
+    */
+   if (this.hasVersionDocument) {
+    if (this.standaloneFormOpen && this.standaloneFormDocKey !== docKey) {
+     this.closeStandaloneForm();
+    }
+    return;
+   }
+
+   /*
+    * NON-LEAP document with nothing recorded yet: auto-open a FRESH form (no "+" needed) — it
+    * prefills itself in ngOnInit (sidecar restore → LICENSING sheet → file-name fallbacks).
+    * Once per document (autoOpenedForDocKey), and never over a form already open on this document.
+    * UNSAVED/blank documents are skipped: the host still reports a pseudo-path for them
+    * ("/Untitled-3"), but it has no file EXTENSION — a saved artwork file always does. Those keep
+    * the plain UI as before (Export needs a saved file anyway).
+    */
+   if (jobs.length === 0) {
+    if (this.standaloneFormOpen && this.standaloneFormDocKey !== docKey) {
+     this.closeStandaloneForm();
+    }
+    const isSavedFile = /\.[a-z0-9]{1,5}$/i.test(docKey);
+    if (docKey && isSavedFile && this.autoOpenedForDocKey !== docKey && !this.standaloneFormOpen) {
+     this.autoOpenedForDocKey = docKey;
+     this.openStandaloneForm(null);
+    }
+    return;
+   }
+
+   if (docKey && this.autoOpenedForDocKey === docKey) return;
+   this.autoOpenedForDocKey = docKey || null;
+   /*
+    * A form left open by a DIFFERENT document must not survive the switch — without this close,
+    * the jobs>0 path early-returned and the PREVIOUS document's values (Team Code etc.) stayed
+    * frozen on the UI. A form open for THIS document is left alone (user may be mid-entry).
+    */
+   if (this.standaloneFormOpen && this.standaloneFormDocKey !== docKey) {
+    this.closeStandaloneForm();
+   }
+   if (this.standaloneFormOpen) return;
+
+   /* Most recent job — entries are appended in export order. */
+   const newest = jobs[jobs.length - 1];
+   if (newest) {
+    this.openStandaloneForm(newest);
+   }
+  } catch (err) {
+   /* Never let this block the Graphics tab. */
+  }
+ }
+
+ /* Show the inline form, optionally pre-filled from a job recorded on the document. */
+ openStandaloneForm(job: any): void {
+  this.standalonePresetJob = job || null;
+  this.standaloneFormOpen = true;
+  this.standaloneFormDocKey = this.lastKnownDocKey;
+  this.cdr.detectChanges();
+ }
+
+ closeStandaloneForm(): void {
+  this.standaloneFormOpen = false;
+  this.standalonePresetJob = null;
+  this.standaloneFormDocKey = null;
+  this.cdr.detectChanges();
+ }
+
  openStandaloneSeparation(): void {
   if (!this.hasSelection || this.isRunningInBrowser) return;
-  const nav = (window as any).__LEAP_TAB_NAVIGATION__;
-  if (nav && typeof nav.openStandalone === 'function') {
-   nav.openStandalone();
+  const openStandalone = () => {
+   const nav = (window as any).__LEAP_TAB_NAVIGATION__;
+   if (nav && typeof nav.openStandalone === 'function') {
+    nav.openStandalone();
+   }
+  };
+  /*
+   * The standalone job is recorded on the SOURCE document's XMP at Export, which needs a file on
+   * disk — XMP on an unsaved document cannot be persisted and would silently vanish. Stop here
+   * rather than after the user has filled in the whole form.
+   */
+  if (typeof this.controller.isActiveDocumentSaved !== 'function') {
+   openStandalone();
+   return;
   }
+  this.controller
+   .isActiveDocumentSaved()
+   .then((res) => {
+    /* Only block when the host positively reports "not saved" — a probe failure must not lock the
+       user out of the feature. */
+    if (res && res.success === true && res.saved === false) {
+     alert('Save the document first.\n\nA standalone separation is recorded on the document itself, so the document needs to exist on disk before you can start.');
+     return;
+    }
+    openStandalone();
+   })
+   .catch(() => openStandalone());
  }
 
  closeCreateGraphicModal(): void {

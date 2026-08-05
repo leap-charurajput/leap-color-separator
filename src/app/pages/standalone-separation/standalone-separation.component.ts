@@ -24,6 +24,11 @@ export interface StandaloneSeparationPayload {
  teamName: string;
  concept: string;
  garmentColors: string;
+ /* Additional page-variable tokens supplied by the form (blank-fallback). */
+ graphicName?: string;
+ graphicCode?: string;
+ /* Garment/body color CODE (COLOR_CODE_LOOKUP.xlsx) that sets the GARMENT swatch. */
+ garmentColorCode?: string;
  /* Set after the selection has been exported (so generate can separate from the ASSETS file). */
  exportedFilePath?: string;
 }
@@ -70,6 +75,13 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
   * refresh its option lists (positions / profiles) for the current document context.
   */
  @Input() documentRefreshKey = 0;
+ /*
+  * A job already recorded on the document (LEAPStandaloneJobs), supplied when the form is opened
+  * from a Separations-tab row's Generate button. Pre-fills every field from that job instead of
+  * re-reading the LICENSING sheet, and marks the export as already done so the user goes straight
+  * to Generate. Null for a fresh "+" entry.
+  */
+ @Input() presetJob: any = null;
 
  /* ----- Form fields ----- */
  position = '';
@@ -86,6 +98,20 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
  teamName = '';
  concept = '';
  garmentColors = '';
+ /*
+  * Additional SEP-grid page-variable tokens the team JSON normally supplies. Brand / ORG-GRP /
+  * Template were dropped from the UI (not needed for standalone) — buildJsonData() still emits
+  * them as empty strings so their [Token]s are blanked, never left literal.
+  */
+ /* Feeds the [Graphic Name] / [Art Code] document tokens (NOT the internal pipeline graphicName, which stays = position). */
+ graphicName = '';
+ graphicCode = '';
+ /*
+  * Garment/body color CODE looked up in COLOR_CODE_LOOKUP.xlsx (same as the LEAP flow) to set the
+  * GARMENT swatch. Blank -> the swatch keeps the default gray. Distinct from the free-text
+  * garmentColors label above.
+  */
+ garmentColorCode = '';
 
  /* ----- Option lists ----- */
  positionOptions: string[] = [];
@@ -128,6 +154,37 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
   */
  private static readonly PREFILL_HOOK = '__LEAP_STANDALONE_PREFILL__';
 
+ /*
+  * Path of the document the form was last prefilled for (normalized). Used to detect a REAL
+  * document switch so an unrelated refresh (a tab change, or the same document being re-activated)
+  * does not wipe what the user is typing. Null until the first prefill resolves a document.
+  */
+ private lastPrefilledDocKey: string | null = null;
+ /* Raw path of the source document (the one the art was selected in), for the XMP job stamp. */
+ private sourceDocumentPath = '';
+
+ /*
+  * Documents CREATED by this standalone session (the exported ASSETS .ai, generated SEP docs),
+  * normalized. Export/Generate open these in Illustrator, which fires documentAfterActivate —
+  * that must NOT count as a "document switch", or the form and the separations view would be
+  * wiped right after Export (the bug this guards against).
+  */
+ private sessionDocPaths = new Set<string>();
+
+ /* Normalize a document path for comparison (slashes + case). */
+ private normalizeDocPath(p: string): string {
+  return String(p || '').trim().split('\\').join('/').toLowerCase();
+ }
+
+ /* True while our own Export/Generate is running (they activate documents we created). */
+ private isBusyWithOwnDocuments(): boolean {
+  if (this.isExporting || this.isGenerating) return true;
+  for (let i = 0; i < this.separationGroups.length; i++) {
+   if (this.separationGroups[i].isGenerating) return true;
+  }
+  return false;
+ }
+
  constructor(private controller: ControllerService, private cdr: ChangeDetectorRef) {
   /*
    * Outside Illustrator (plain browser dev) the leap bridge is absent; keep the form
@@ -137,27 +194,47 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
  }
 
  ngOnInit(): void {
+  this.startSelectionPolling();
   this.loadPositionOptions();
   /*
    * Expose a prefill hook so the Graphics "+" button can refresh the form from the active
-   * document each time it opens this tab.
+   * document each time it opens this tab. force=true: a "+" always re-reads for the current
+   * selection and clears the previous export view.
    */
-  (window as any)[StandaloneSeparationComponent.PREFILL_HOOK] = () => this.prefillFromLicensing();
-  /* Prefill once on first load too, in case the tab is opened for an already-active document. */
-  this.prefillFromLicensing();
+  (window as any)[StandaloneSeparationComponent.PREFILL_HOOK] = () => this.prefillForActiveDocument(true);
+  /*
+   * Prefill once on first load, EXCEPT when the form was opened with a stored job.
+   * Angular runs ngOnChanges BEFORE ngOnInit, so applyPresetJob() has already populated every field
+   * by now — re-reading the LICENSING sheet here would overwrite them (Team Code and League came back
+   * empty, because LICENSING does not carry them).
+   */
+  if (!this.presetJob) {
+   this.prefillForActiveDocument(true);
+  }
  }
 
  ngOnChanges(changes: SimpleChanges): void {
+  if (changes['presetJob'] && this.presetJob) {
+   this.applyPresetJob(this.presetJob);
+   return;
+  }
   if (changes['documentRefreshKey'] && !changes['documentRefreshKey'].firstChange) {
    /*
-    * Reload option lists on document activation; the form values themselves are kept so a
-    * user who was mid-entry does not lose their typing when Illustrator refocuses.
+    * Reload option lists on every refresh, and re-prefill ONLY when the active document actually
+    * changed (prefillForActiveDocument(false) is a no-op on a same-document refocus / tab-change
+    * bump, so a user mid-entry does not lose their typing). A real switch re-reads the new
+    * document's LICENSING sheet and clears the previous document's values.
     */
    this.loadPositionOptions();
+   this.prefillForActiveDocument(false);
   }
  }
 
  ngOnDestroy(): void {
+  if (this.selectionPollInterval) {
+   clearInterval(this.selectionPollInterval);
+   this.selectionPollInterval = null;
+  }
   /* Remove the global hook this instance registered. */
   if ((window as any)[StandaloneSeparationComponent.PREFILL_HOOK]) {
    try {
@@ -306,9 +383,260 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
  }
 
  /*
-  * Read the active document's LICENSING sheet and prefill the form. Called on first load and
-  * whenever the Graphics "+" button opens this tab. Safe to call repeatedly; on error the form
-  * is simply left as-is.
+  * Entry point for (re)prefilling the form from the ACTIVE document.
+  * - force = true  (first load, Graphics "+"): always re-read the sheet and clear the export view
+  *   for the current selection; document-level manual fields are kept when the document is unchanged.
+  * - force = false (documentRefreshKey bumped): act ONLY when the active document actually changed,
+  *   so a same-document refocus or a tab-change refresh never clobbers in-progress typing. A real
+  *   switch clears the whole form (previous document's data) before prefilling the new document.
+  */
+ prefillForActiveDocument(force: boolean): void {
+  if (this.isRunningInBrowser) {
+   return;
+  }
+  if (typeof this.controller.getActiveDocumentPath !== 'function') {
+   /* Older build without the document-path probe: fall back to a plain prefill on forced entries. */
+   if (force) {
+    this.resetExportState();
+    this.prefillFromLicensing();
+   }
+   return;
+  }
+  /*
+   * Never react to activations caused by our OWN Export/Generate — they open documents we created
+   * (the ASSETS export, the SEP doc), and treating that as a switch wiped the form + separations
+   * view right after Export.
+   */
+  if (!force && this.isBusyWithOwnDocuments()) {
+   return;
+  }
+  this.controller
+   .getActiveDocumentPath()
+   .then((path: string) => {
+    const key = this.normalizeDocPath(path);
+    /* A document this session created becoming active is not a switch — keep everything as-is. */
+    if (!force && key && this.sessionDocPaths.has(key)) {
+     return;
+    }
+    const docChanged = !!key && key !== this.lastPrefilledDocKey;
+    if (!force && !docChanged) {
+     /* Unrelated refresh on the same document — leave the user's input untouched. */
+     return;
+    }
+    if (!force && docChanged) {
+     /*
+      * DOCUMENT SWITCH under a live form is owned by the GRAPHICS HOST: it closes this form and
+      * reopens a fresh instance for the new document (whose ngOnInit prefills via the forced
+      * path). Mutating fields here made values (e.g. Team Code) visibly flip on the still-open
+      * form before that close/reopen landed — so on a non-forced switch, do nothing.
+      */
+     return;
+    }
+    if (docChanged && !this.sessionDocPaths.has(key)) {
+     /* New document: drop the previous document's values entirely, then prefill the new one. */
+     this.resetFormForNewDocument();
+    } else if (!docChanged) {
+     /* Same document, forced ("+"/new selection): only the post-Export view is stale. */
+     this.resetExportState();
+    }
+    if (key && !this.sessionDocPaths.has(key)) {
+     this.lastPrefilledDocKey = key;
+     /* Raw (un-normalized) path of the document the user selected art in — the source document the
+        standalone job is stamped onto at Export. lastPrefilledDocKey is lowercased/slash-normalized
+        for comparison, so it cannot be used as a real path. */
+     this.sourceDocumentPath = path || '';
+    }
+    /*
+     * Assets already exported for this location? Restore the form + Separations view from the
+     * sidecar JSON and skip the LICENSING read — no re-export needed.
+     */
+    if (this.tryRestoreFromSidecar(String(path || '').trim())) {
+     return;
+    }
+    this.prefillFromLicensing();
+   })
+   .catch(() => {
+    /* Could not resolve the document; on a forced entry still prefill best-effort. */
+    if (force) {
+     this.resetExportState();
+     this.prefillFromLicensing();
+    }
+   });
+ }
+
+ /*
+  * Persist the standalone job at Export time, to TWO places — one object, two homes:
+  *
+  *  1. A sidecar JSON next to the exported ASSETS .ai. Keyed by the EXPORT location, so the metadata
+  *     can be reused for other files there and re-opening the source doc skips re-export.
+  *  2. The SOURCE document's own XMP (`LEAPStandaloneJobs`). Keyed by the DOCUMENT, so the document
+  *     itself records that a standalone job exists for it — the same way a LEAP version document
+  *     carries LEAPSeparationProfileData. This is what lets the Separations tab show a standalone job
+  *     without a dedicated Standalone tab.
+  *
+  * Neither is redundant: XMP travels inside the document (survives the exported file being moved),
+  * the sidecar survives XMP being stripped and is readable without opening Illustrator.
+  *
+  * Both are best-effort — a persistence failure must never fail an export that actually succeeded.
+  */
+ private writeExportSidecar(colors: string[]): void {
+  if (!this.exportedFilePath) return;
+
+  const job = {
+   position: this.position.trim(),
+   teamCode: this.teamCode.trim(),
+   league: this.league.trim(),
+   styleCode: this.styleCode.trim(),
+   profileName: this.profileName.trim(),
+   teamName: this.teamName.trim(),
+   concept: this.concept.trim(),
+   garmentColors: this.garmentColors.trim(),
+   garmentColorCode: this.garmentColorCode.trim(),
+   graphicName: this.graphicName.trim(),
+   graphicCode: this.graphicCode.trim(),
+   exportedFileName: this.exportedFileName,
+   exportedFilePath: this.exportedFilePath,
+   colors: Array.isArray(colors) ? colors : [],
+   /*
+    * Which SOURCE document this job belongs to. Restore is doc-specific: several source files can
+    * share one folder (and thus one ASSETS folder), and without this key a doc switch restored the
+    * NEWEST sidecar regardless of owner — the previous document's Team Code etc. stuck on the form.
+    */
+   sourceDocumentPath: this.sourceDocumentPath
+  };
+
+  /* (1) Sidecar beside the exported .ai — panel-side via cep_node fs, no host round-trip. */
+  try {
+   const req = (window as any).cep_node?.require;
+   if (req) {
+    const fs = req('fs');
+    const sidecarPath = this.exportedFilePath.replace(/\.ai$/i, '.json');
+    fs.writeFileSync(sidecarPath, JSON.stringify(job, null, 2), 'utf8');
+   }
+  } catch (e) {
+   console.warn('[STANDALONE] Could not write export sidecar:', e);
+  }
+
+  /* (2) Source-document XMP. Upserted by exportedFilePath, so re-exporting the same selection
+     replaces its entry rather than stacking duplicates. */
+  try {
+   if (typeof this.controller.writeStandaloneJobToXmp === 'function') {
+    this.controller
+     .writeStandaloneJobToXmp({ ...job, sourceDocumentPath: this.sourceDocumentPath }, this.sourceDocumentPath)
+     .then((res: any) => {
+      if (res && res.success) {
+       console.log(
+        '[STANDALONE] Job recorded on source document XMP (' +
+         res.jobCount +
+         ' job(s), ' +
+         (res.replaced ? 'replaced existing' : 'new entry') +
+         ')'
+       );
+      } else {
+       console.warn('[STANDALONE] Could not record job on source XMP:', res && res.error);
+      }
+     })
+     .catch((err: any) => console.warn('[STANDALONE] Source XMP write error:', err));
+   }
+  } catch (e) {
+   console.warn('[STANDALONE] Could not record job on source XMP:', e);
+  }
+ }
+
+ /*
+  * Restore the form + Separations view from the newest ASSETS sidecar whose .ai still exists.
+  * Returns true when restored (caller then skips the LICENSING prefill and the Export step).
+  */
+ private tryRestoreFromSidecar(activeDocPath: string): boolean {
+  try {
+   const req = (window as any).cep_node?.require;
+   if (!req || !activeDocPath) return false;
+   const fs = req('fs');
+   const path = req('path');
+   const assetsDir = path.join(path.dirname(activeDocPath), 'ASSETS');
+   if (!fs.existsSync(assetsDir)) return false;
+   const jsons = fs
+    .readdirSync(assetsDir)
+    .filter((f: string) => /\.json$/i.test(f))
+    .map((f: string) => path.join(assetsDir, f))
+    .sort((a: string, b: string) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+   for (const jp of jsons) {
+    let sc: any = null;
+    try { sc = JSON.parse(fs.readFileSync(jp, 'utf8')); } catch (pe) { continue; }
+    if (!sc || !sc.exportedFilePath || !fs.existsSync(sc.exportedFilePath)) continue;
+    /*
+     * DOC-SPECIFIC restore: a shared folder means a shared ASSETS folder, and its newest sidecar
+     * may belong to a DIFFERENT source document — restoring it left the previous document's
+     * Team Code etc. on the form. Only a sidecar recorded for THIS document qualifies; older
+     * sidecars without the field are skipped (never restore foreign data).
+     */
+    const scSource = this.normalizeDocPath(String(sc.sourceDocumentPath || ''));
+    if (!scSource || scSource !== this.normalizeDocPath(activeDocPath)) continue;
+    /* Apply the stored form values (they were user-confirmed at export time). */
+    this.position = String(sc.position || '');
+    this.teamCode = String(sc.teamCode || '');
+    this.league = String(sc.league || '');
+    this.styleCode = String(sc.styleCode || '');
+    this.profileName = String(sc.profileName || '');
+    this.teamName = String(sc.teamName || '');
+    this.concept = String(sc.concept || '');
+    this.garmentColors = String(sc.garmentColors || '');
+    this.garmentColorCode = String(sc.garmentColorCode || '');
+    this.graphicName = String(sc.graphicName || '');
+    this.graphicCode = String(sc.graphicCode || '');
+    this.exported = true;
+    this.exportedFileName = String(sc.exportedFileName || '');
+    this.exportedFilePath = String(sc.exportedFilePath || '');
+    this.sessionDocPaths.add(this.normalizeDocPath(this.exportedFilePath));
+    this.separationGroups = this.buildSeparationGroups(
+     Array.isArray(sc.colors) ? sc.colors : []
+    );
+    this.statusMessage = 'Restored from previous export: ' + this.exportedFileName;
+    /* Restore paths skip the LICENSING read — record here so the debug box is not empty. */
+    try {
+     this.licensingDebug = 'RESTORED FROM SIDECAR: ' + jp + '\n' + JSON.stringify(sc, null, 2);
+    } catch (dbgErr) { /* debug only */ }
+    this.cdr.detectChanges();
+    return true;
+   }
+   return false;
+  } catch (e) {
+   return false;
+  }
+ }
+
+ /* Clear the post-Export view (separations grouped by profile) — it belongs to a specific selection. */
+ private resetExportState(): void {
+  this.exported = false;
+  this.exportedFileName = '';
+  this.exportedFilePath = '';
+  this.separationGroups = [];
+  this.statusMessage = '';
+  this.warningMessage = '';
+ }
+
+ /* Clear every editable field + the export view when moving to a DIFFERENT document. */
+ private resetFormForNewDocument(): void {
+  this.position = '';
+  this.teamCode = '';
+  this.league = '';
+  this.styleCode = '';
+  this.profileName = '';
+  this.profileResolveWarning = '';
+  this.teamName = '';
+  this.concept = '';
+  this.garmentColors = '';
+  this.garmentColorCode = '';
+  this.graphicName = '';
+  this.graphicCode = '';
+  this.resetExportState();
+ }
+
+ /*
+  * Read the active document's LICENSING sheet and prefill the form. Called via
+  * prefillForActiveDocument on first load and whenever the Graphics "+" button opens this tab.
+  * Safe to call repeatedly; on error the form is simply left as-is. Only non-empty extracted values
+  * are applied, so a partial sheet never blanks a field.
   */
  prefillFromLicensing(): void {
   if (this.isRunningInBrowser || typeof this.controller.getLicensingInfo !== 'function') {
@@ -341,6 +669,9 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
      this.licensingDebug = String(result);
     }
     if (!result || !result.success) {
+     /* No LICENSING sheet at all — the file name is the only metadata source. */
+     this.applyFilenameFallbacks();
+     this.resolveProfileFromStyle();
      return;
     }
     /*
@@ -358,12 +689,16 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
      /* ignore debug stringify issues */
     }
     this.applyLicensingRaw(mapped);
+    /* Sheet did not supply everything (League never does) — derive missing values from the file name. */
+    this.applyFilenameFallbacks();
     /* Style Code just changed via prefill — resolve its profile from Styles.xlsx. */
     this.resolveProfileFromStyle();
    })
    .catch((err: any) => {
-    /* Ignore: leave the form untouched if the sheet cannot be read. */
+    /* Ignore: leave the form untouched if the sheet cannot be read — file-name fallbacks still apply. */
     this.licensingDebug = 'getLicensingInfo error: ' + (err && err.message ? err.message : String(err));
+    this.applyFilenameFallbacks();
+    this.resolveProfileFromStyle();
    })
    .finally(() => {
     this.isPrefilling = false;
@@ -482,6 +817,66 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
   * League or Profile, so those stay for the user to fill. Only non-empty extracted values are
   * applied, so a partial sheet never blanks a field.
   */
+ /*
+  * Known league codes for the file-name fallback. The first file-name segment may carry a suffix
+  * (e.g. "MLBN" -> league "MLB"), so we prefix-match against this list; an unmatched segment is
+  * used as-is. Extend as new leagues appear.
+  */
+ private static readonly KNOWN_LEAGUES = [
+  'WNBA', 'NCAA', 'MILB', 'MLB', 'NFL', 'NBA', 'NHL', 'MLS', 'USFL', 'XFL'
+ ];
+
+ /*
+  * Derive missing form values from the SOURCE DOCUMENT FILE NAME. Naming convention:
+  * <LEAGUE...>_<CONCEPT>_<STYLE>_<...>  e.g. "MLBN_0FWK_N199_FZD31" ->
+  * league "MLB" (known-league prefix of segment 1), concept "0FWK" (segment 2),
+  * style "N199" (segment 3). The LICENSING sheet never carries League, so this is its primary
+  * source. Fills ONLY still-empty fields — never overwrites sheet or user input.
+  */
+ private applyFilenameFallbacks(): void {
+  try {
+   const p = String(this.sourceDocumentPath || '');
+   if (!p) return;
+   /* Unsaved docs have a pseudo-path ("/Untitled-3") — deriving League from that pollutes the form. */
+   if (!this.isSourceDocSaved) return;
+   const base = p.split('\\').join('/').split('/').pop() || '';
+   const name = base.replace(/\.[^.]+$/, '');
+   if (!name) return;
+   const segs = name.split('_').map((s) => s.trim()).filter((s) => s.length > 0);
+   if (!segs.length) return;
+
+   /*
+    * TEAM CODE — the 4th segment is <ORGCODE><GRAPHICCODE> (e.g. "DQSD31" -> DQS + D31,
+    * "DNVD31" -> DNV + D31; same split the CAD PNG name uses). The FILE NAME is AUTHORITATIVE
+    * here — sibling files differing only in this segment are different teams, while the LICENSING
+    * sheet inside them can carry a stale/shared Org code (seen: sheet said GIA, file said DQS).
+    * So this OVERRIDES the sheet value, unlike the fill-if-empty fields below.
+    */
+   if (segs.length > 3) {
+    const m4 = segs[3].match(/^(.*?)([A-Za-z]\d+)$/);
+    if (m4 && m4[1]) {
+     this.teamCode = m4[1];
+    }
+   }
+
+   if (!this.league.trim()) {
+    const segUpper = segs[0].toUpperCase();
+    const known = StandaloneSeparationComponent.KNOWN_LEAGUES.find(
+     (lg) => segUpper.indexOf(lg) === 0
+    );
+    this.league = known || segs[0];
+   }
+   if (!this.concept.trim() && segs.length > 1) {
+    this.concept = segs[1];
+   }
+   if (!this.styleCode.trim() && segs.length > 2) {
+    this.styleCode = segs[2];
+   }
+  } catch (e) {
+   /* best-effort — a malformed name simply leaves the fields for the user */
+  }
+ }
+
  private applyLicensingRaw(raw: any): void {
   const pick = (v: any) => (v != null ? String(v).trim() : '');
 
@@ -496,7 +891,19 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
   if (teamName) this.teamName = teamName;
   if (conceptCode) this.concept = conceptCode;
   if (style) this.styleCode = style;
-  if (color) this.garmentColors = color;
+  if (color) {
+   /*
+    * The sheet's "Color" field carries garment color CODES (e.g. "0484, 0042") — the same codes
+    * COLOR_CODE_LOOKUP.xlsx is keyed by — not descriptive names. Keep the full string as the
+    * [Garm Colors] token text, AND feed the FIRST code into the lookup field that sets the
+    * GARMENT swatch (mirrors the LEAP flow, which looks up the first color code).
+    */
+   this.garmentColors = color;
+   const firstColorToken = color.split(/[,/]+/)[0].trim();
+   if (/^[0-9A-Za-z]{2,6}$/.test(firstColorToken)) {
+    this.garmentColorCode = firstColorToken;
+   }
+  }
 
   const mappedPosition = this.mapPlacementToPosition(placement);
   if (mappedPosition) this.position = mappedPosition;
@@ -540,8 +947,151 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
   * Name / size are intentionally not collected: standalone exports the current selection as-is
   * and does not modify the active document, so the export bounds come from the selection itself.
   */
+ /*
+  * Live Illustrator selection state. Export copies the SELECTED artwork into the ASSETS file, so with
+  * nothing selected it would export an empty document — the button is disabled instead. Polled the
+  * same way the Graphics tab does it: Illustrator raises no selection-changed event to CEP.
+  */
+ hasSelection = false;
+ private selectionPollInterval: any;
+
+ private startSelectionPolling(): void {
+  if (this.isRunningInBrowser) return;
+  this.refreshSelectionState();
+  this.selectionPollInterval = setInterval(() => this.refreshSelectionState(), 700);
+ }
+
+ private refreshSelectionState(): void {
+  this.controller
+   .getSelectionCount()
+   .then((count: number) => {
+    const next = (count || 0) > 0;
+    if (next !== this.hasSelection) {
+     this.hasSelection = next;
+     this.cdr.detectChanges();
+    }
+   })
+   .catch(() => { });
+  this.validateExportedFileStillExists();
+ }
+
+ /*
+  * The post-Export state ("Generate without a selection") is only valid while the exported .ai is
+  * still ON DISK. If the user deletes it, exported=true would keep the Export button enabled with
+  * nothing selected — and Generate would fail on a missing file. Piggybacks on the selection poll;
+  * a cheap fs.existsSync every 700ms.
+  */
+ private validateExportedFileStillExists(): void {
+  if (!this.exported || !this.exportedFilePath) return;
+  try {
+   const req = (window as any).cep_node?.require;
+   if (!req) return;
+   const fs = req('fs');
+   if (!fs.existsSync(this.exportedFilePath)) {
+    this.resetExportState();
+    this.warningMessage = 'The exported file was deleted — select the artwork and Export again.';
+    this.cdr.detectChanges();
+   }
+  } catch (e) {
+   /* best-effort — never break the poll */
+  }
+ }
+
+ /*
+  * CAD reference PNG for the standalone flow (mirrors the LEAP flow's CAD placement). The PNG name
+  * is derived from values already on the form + the source file name:
+  *   <STYLE>-<COLORCODE>-<PREFIX>-<GCODE>.png
+  * e.g. source "MLBN_0FWK_N199_ANGD31" + garment color code "10A" -> "N199-10A-ANG-D31.png"
+  * (the 4th file-name segment "ANGD31" splits into "ANG" + "D31" at its final letter+digits run).
+  * Searched in a "PNG" folder at the source document's level, one level up and two levels up —
+  * case-insensitive file match. Returns '' when anything is missing; the CAD image is optional.
+  */
+ private resolveCadPngPath(): string {
+  try {
+   const req = (window as any).cep_node?.require;
+   if (!req) return '';
+   const fs = req('fs');
+   const path = req('path');
+   const src = String(this.sourceDocumentPath || '').trim();
+   if (!src) return '';
+
+   const base = src.split('\\').join('/').split('/').pop() || '';
+   const name = base.replace(/\.[^.]+$/, '');
+   const segs = name.split('_').map((s) => s.trim()).filter((s) => s.length > 0);
+
+   const style = this.styleCode.trim() || (segs.length > 2 ? segs[2] : '');
+   /*
+    * The PNG folder holds ONE PNG PER COLORWAY (e.g. N199-10A-… and N199-20B-…). Choose the one
+    * for the color code THIS separation is generated for = the FIRST Garment Color Code (the same
+    * code that sets the GARMENT/body swatch). Remaining codes are tried only as fallback when the
+    * first code's PNG is missing.
+    */
+   const colorCodes = this.garmentColorCode
+    .split(/[,/]+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+   const lastSeg = segs.length > 3 ? segs[3] : '';
+   /* "ANGD31" -> ["ANG", "D31"]: split at the final letter-followed-by-digits run. */
+   const m = lastSeg.match(/^(.*?)([A-Za-z]\d+)$/);
+   if (!style || !colorCodes.length || !m || !m[1]) return '';
+
+   /* Collect the PNG dirs once (doc level, one up, two up). */
+   const pngDirs: string[] = [];
+   let dir = path.dirname(src);
+   for (let level = 0; level < 3; level++) {
+    pngDirs.push(path.join(dir, 'PNG'));
+    const parent = path.dirname(dir);
+    if (!parent || parent === dir) break;
+    dir = parent;
+   }
+
+   /* Color code has priority over folder level: the generating code's PNG wins wherever it lives. */
+   for (const code of colorCodes) {
+    const pngName = (style + '-' + code + '-' + m[1] + '-' + m[2] + '.png').toLowerCase();
+    for (const pngDir of pngDirs) {
+     try {
+      if (fs.existsSync(pngDir)) {
+       const files: string[] = fs.readdirSync(pngDir);
+       for (const f of files) {
+        if (String(f).toLowerCase() === pngName) {
+         return path.join(pngDir, f);
+        }
+       }
+      }
+     } catch (e) {
+      /* unreadable level — keep looking */
+     }
+    }
+   }
+  } catch (e) {
+   /* best-effort — CAD image is optional */
+  }
+  return '';
+ }
+
+ /*
+  * Export writes the ASSETS folder NEXT TO the document, so an UNSAVED document has nowhere to
+  * export to — the host reports a pseudo-path for it ("/Untitled-3") with no file extension,
+  * while a saved artwork file always has one.
+  */
+ get isSourceDocSaved(): boolean {
+  return /\.[a-z0-9]{1,5}$/i.test(String(this.sourceDocumentPath || '').trim());
+ }
+
  get canGenerate(): boolean {
   if (this.isGenerating || this.isRunningInBrowser || this.isResolvingProfile) {
+   return false;
+  }
+  /*
+   * Export needs a live selection. Skipped once the artwork has been exported (or the form was
+   * restored from a stored job): the .ai already exists on disk, so Generate no longer depends on
+   * what is selected in the document.
+   */
+  if (!this.exported && !this.hasSelection) {
+   return false;
+  }
+  /* And a SAVED document — no ASSETS destination exists next to an unsaved one. */
+  if (!this.exported && !this.isSourceDocSaved) {
    return false;
   }
   /* profileName is the profile resolved from the Style Code via Styles.xlsx. */
@@ -565,6 +1115,9 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
    teamName: this.teamName.trim(),
    concept: this.concept.trim(),
    garmentColors: this.garmentColors.trim(),
+   graphicName: this.graphicName.trim(),
+   graphicCode: this.graphicCode.trim(),
+   garmentColorCode: this.garmentColorCode.trim(),
    exportedFilePath: this.exportedFilePath || undefined
   };
  }
@@ -598,13 +1151,47 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
     this.exported = true;
     this.exportedFileName = String(result.fileName || '');
     this.exportedFilePath = String(result.filePath || '');
+    /*
+     * The exported file is now open/active in Illustrator. Register it as OUR document so the
+     * documentAfterActivate it fires is not mistaken for a switch (which would wipe the form
+     * and this separations view).
+     */
+    if (this.exportedFilePath) {
+     this.sessionDocPaths.add(this.normalizeDocPath(this.exportedFilePath));
+    }
     this.statusMessage = 'Exported to ASSETS: ' + this.exportedFileName;
     /* Decoration inks extracted from the art, to show as the group's Colors. */
     const colors: string[] = Array.isArray(result.colors)
      ? result.colors.map((c: any) => String(c || '').trim()).filter((c: string) => c.length > 0)
      : [];
-    /* Build the profile-grouped separations view (one row per profile). */
-    this.separationGroups = this.buildSeparationGroups(colors);
+    /*
+     * The separation engine (splitColors) builds ink plates from SPOT colors only — LEAP art is
+     * always spot-swatched, but an arbitrary standalone file may use process/CMYK fills. Warn now,
+     * at Export, so the user isn't surprised by an empty Plates list after Generate.
+     */
+    if (colors.length === 0) {
+     this.warningMessage =
+      'No spot-color inks found in the selected artwork. Separation plates are built from spot ' +
+      'swatches — convert the artwork colors to spot swatches (Swatches panel) and re-export, or ' +
+      'the generated separation will have no ink plates.';
+    }
+    /*
+     * Persist the metadata: sidecar next to the exported .ai, and the job on the SOURCE document's
+     * XMP. The XMP copy is what the Separations tab reads, so it must be written BEFORE we navigate.
+     */
+    this.writeExportSidecar(colors);
+    /*
+     * Export is the end of this form's job. The separation itself is shown on the SEPARATIONS tab,
+     * which lists every standalone job recorded on the document (with its own Generate button) — so
+     * close the form and go there rather than showing a second, competing copy of that view here.
+     * Skipped when the artwork has no spot inks: the warning above needs to stay on screen.
+     */
+    this.separationGroups = [];
+    if (colors.length > 0) {
+     this.finishAndShowSeparations();
+    } else {
+     this.separationGroups = this.buildSeparationGroups(colors);
+    }
    })
    .catch((err: any) => {
     this.warningMessage = (err && err.message) || 'Could not export the selection to ASSETS.';
@@ -613,6 +1200,28 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
     this.isExporting = false;
     this.cdr.detectChanges();
    });
+ }
+
+ /*
+  * Close the form and hand over to the Separations tab. The XMP job stamp written at Export is what
+  * that tab reads, so the navigation bump makes it re-read the document and show the new job.
+  */
+ private finishAndShowSeparations(): void {
+  /*
+   * Export closes the exported document and re-activates the source one, which fires
+   * documentAfterActivate — and the shell's auto-routing would send the user to Graphics, undoing
+   * this handover. Suppress that routing for a short window so the navigation below wins.
+   */
+  (window as any).__LEAP_STANDALONE_HANDOVER_UNTIL__ = Date.now() + 3000;
+  const close = (window as any).__LEAP_STANDALONE_CLOSE__;
+  if (typeof close === 'function') {
+   close();
+  }
+  const nav = (window as any).__LEAP_TAB_NAVIGATION__;
+  if (nav && typeof nav.navigateToTab === 'function') {
+   /* Delay so the export's own document activation settles before the tab refreshes. */
+   setTimeout(() => nav.navigateToTab(1), 600);
+  }
  }
 
  /*
@@ -676,12 +1285,28 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
      profileMetadata: meta,
      jsonData: jsonData,
      sepsTemplateFileName: sepsTemplateFileName || undefined,
-     exportedFilePath: this.exportedFilePath
+     exportedFilePath: this.exportedFilePath,
+     cadPngPath: this.resolveCadPngPath() || undefined
     });
    })
    .then((result: any) => {
+    /*
+     * Host diagnostics come back in the response and are echoed to the console, because the
+     * ExtendScript-side file logger silently fails here (no [JSX] line ever reaches leap_seps.log).
+     * console.* IS captured by the panel file logger, so this is the transport that actually works.
+     * Logged for success AND failure — a wrong-plates run reports success.
+     */
+    if (result && Array.isArray(result.debugLog)) {
+     for (const line of result.debugLog) {
+      console.log('[STANDALONE] ' + line);
+     }
+    }
     if (result && result.success) {
      group.status = 'Separation generated. Opening Plates…';
+     /* The generated SEP doc is ours too — its activation must not reset this form. */
+     if (result.separatedDocumentPath) {
+      this.sessionDocPaths.add(this.normalizeDocPath(String(result.separatedDocumentPath)));
+     }
      /* Switch to the Plates tab (index 2) to show the generated plates. */
      const nav = (window as any).__LEAP_TAB_NAVIGATION__;
      if (nav && typeof nav.navigateToTab === 'function') {
@@ -702,7 +1327,12 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
    });
  }
 
- /* Build the jsonData map (form values) used to fill the SEP template's [Token] variables. */
+ /*
+  * Build the jsonData map (form values) used to fill the SEP template's [Token] variables.
+  * Every known page-variable token is included (blank-defaulted) so no literal "[Token]" is left in
+  * the separated document — findValueInJSON returns the empty string and the host replaces the token
+  * with it. Key variants (spaced + unspaced) match the host's normalized token lookup.
+  */
  private buildJsonData(): any {
   const t = this.teamCode.trim();
   const l = this.league.trim();
@@ -710,6 +1340,10 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
   const c = this.concept.trim();
   const gc = this.garmentColors.trim();
   const pos = this.position.trim();
+  /* No UI fields for these anymore: [Graphic Name]/[Art Code] default to Position (the same value
+     the pipeline uses as graphicName); a sidecar-restored value still wins when present. */
+  const gn = this.graphicName.trim() || pos;
+  const gcode = this.graphicCode.trim();
   return {
    TeamCode: t,
    'Team Code': t,
@@ -721,7 +1355,28 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
    Styles: this.styleCode.trim(),
    GarmColors: gc,
    'Garm Colors': gc,
-   Position: pos
+   Position: pos,
+   /* Additional page-variable tokens sourced from the form (see field declarations). */
+   GraphicName: gn,
+   'Graphic Name': gn,
+   'Art Code': gn,
+   'Graphic Code': gcode,
+   Graphic_code: gcode,
+   /*
+    * SEP-template tokens under their EXACT document spelling (findValueInJSON matches
+    * hasOwnProperty first): concept, org code and colorway all come from the form.
+    */
+   GRAPHIC_CONCEPT_CODE: c,
+   Graphic_Concept_Code: c,
+   Lineup_Org_Code: t,
+   LINEUP_ORG_CODE: t,
+   Colorway_Desc: gc,
+   COLORWAY_DESC: gc,
+   /* No UI for these (dropped as not needed) — emit empty so their [Token]s are blanked, not literal. */
+   Brand: '',
+   'ORG-GRP': '',
+   ORGGRP: '',
+   Template: ''
   };
  }
 
@@ -731,6 +1386,93 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
   * standalone form + the shared profile lookups. Also returns the SEP template file name from
   * General Settings.
   */
+ /*
+  * Custom per-underbase names for a profile, read from the raw Profiles.json.
+  *
+  * The leap-bundle profileInfo does not expose `underbaseNames`, so the names have to come from the
+  * profile records directly. Mirrors resolveUnderbaseNamesForProfile in separations.component.ts —
+  * kept as a local copy because the two pages share no base class today. Returns four entries; an
+  * empty entry means "use the default White UB N naming".
+  */
+ /*
+  * Restore the form from a job already recorded on the document, then jump straight to the
+  * post-Export state: the artwork was exported when the job was first created, so the .ai already
+  * exists and only Generate remains. Used when the user presses Generate on a Separations-tab row.
+  */
+ private applyPresetJob(job: any): void {
+  if (!job) return;
+  /* Restore paths skip the LICENSING read, which left the temporary debug box empty — record here. */
+  try {
+   this.licensingDebug = 'RESTORED FROM XMP JOB:\n' + JSON.stringify(job, null, 2);
+  } catch (e) { /* debug only */ }
+  this.position = job.position ? String(job.position) : '';
+  this.teamCode = job.teamCode ? String(job.teamCode) : '';
+  this.league = job.league ? String(job.league) : '';
+  this.styleCode = job.styleCode ? String(job.styleCode) : '';
+  this.profileName = job.profileName ? String(job.profileName) : '';
+  this.teamName = job.teamName ? String(job.teamName) : '';
+  this.concept = job.concept ? String(job.concept) : '';
+  this.garmentColors = job.garmentColors ? String(job.garmentColors) : '';
+  this.garmentColorCode = job.garmentColorCode ? String(job.garmentColorCode) : '';
+  this.graphicName = job.graphicName ? String(job.graphicName) : '';
+  this.graphicCode = job.graphicCode ? String(job.graphicCode) : '';
+  this.exportedFileName = job.exportedFileName ? String(job.exportedFileName) : '';
+  this.exportedFilePath = job.exportedFilePath ? String(job.exportedFilePath) : '';
+  this.sourceDocumentPath = job.sourceDocumentPath ? String(job.sourceDocumentPath) : '';
+  this.exported = !!this.exportedFilePath;
+  const colors: string[] = Array.isArray(job.colors) ? job.colors.filter((c: any) => !!c) : [];
+  this.separationGroups = this.profileName
+   ? [
+      {
+       profileName: this.profileName,
+       styleCodes: this.styleCode ? [this.styleCode] : [],
+       colors: colors,
+       garmentColors: this.garmentColors,
+       isGenerating: false,
+       status: '',
+       error: ''
+      }
+     ]
+   : [];
+  /* Its own document is already open/known — do not let its activation reset this form. */
+  if (this.exportedFilePath) {
+   this.sessionDocPaths.add(this.normalizeDocPath(this.exportedFilePath));
+  }
+  this.statusMessage = 'Loaded a saved standalone job. Generate the separation when ready.';
+  this.cdr.detectChanges();
+
+  /*
+   * Opened by the Separations tab's Generate button: run it straight away instead of waiting for the
+   * user to press Generate again on a form they never asked to see. Deferred a tick so the group
+   * above is bound first. generateGroup() navigates to Plates on success, as the LEAP flow does.
+   */
+  if (job.autoGenerate && this.separationGroups.length > 0) {
+   this.statusMessage = 'Generating separation…';
+   setTimeout(() => this.generateGroup(this.separationGroups[0]), 0);
+  }
+ }
+
+ private async resolveUnderbaseNamesForProfile(profileCode: string, profileName: string): Promise<string[]> {
+  const empty = ['', '', '', ''];
+  try {
+   if (this.isRunningInBrowser || !this.controller.getSeparationProfiles) return empty;
+   const result: any = await this.controller.getSeparationProfiles();
+   const profiles: any[] = result && result.success && Array.isArray(result.profiles) ? result.profiles : [];
+   const code = String(profileCode || '').trim().toLowerCase();
+   const name = String(profileName || '').trim().toLowerCase();
+   const match = profiles.find((p) => {
+    const pc = String((p && (p['Profile Code'] ?? p.profileCode)) || '').trim().toLowerCase();
+    const pn = String((p && (p['Profile Name'] ?? p.profileName ?? p.name)) || '').trim().toLowerCase();
+    return (!!code && pc === code) || (!!name && pn === name);
+   });
+   const arr = match && Array.isArray(match.underbaseNames) ? match.underbaseNames : null;
+   if (!arr) return empty;
+   return [0, 1, 2, 3].map((i) => (arr[i] != null ? String(arr[i]).trim() : ''));
+  } catch (_) {
+   return empty;
+  }
+ }
+
  private async buildStandaloneProfileMetadata(
   group: StandaloneSeparationGroup
  ): Promise<{ meta: any; sepsTemplateFileName: string }> {
@@ -757,13 +1499,34 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
   } catch (e) {
    /* non-fatal */
   }
+  /*
+   * Resolve the LEAP Data base path via the panel (CEP) resolver and pass it to the leap-bundle
+   * profile lookup — the Node-side existsSync gate fails persistently on some cloud/network drives
+   * (same workaround as the Styles.xlsx profile-name lookup above). Without profileInfo the meta
+   * carries NO underbase/blocker config, and White UB / Choke generate wrong vs the LEAP flow.
+   */
+  let dataBasePath = '';
   try {
-   const infoRes: any = await this.controller.getProfileInformation(profileCode || profileName, lookupOptions);
+   if (typeof this.controller.getLeapServerDataPath === 'function') {
+    dataBasePath = String((await this.controller.getLeapServerDataPath()) || '').trim();
+   }
+  } catch (e) {
+   dataBasePath = '';
+  }
+  try {
+   const infoOptions: any = dataBasePath ? { ...lookupOptions, basePath: dataBasePath } : lookupOptions;
+   const infoRes: any = await this.controller.getProfileInformation(profileCode || profileName, infoOptions);
    if (infoRes && infoRes.success && infoRes.profileInfo) {
     profileInfo = infoRes.profileInfo;
    }
   } catch (e) {
    /* non-fatal */
+  }
+  if (!profileInfo || !profileInfo.found) {
+   /* Surface it — underbase/choke/blocker would silently generate with defaults otherwise. */
+   group.error =
+    'Profile settings could not be loaded from Profiles.json (underbase/choke config missing). ' +
+    'Check General Settings → Data Folder Path, then retry.';
   }
 
   let artistName = '';
@@ -807,6 +1570,10 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
   if (profileInfo && profileInfo.found) {
    if (profileInfo.profileName) meta.resolvedProfileName = String(profileInfo.profileName);
    if (profileInfo.profileCode) meta.profileCode = String(profileInfo.profileCode);
+   /* Mirror the LEAP flow: the profile's own distress flag wins over the form default. */
+   if (profileInfo.distress != null && String(profileInfo.distress).trim() !== '') {
+    meta.profileDistress = String(profileInfo.distress).trim().toUpperCase() === 'Y' ? 'Y' : 'N';
+   }
    meta.underbaseEnabled = [
     true,
     !!profileInfo.underbase2Enabled,
@@ -836,8 +1603,17 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
         : defaultUbSwatches[j]
       )
     : defaultUbSwatches.slice();
-   /* Empty entries -> the JSX generator uses the default "White UB N" naming. */
-   meta.underbaseNames = ['', '', '', ''];
+   /*
+    * Custom per-UB names live in the raw Profiles.json (the Node profileInfo does not expose them),
+    * so read them directly — same as the LEAP flow. Hardcoding empties here meant a profile with
+    * custom underbase names (e.g. "SL White UB" / "SL White UB 2nd") silently fell back to the
+    * default "White UB N" naming, producing different swatch + layer names than the LEAP path.
+    * Empty entries still mean "use the default naming".
+    */
+   meta.underbaseNames = await this.resolveUnderbaseNamesForProfile(
+    meta.profileCode,
+    meta.resolvedProfileName || profileName
+   );
    meta.blackInksKnockoutDisplay =
     profileInfo.blackInksKnockoutDisplay != null ? String(profileInfo.blackInksKnockoutDisplay) : '';
    meta.underbaseSwatch =
@@ -847,10 +1623,44 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
    meta.blocker = toEnabled(profileInfo.blocker);
    meta.blockerMesh = profileInfo.blockerMesh != null ? String(profileInfo.blockerMesh) : '';
    meta.formatInkNameLabel = !!profileInfo.formatInkNameLabel;
+   /*
+    * Same fallback as the LEAP flow. An empty format is NOT equivalent to the default:
+    * renameFormattedInks self-defaults to "PANTONE ### C", but resolveSharedWhitePlateSwatchName
+    * (color_separation.jsx) gates on `if (fmt)` and builds no candidates when it is blank — so the
+    * format-aware white-plate sharing was silently skipped in standalone, giving different white /
+    * underbase plates than the LEAP path for the same artwork.
+    */
    meta.colorNameLabelFormat =
     profileInfo.colorNameLabelFormat != null && String(profileInfo.colorNameLabelFormat).trim() !== ''
      ? String(profileInfo.colorNameLabelFormat).trim()
-     : '';
+     : 'PANTONE ### C';
+  }
+
+  /*
+   * Body/garment swatch color from COLOR_CODE_LOOKUP.xlsx, keyed by the garment color CODE
+   * (prefilled with the first code from the LICENSING sheet; the split guards against a user
+   * typing several codes — the FIRST one wins, mirroring the LEAP Separations flow). When unset/
+   * not found the swatch keeps its default gray. Best-effort — a lookup failure never blocks
+   * generation.
+   */
+  const garmentCode = this.garmentColorCode.split(/[,/]+/)[0].trim();
+  if (garmentCode && !this.isRunningInBrowser && this.controller.getColorByCodeFromLookup) {
+   try {
+    /* Pass the panel-resolved base path — the Node-side resolver fails on cloud drives. */
+    const lookupResult: any = await (this.controller.getColorByCodeFromLookup as any)(garmentCode, dataBasePath || undefined);
+    if (lookupResult && lookupResult.success && lookupResult.color) {
+     meta.bodyColorData = {
+      bodyColor: lookupResult.color.hex,
+      colorName: lookupResult.color.colorName,
+      cmyk: lookupResult.color.cmyk,
+      rgb: lookupResult.color.rgb
+     };
+    } else {
+     console.warn('[STANDALONE] Garment color lookup failed for code:', garmentCode, lookupResult && lookupResult.error);
+    }
+   } catch (lookupErr) {
+    console.warn('[STANDALONE] Garment color lookup error for code:', garmentCode, lookupErr);
+   }
   }
 
   return { meta, sepsTemplateFileName };

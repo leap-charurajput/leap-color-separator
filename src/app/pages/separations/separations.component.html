@@ -86,7 +86,58 @@
  (confirm)="confirmAddSeparationDialog($event)"
 ></app-add-separation-dialog>
 
- <div *ngIf="!hasVersionDocument && !isSeparatedDoc && !isCheckingDocument" class="organize-graphics-content">
+ <!--
+  Standalone (non-LEAP) jobs recorded on THIS document at Export. One row per job, because a document
+  can hold several (one per exported selection/position) — the same shape the LEAP list uses above.
+  Rendered only when the document is not a LEAP version document, so the two lists never mix.
+ -->
+ <div *ngIf="!hasVersionDocument && !isSeparatedDoc && !isCheckingDocument && standaloneJobs.length > 0"
+  class="organize-graphics-content">
+  <!--
+   Same structure as the LEAP list above: one graphic-section-wrapper per exported graphic, with the
+   "Add Separation..." link in the section HEADER (not on every profile row), and the profile rows
+   underneath in a separations-list. Reusing LEAP's classes keeps both lists looking identical.
+  -->
+  <div *ngFor="let group of standaloneJobGroups" class="graphic-section-wrapper">
+   <div class="header">
+    <div class="graphic-header">
+     <div class="graphic-title">Graphic: <span class="graphic-name">{{ group.title }}</span></div>
+    </div>
+    <div class="">
+     <button type="button" class="add-separation-link"
+      (click)="$event.stopPropagation(); handleAddStandaloneSeparation(group.jobs[0])">Add Separation...</button>
+    </div>
+   </div>
+
+   <div class="graphic-content">
+    <div class="separations-list">
+     <div *ngFor="let job of group.jobs" class="separation-profile">
+      <div class="separation-profile-header">
+       <div class="separation-profile-info">
+        <div class="profile-name">Profile: {{ job.profileName || '—' }}</div>
+        <div class="profile-styles">Position: {{ getStandaloneJobTitle(job) }}</div>
+        <div class="profile-styles" *ngIf="job.styleCode">Styles: {{ job.styleCode }}</div>
+        <div class="profile-colors">Colors: {{ getStandaloneJobColors(job).join(', ') }}</div>
+       </div>
+       <div class="separation-profile-right">
+        <div class="separation-profile-content">
+         <div class="generate-button-section">
+          <app-button variant="primary" size="medium" (onClick)="generateStandaloneJob(job)">
+           Generate Separations
+          </app-button>
+         </div>
+        </div>
+       </div>
+      </div>
+     </div>
+    </div>
+   </div>
+  </div>
+ </div>
+
+ <div
+  *ngIf="!hasVersionDocument && !isSeparatedDoc && !isCheckingDocument && standaloneJobs.length === 0"
+  class="organize-graphics-content">
   <div class="panelTitle mx-5" style="text-align: center; padding: 40px 20px;">
    <span *ngIf="isRunningInBrowser">Please run this in Illustrator</span>
    <span *ngIf="!isRunningInBrowser">Please open the version document</span>

@@ -144,6 +144,22 @@ function exportSelectionToAssetsRun(params) {
 	app.executeMenuCommand("pasteInPlace");
 	app.redraw();
 
+	/*
+	 * Flatten live objects IN THE EXPORTED FILE: outline text (Type > Create Outlines) and Expand
+	 * Appearance, so the saved asset is plain filled paths — stable for reuse and ready for
+	 * splitColors. (Menu commands only: this inline script has no access to the jsx expandObject
+	 * helper; the standalone separation run does a final expand pass before splitting anyway.)
+	 */
+	try {
+		app.executeMenuCommand("selectall");
+		if (newDoc.selection && newDoc.selection.length) {
+			try { app.executeMenuCommand("outline"); } catch (fOut) { }
+			try { app.executeMenuCommand("expandStyle"); } catch (fStyle) { }
+		}
+		newDoc.selection = null;
+		app.redraw();
+	} catch (fPrep) { }
+
 	/* Fit the artboard to the pasted art. */
 	var pasted = [];
 	try { for (var p = 0; p < newDoc.pageItems.length; p++) pasted.push(newDoc.pageItems[p]); } catch (e2) { }
@@ -153,14 +169,61 @@ function exportSelectionToAssetsRun(params) {
 		if (pb) ab.artboardRect = pb;
 	} catch (abErr) { }
 
+	/*
+	 * DELETE UNUSED SWATCHES before saving. In a freshly-created document a SPOT swatch exists ONLY
+	 * because the pasted art uses it (Illustrator auto-adds spots with the paste), so every spot is
+	 * used. Everything else non-bracketed is the new-doc default junk (process White/Black/CMYK
+	 * presets) — unused, and process fills never reference a swatch by name anyway. Keep [None] /
+	 * [Registration], keep spots, remove the rest.
+	 */
+	try {
+		for (var swi = newDoc.swatches.length - 1; swi >= 0; swi--) {
+			var swx = newDoc.swatches[swi];
+			var swxName = String(swx && swx.name != null ? swx.name : "");
+			if (swxName.charAt(0) === "[") continue;
+			var swxColor = null;
+			try { swxColor = swx.color; } catch (swcErr) { swxColor = null; }
+			if (swxColor && swxColor.typename === "SpotColor") continue;
+			try { swx.remove(); } catch (swrErr) { }
+		}
+	} catch (swErr) { }
+
+	/*
+	 * Decoration inks, authoritative pass: the exported doc's remaining SPOT swatches. The manual
+	 * selection walk above misses spots used via text, gradient stops, patterns, or deeply nested /
+	 * clipped structures — but Illustrator adds a spot swatch to the new doc for EVERY spot the
+	 * pasted art actually uses, so the swatches panel is the reliable source. Union (walk kept as
+	 * fallback ordering for plain-path art).
+	 */
+	try {
+		for (var dsi = 0; dsi < newDoc.swatches.length; dsi++) {
+			var dsw = newDoc.swatches[dsi];
+			var dswName = String(dsw && dsw.name != null ? dsw.name : "");
+			if (!dswName || dswName.charAt(0) === "[") continue;
+			var dswColor = null;
+			try { dswColor = dsw.color; } catch (dscErr) { dswColor = null; }
+			if (!dswColor || dswColor.typename !== "SpotColor") continue;
+			if (easIsExcludedSwatchName(dswName)) continue;
+			if (!colorSeen[dswName]) { colorSeen[dswName] = true; colors.push(dswName); }
+		}
+	} catch (dsErr) { }
+
 	try {
 		newDoc.saveAs(aiFile);
 	} catch (saveErr) {
 		return easErr("Could not save exported AI: " + (saveErr.message || saveErr));
 	}
 
-	/* Keep the exported document open and frontmost (do NOT close it). */
-	try { newDoc.activate(); } catch (actErr) { }
+	/*
+	 * Close the exported document now that it is saved. Nothing downstream needs it OPEN — the
+	 * separation reads the .ai from disk by path (placeAndEmbedGraphicAI), not from the open document.
+	 * Leaving it open put an unrelated document in front of the user and fired documentAfterActivate,
+	 * which the Standalone tab then had to defend against. SAVECHANGES.DONOTSAVECHANGES because
+	 * saveAs above already wrote the file; the original document is re-activated so focus returns to
+	 * what the user was working on.
+	 */
+	try { newDoc.close(SaveOptions.DONOTSAVECHANGES); } catch (closeErr) { }
+	try { if (doc) app.activeDocument = doc; } catch (actErr) { }
 
 	return JSON.stringify({
 		success: true,
