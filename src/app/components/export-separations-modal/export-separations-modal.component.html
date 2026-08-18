@@ -5,30 +5,34 @@
 		</div>
 
 		<div class="modal-body">
-			<div class="control-number-field">
-				<label for="control-number" class="control-number-label">Control number</label>
-				<input
-					id="control-number"
-					type="text"
-					class="control-number-input"
-					[value]="controlNumber"
-					(input)="handleControlNumberChange($event)"
-					placeholder="Enter control number"
-					autocomplete="off"
-				/>
-			</div>
+			<!-- Control and version sit side by side: both are short values, and stacking them cost
+			     a whole field's height for no benefit. -->
+			<div class="control-number-row">
+				<div class="control-number-field">
+					<label for="control-number" class="control-number-label">Control number</label>
+					<input
+						id="control-number"
+						type="text"
+						class="control-number-input"
+						[value]="controlNumber"
+						(input)="handleControlNumberChange($event)"
+						placeholder="Control"
+						autocomplete="off"
+					/>
+				</div>
 
-			<div class="control-number-field">
-				<label for="version-number" class="control-number-label">Version number</label>
-				<input
-					id="version-number"
-					type="text"
-					class="control-number-input"
-					[value]="versionNumber"
-					(input)="handleVersionNumberChange($event)"
-					placeholder="Enter version number"
-					autocomplete="off"
-				/>
+				<div class="control-number-field">
+					<label for="version-number" class="control-number-label">Version number</label>
+					<input
+						id="version-number"
+						type="text"
+						class="control-number-input"
+						[value]="versionNumber"
+						(input)="handleVersionNumberChange($event)"
+						placeholder="Version"
+						autocomplete="off"
+					/>
+				</div>
 			</div>
 
 			<div class="export-options-list">
@@ -54,6 +58,67 @@
 					<ul>
 						<li *ngFor="let issue of postscriptIssues">{{ issue.message }}</li>
 					</ul>
+				</div>
+			</div>
+			<!--
+			 Destination preview. An unresolved [Token] stays literal in the resolved path, so it is
+			 called out here — with an input per token — instead of surfacing later as a folder
+			 literally named "[League]". File name is shown separately from its folder: that is the
+			 part people actually scan for.
+			-->
+			<div class="export-destinations">
+				<div class="export-destinations-title">Files will be exported to</div>
+
+				<div *ngIf="destinationsLoading" class="export-destinations-note">Resolving paths…</div>
+				<div *ngIf="!destinationsLoading && destinationsError" class="export-destinations-error">{{ destinationsError }}</div>
+
+				<div *ngIf="!destinationsLoading && !destinationsError">
+					<div *ngIf="visibleDestinations.length === 0" class="export-destinations-note">
+						Tick an export above to see where it will be written.
+					</div>
+
+					<div
+						*ngFor="let dest of visibleDestinations"
+						class="export-destination"
+						[class.is-incomplete]="dest.unresolvedTokens?.length"
+					>
+						<div class="export-destination-head">
+							<span class="export-destination-label">{{ dest.label }}</span>
+							<span *ngIf="dest.usesDefault" class="export-destination-default" title="No path pattern set in Export Settings — exported next to the document">default location</span>
+						</div>
+						<div class="export-destination-file" [title]="dest.path">
+							<span *ngFor="let seg of dest.fileSegments" [class.export-path-token]="seg.unresolved">{{ seg.text }}</span>
+						</div>
+						<div class="export-destination-folder" [title]="dest.path">
+							<span *ngFor="let seg of dest.folderSegments" [class.export-path-token]="seg.unresolved">{{ seg.text }}</span>
+						</div>
+						<div *ngIf="dest.error" class="export-destinations-error">{{ dest.error }}</div>
+					</div>
+				</div>
+
+				<!-- One field per unresolved token; filling it re-resolves the paths above. -->
+				<div *ngIf="hasUnresolvedTokens" class="export-token-fields">
+					<div class="export-token-fields-title">
+						<span class="export-token-warn">!</span>
+						<span *ngIf="missingTokenCount > 0">
+							{{ missingTokenCount }} value{{ missingTokenCount > 1 ? 's' : '' }} missing from the path{{ visibleDestinations.length > 1 ? 's' : '' }} above
+						</span>
+						<span *ngIf="missingTokenCount === 0">Values applied — check the paths above</span>
+					</div>
+					<div *ngFor="let entry of tokenInputs" class="export-token-field">
+						<label class="export-token-label" [attr.for]="'export-token-' + entry.token">{{ entry.token }}</label>
+						<input
+							[id]="'export-token-' + entry.token"
+							type="text"
+							class="control-number-input export-token-input"
+							[value]="entry.value"
+							(input)="handleTokenValueChange(entry.token, $event)"
+							(change)="applyTokenValues()"
+							(blur)="applyTokenValues()"
+							[placeholder]="'Value for [' + entry.token + ']'"
+							autocomplete="off"
+						/>
+					</div>
 				</div>
 			</div>
 		</div>

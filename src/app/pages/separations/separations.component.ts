@@ -1943,7 +1943,8 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
   try {
    const d = new Date(created);
    if (isNaN(d.getTime())) return '';
-   const dateStr = d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '/');
+   /* mm/dd/yyyy, matching the [DATE] token written into the separated document. */
+   const dateStr = d.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
    const timeStr = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
    const by = meta.artistInitials && meta.artistInitials.trim() ? meta.artistInitials.trim() : '';
    return by ? `${dateStr} at ${timeStr} by ${by}` : `${dateStr} at ${timeStr}`;

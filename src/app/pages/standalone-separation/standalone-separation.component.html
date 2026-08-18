@@ -17,9 +17,29 @@
 
  <div *ngIf="!isRunningInBrowser" class="standalone-content">
   <p class="standalone-hint">
-   Enter the details below for the selected artwork, then Generate Separate.
    <span *ngIf="isPrefilling" class="standalone-prefill-note">Reading LICENSING sheet…</span>
   </p>
+
+
+  <!--
+   Item ID — the whole code in one paste, e.g. FM02-127A-58-KPN. Leaving the field (or pasting into
+   it) splits it into Style Code / Color Code / Team-Org Code / Graphic Code below. Filling those
+   four individually instead composes the id back, so [Item ID] resolves either way.
+  -->
+  <div class="standalone-field">
+   <label class="standalone-label">Item ID</label>
+   <div class="standalone-control">
+    <input
+     type="text"
+     class="standalone-input"
+     [(ngModel)]="itemId"
+     (change)="onItemIdChange()"
+     (blur)="onItemIdChange()"
+     (paste)="onItemIdPaste()"
+     placeholder="e.g. FM02-127A-58-KPN"
+    />
+   </div>
+  </div>
 
   <!-- Position -->
   <div class="standalone-field">
@@ -34,23 +54,7 @@
    </div>
   </div>
 
-  <!-- Team Code -->
-  <div class="standalone-field">
-   <label class="standalone-label">Team Code</label>
-   <div class="standalone-control">
-    <input type="text" class="standalone-input" [(ngModel)]="teamCode" placeholder="e.g. ABN" />
-   </div>
-  </div>
-
-  <!-- League -->
-  <div class="standalone-field">
-   <label class="standalone-label">League</label>
-   <div class="standalone-control">
-    <input type="text" class="standalone-input" [(ngModel)]="league" placeholder="e.g. SEPS" />
-   </div>
-  </div>
-
-  <!-- Style Code (drives the profile lookup) -->
+  <!-- Style Code (drives the profile lookup) — Item ID segment 1 -->
   <div class="standalone-field">
    <label class="standalone-label">Style Code</label>
    <div class="standalone-control">
@@ -59,8 +63,48 @@
      class="standalone-input"
      [(ngModel)]="styleCode"
      (change)="onStyleCodeChange()"
-     placeholder="Style code"
+     placeholder="e.g. FM02"
     />
+   </div>
+  </div>
+
+  <!--
+   Color Code — Item ID segment 2. Looked up in COLOR_CODE_LOOKUP.xlsx to set the GARMENT (body)
+   swatch (blank = default gray), and printed as [Color Code] / [Style_Color_Code].
+  -->
+  <div class="standalone-field">
+   <label class="standalone-label">Color Code</label>
+   <div class="standalone-control">
+    <input
+     type="text"
+     class="standalone-input"
+     [(ngModel)]="garmentColorCode"
+     placeholder="e.g. 127A (sets body swatch)"
+    />
+   </div>
+  </div>
+
+  <!-- Team / Org Code — Item ID segment 3; the LICENSING sheet's "Org code". -->
+  <div class="standalone-field">
+   <label class="standalone-label">Team / Org Code</label>
+   <div class="standalone-control">
+    <input type="text" class="standalone-input" [(ngModel)]="teamCode" placeholder="e.g. 58" />
+   </div>
+  </div>
+
+  <!-- Graphic Code — Item ID segment 4. -->
+  <div class="standalone-field">
+   <label class="standalone-label">Graphic Code</label>
+   <div class="standalone-control">
+    <input type="text" class="standalone-input" [(ngModel)]="graphicCode" placeholder="e.g. KPN" />
+   </div>
+  </div>
+
+  <!-- League -->
+  <div class="standalone-field">
+   <label class="standalone-label">League</label>
+   <div class="standalone-control">
+    <input type="text" class="standalone-input" [(ngModel)]="league" placeholder="e.g. SEPS" />
    </div>
   </div>
 
@@ -78,8 +122,13 @@
 
   <div *ngIf="profileResolveWarning" class="standalone-warning">{{ profileResolveWarning }}</div>
 
-  <!-- Optional SEP-grid token fields -->
-  <div class="standalone-optional-title">Optional (SEP grid tokens)</div>
+  <!-- [Graphic Name] / [Art Code] / [Design Name]; falls back to Position when left empty. -->
+  <div class="standalone-field">
+   <label class="standalone-label">Graphic Name</label>
+   <div class="standalone-control">
+    <input type="text" class="standalone-input" [(ngModel)]="graphicName" placeholder="Design name" />
+   </div>
+  </div>
 
   <div class="standalone-field">
    <label class="standalone-label">Team Name</label>
@@ -89,40 +138,17 @@
   </div>
 
   <div class="standalone-field">
-   <label class="standalone-label">Concept</label>
+   <label class="standalone-label">Concept Code</label>
    <div class="standalone-control">
     <input type="text" class="standalone-input" [(ngModel)]="concept" placeholder="Optional" />
    </div>
   </div>
 
-  <!-- Full code string from the LICENSING sheet; printed as the [Garm Colors] token. -->
-  <div class="standalone-field">
-   <label class="standalone-label">Garment Colors</label>
-   <div class="standalone-control">
-    <input
-     type="text"
-     class="standalone-input"
-     [(ngModel)]="garmentColors"
-     placeholder="Optional"
-    />
-   </div>
-  </div>
-
-  <!-- Garment color CODE -> COLOR_CODE_LOOKUP.xlsx sets the GARMENT (body) swatch (blank = default gray). -->
-  <div class="standalone-field">
-   <label class="standalone-label">Garment Color Code</label>
-   <div class="standalone-control">
-    <input
-     type="text"
-     class="standalone-input"
-     [(ngModel)]="garmentColorCode"
-     placeholder="e.g. 0484 (sets body swatch)"
-    />
-   </div>
-  </div>
-
-  <!-- Graphic Name / Graphic Code inputs removed: [Graphic Name]/[Art Code] auto-fill from
-       Position (same value the pipeline uses as graphicName); [Graphic Code] is blanked. -->
+  <!--
+   Say what the form deliberately does NOT ask for, so a missing input does not read as an omission.
+   Player / Product Line / Season / Art Revisions are not asked for either — they are read from the
+   LICENSING sheet when the document has them (see applyLicensingRaw).
+  -->
 
   <div *ngIf="warningMessage" class="standalone-warning">{{ warningMessage }}</div>
   <div *ngIf="statusMessage" class="standalone-status">{{ statusMessage }}</div>

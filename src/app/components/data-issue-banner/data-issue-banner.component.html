@@ -1,0 +1,20 @@
+<!--
+ Data problems the user must fix in their files. Red with white text so it cannot be mistaken for
+ ordinary panel chrome — these states otherwise look exactly like the panel working normally.
+-->
+<div *ngIf="issues.length" class="data-issue-banner" role="alert">
+	<div *ngFor="let issue of issues; trackBy: trackById" class="data-issue">
+		<span class="data-issue-mark" aria-hidden="true">!</span>
+		<div class="data-issue-text">
+			<div class="data-issue-message">{{ issue.message }}</div>
+			<div *ngIf="issue.detail" class="data-issue-detail" [title]="issue.detail">{{ issue.detail }}</div>
+		</div>
+		<button
+			type="button"
+			class="data-issue-dismiss"
+			(click)="dismiss(issue.id)"
+			title="Hide this warning for the current document"
+			aria-label="Dismiss warning"
+		>×</button>
+	</div>
+</div>

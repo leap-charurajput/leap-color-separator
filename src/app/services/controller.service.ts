@@ -1,4 +1,5 @@
 import { Injectable } from '@angular/core';
+import { DataIssuesService } from './data-issues.service';
 import { checkForJSXUpdates, csInterface, evalScript } from '../../libs/helper';
 import { createGraphicFromSelection } from '../../lib/scripts/createGraphicFromSelection.script';
 /* Standalone (non-LEAP) mode: read the LICENSING sheet from the active document to prefill the form. */
@@ -15,7 +16,7 @@ import { LeapSepsLogService } from './leap-seps-log.service';
  providedIn: 'root'
 })
 export class ControllerService {
- constructor(private leapSepsLog: LeapSepsLogService) {
+ constructor(private leapSepsLog: LeapSepsLogService, private dataIssues: DataIssuesService) {
   this.init();
  }
 
@@ -665,6 +666,7 @@ export class ControllerService {
     .evalScript('handleUpdateSepTable', params)
     .then((res: string) => {
      const result = JSON.parse(res);
+     this.reportSepTableIssues(result);
 
      return result;
     })
@@ -674,22 +676,248 @@ export class ControllerService {
   });
  }
 
- getTemplateInfo(): Promise<any> {
+ /*
+  * Every host handler that reads the team JSON fails with this exact message when it cannot get at
+  * the file, so one predicate covers handleGetTemplateInfo, handleGetGraphicSwatches,
+  * handleGetBodyColor and handlePerformSeparation.
+  */
+ private static readonly TEAM_JSON_UNREADABLE = /JSON file not found or invalid for document/i;
+
+ /*
+  * Document whose team JSON has already been pushed to the host, and the in-flight read for it.
+  * checkVersionDocument fires from several components at once (the log shows getTemplateInfo called
+  * four to six times inside 100ms), so without the in-flight promise the same file would be read and
+  * pushed once per caller.
+  */
+ private readonly teamJsonOverrideDocPaths = new Set<string>();
+ private readonly teamJsonOverrideInFlight = new Map<string, Promise<boolean>>();
+
+ /*
+  * Read the team JSON on the panel side and hand it to the host, so the handlers that need it stop
+  * depending on ExtendScript's own disk access.
+  *
+  * This exists because ExtendScript's Folder.getFiles() / File.read() are unreliable on macOS File
+  * Provider mounts -- confirmed on Box Drive, where a valid LEAP version document under
+  * ~/Library/CloudStorage was reported as "JSON file not found or invalid" and the panel fell back
+  * to standalone mode, while the very same job opened from a local disk worked. Node reads those
+  * paths without trouble, which the panel's own Excel lookups already prove on every Box job.
+  *
+  * Returns false when there is nothing to push (no document, or the JSON genuinely is not there),
+  * leaving the caller with the host's original result rather than masking a real failure.
+  */
+ private async ensureTeamJsonOverride(): Promise<boolean> {
+  const documentPath = await this.getActiveDocumentPathForClient();
+  if (!documentPath) {
+   return false;
+  }
+
+  /* Already pushed for this document -- a retry would read and re-send the same bytes. */
+  if (this.teamJsonOverrideDocPaths.has(documentPath)) {
+   return true;
+  }
+  const pending = this.teamJsonOverrideInFlight.get(documentPath);
+  if (pending) {
+   return pending;
+  }
+
+  const read$ = (async () => {
+   try {
+    const read = await (window as any).leap.readTeamJsonNearDocument(documentPath);
+    if (!read?.success || !read?.data) {
+     console.log(
+      '[Controller] team JSON panel-side fallback found nothing:',
+      read?.error || '(no error reported)'
+     );
+     return false;
+    }
+
+    const docName = String(documentPath.split('/').pop() || '').replace(/\.[^.]+$/, '');
+    const res = await (window as any).leap
+     .scriptLoader()
+     .evalScript('handleSetTeamJsonOverride', { docName: docName, jsonData: read.data });
+    const applied = JSON.parse(res)?.success === true;
+
+    if (applied) {
+     this.teamJsonOverrideDocPaths.add(documentPath);
+     console.log(
+      '[Controller] team JSON supplied to host from panel side (host could not read it):',
+      read.jsonPath
+     );
+     this.leapSepsLog.logProcess('Team JSON panel-side fallback applied', {
+      jsonPath: read.jsonPath,
+      bytes: read.bytesRead,
+      documentPath: documentPath
+     });
+    }
+    return applied;
+   } catch (error) {
+    console.log('[Controller] team JSON panel-side fallback failed:', error);
+    return false;
+   } finally {
+    this.teamJsonOverrideInFlight.delete(documentPath);
+   }
+  })();
+
+  this.teamJsonOverrideInFlight.set(documentPath, read$);
+  return read$;
+ }
+
+ /*
+  * Drop the pushed team JSON so a different document is never served the previous one's data. The
+  * host keeps its own document-name guard as well; this just stops the panel short-circuiting on a
+  * stale "already applied" flag.
+  */
+ async clearTeamJsonOverride(): Promise<void> {
+  this.teamJsonOverrideDocPaths.clear();
+  try {
+   await (window as any).leap.scriptLoader().evalScript('handleClearTeamJsonOverride', {});
+  } catch (_) {
+   /* Nothing to do: a failed clear only means the host keeps a value its own guard will reject. */
+  }
+ }
+
+ /*
+  * Run a host handler that reads the team JSON, retrying once through the panel-side fallback when
+  * the host could not read it. The first call is untouched, so setups where ExtendScript reads the
+  * JSON fine pay nothing -- no extra evalScript, no extra disk access.
+  */
+ private async evalWithTeamJsonFallback(
+  handlerName: string,
+  params: any,
+  needsFallback: (result: any) => boolean
+ ): Promise<any> {
+  await this.ensureSession();
+  const first = JSON.parse(
+   await (window as any).leap.scriptLoader().evalScript(handlerName, params ?? {})
+  );
+  if (!needsFallback(first)) {
+   return first;
+  }
+
+  const applied = await this.ensureTeamJsonOverride();
+  if (!applied) {
+   return first;
+  }
+
+  const second = JSON.parse(
+   await (window as any).leap.scriptLoader().evalScript(handlerName, params ?? {})
+  );
+  if (second && typeof second === 'object') {
+   second._teamJsonFallbackUsed = true;
+  }
+  return second;
+ }
+
+ /*
+  * Turn a failed team-JSON lookup into a user-facing warning — but ONLY when it is a data problem.
+  *
+  * A document outside a LEAP tree has no JSON folder at all and is simply a non-LEAP document; the
+  * standalone flow handles it and a red banner there would be noise. The states worth shouting about
+  * are a JSON folder that EXISTS but holds nothing matching this document (the batch was exported
+  * incompletely, or the file was renamed), one that cannot be enumerated (cloud mount), and a file
+  * that is present but unreadable.
+  */
+ private reportTeamJsonIssue(result: any): void {
+  const id = 'team-json';
+  const debug = result && result._debug;
+  const source = debug && debug.source ? String(debug.source) : '';
+  const docPath = result && result.documentPath ? String(result.documentPath) : '';
+  const docName = docPath ? docPath.split(/[\\/]/).pop() || docPath : '';
+  /* getTemplateInfo runs on every document activate, so this is where a doc switch is noticed. */
+  this.dataIssues.setScope(docPath);
+
+  if (!result || result.success !== false || result.hasDocument === false) {
+   this.dataIssues.clear(id);
+   return;
+  }
+
+  if (source === 'no-filename-match') {
+   this.dataIssues.report(
+    id,
+    'No team JSON for this document — it will be treated as a non-LEAP file.' +
+     (docName ? ' Looked for a file named after "' + docName.replace(/\.[^.]+$/, '') + '".' : ''),
+    (debug.jsonFileCount || 0) + ' file(s) in ' + (debug.jsonFolderPath || 'the JSON folder') + ', none match.'
+   );
+   return;
+  }
+
+  if (source === 'json-folder-empty') {
+   this.dataIssues.report(
+    id,
+    'The team JSON folder could not be read — if it is on a cloud drive, open it in Finder once and try again.',
+    debug.jsonFolderPath || ''
+   );
+   return;
+  }
+
+  if (source === 'parse-error') {
+   this.dataIssues.report(
+    id,
+    'The team JSON for this document could not be read (the file may be incomplete or still syncing).',
+    (debug.matchedFile || '') + (debug.parseError ? ' — ' + debug.parseError : '')
+   );
+   return;
+  }
+
+  /* Any other source (no JSON folder / not in a LEAP tree) is a normal non-LEAP document. */
+  this.dataIssues.clear(id);
+ }
+
+ /*
+  * The SEP table writer returns per-row errors ("Swatch 'X' not found for group 'N'") in a success
+  * response. They used to reach only the log, while the visible result was a grid label silently
+  * printed in [Registration] — the failure that looks most like success.
+  */
+ private reportSepTableIssues(result: any): void {
+  const id = 'sep-table';
+  const errors: string[] = result && Array.isArray(result.errors) ? result.errors : [];
+  if (errors.length === 0) {
+   this.dataIssues.clear(id);
+   return;
+  }
+  this.dataIssues.report(
+   id,
+   errors.length === 1
+    ? 'A grid label could not be filled in correctly.'
+    : errors.length + ' grid labels could not be filled in correctly.',
+   errors.slice(0, 3).join(' · ') + (errors.length > 3 ? ' …' : '')
+  );
+ }
+
+ async getTemplateInfo(): Promise<any> {
   this.log('getTemplateInfo called');
 
-  return this.ensureSession().then(() => {
-   return (window as any).leap
-    .scriptLoader()
-    .evalScript('handleGetTemplateInfo', {})
-    .then((res: string) => {
-     const result = JSON.parse(res);
+  /*
+   * teamCode is the single field the whole version-document decision hangs on, so retry whenever it
+   * is missing rather than only on an explicit error. hasDocument === false is the one case that is
+   * genuinely nothing to do with the JSON.
+   */
+  const result = await this.evalWithTeamJsonFallback(
+   'handleGetTemplateInfo',
+   {},
+   (r: any) => r?.hasDocument !== false && !r?.data?.teamCode
+  );
 
-     return result;
-    })
-    .catch((err: any) => {
-     throw err;
-    });
-  });
+  console.log(
+   '[Controller] getTemplateInfo result:',
+   JSON.stringify(
+    {
+     success: result?.success,
+     hasDocument: result?.hasDocument,
+     teamCode: result?.data?.teamCode || '(none)',
+     documentPath: result?.documentPath,
+     error: result?.error,
+     resolvedVia: result?._teamJsonFallbackUsed ? 'panel-side fallback' : 'host',
+     _debug: result?._debug
+    },
+    null,
+    2
+   )
+  );
+
+  this.reportTeamJsonIssue(result);
+
+  return result;
  }
 
  getGraphicSwatches(graphicName: string): Promise<any> {
@@ -697,17 +925,11 @@ export class ControllerService {
 
   return this.ensureSession().then(() => {
    const params = { graphicName: graphicName };
-   return (window as any).leap
-    .scriptLoader()
-    .evalScript('handleGetGraphicSwatches', params)
-    .then((res: string) => {
-     const result = JSON.parse(res);
-
-     return result;
-    })
-    .catch((err: any) => {
-     throw err;
-    });
+   return this.evalWithTeamJsonFallback('handleGetGraphicSwatches', params, (r: any) =>
+    ControllerService.TEAM_JSON_UNREADABLE.test(String(r?.error || ''))
+   ).catch((err: any) => {
+    throw err;
+   });
   });
  }
 
@@ -2057,7 +2279,17 @@ export class ControllerService {
  }
 
  private buildExportPathResolverScript(): string {
+  /*
+   * Values the user typed for tokens the document cannot supply (see setExportTokenOverrides).
+   * Injected into every export script so the path the Export window PREVIEWED is byte-for-byte the
+   * path the export writes to — same helpers, same overrides, same code.
+   */
+  const overridesLiteral = JSON.stringify(this.exportTokenOverrides || {});
   return `
+var EXPORT_TOKEN_OVERRIDES = ${overridesLiteral};
+/* Preview runs the real resolver but must not create folders on disk. */
+var EXPORT_PREVIEW_MODE = false;
+
 function getDefaultExportSettings() {
  return {
   printGuideFilePath: "",
@@ -2443,6 +2675,9 @@ function getExportVariableContext(doc) {
 }
 
 function getExportTemplateValue(token, context) {
+ /* A user-supplied override wins over every document source — it exists because they were empty. */
+ var override = findExportValueInObject(EXPORT_TOKEN_OVERRIDES, token);
+ if (override !== null && override !== undefined && override !== "") return sanitizeExportPathValue(override);
  var value = findExportValueInObject(context.aliases, token);
  if (value !== null && value !== undefined && value !== "") return sanitizeExportPathValue(value);
  value = findExportValueInObject(context.jsonData, token);
@@ -2458,6 +2693,7 @@ function getExportTemplateValue(token, context) {
 
 function ensureExportFolder(folder) {
  try {
+  if (EXPORT_PREVIEW_MODE) return true;
   if (!folder || folder.exists) return true;
   var parent = folder.parent;
   if (parent && !parent.exists) ensureExportFolder(parent);
@@ -2654,6 +2890,55 @@ function resolveExportFilePathFromTokens(template, defaultFile, extension, conte
  return buildExportDestinationFromResolvedPath(reconstructed, defaultFile, extension);
 }
 
+/* Tokens in a template that resolve to nothing — what the Export window asks the user to fill in. */
+function collectUnresolvedExportTokens(template, context) {
+ var out = [];
+ var seen = {};
+ if (!template) return out;
+ var re = /\\[([^\\]]+)\\]/g;
+ var m;
+ while ((m = re.exec(template)) !== null) {
+  var token = trimExportString(m[1]);
+  if (!token) continue;
+  var key = token.toLowerCase();
+  if (seen[key]) continue;
+  seen[key] = true;
+  var value = getExportTemplateValue(token, context);
+  if (value === null || value === undefined || String(value) === "") out.push(token);
+ }
+ return out;
+}
+
+/*
+ * Where one export WOULD write, without writing anything. Runs the real resolver with folder
+ * creation suppressed, so the preview cannot drift from the export.
+ */
+function previewExportDestination(settingsKey, label, defaultFile, doc, extension, context) {
+ var settings = readExportSettings();
+ var template = settings && settings[settingsKey] != null ? trimExportString(settings[settingsKey]) : "";
+ var item = {
+  key: settingsKey,
+  label: label,
+  template: template,
+  usesDefault: !template,
+  path: "",
+  fileName: "",
+  unresolvedTokens: []
+ };
+ try {
+  item.unresolvedTokens = collectUnresolvedExportTokens(template, context);
+  var file = resolveExportFilePath(settingsKey, defaultFile, doc, extension);
+  item.path = file && file.fsName ? String(file.fsName) : "";
+  if (item.path) {
+   var slash = item.path.lastIndexOf("/");
+   item.fileName = slash === -1 ? item.path : item.path.substring(slash + 1);
+  }
+ } catch (e) {
+  item.error = e.message || String(e);
+ }
+ return item;
+}
+
 function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
  var settings = readExportSettings();
  var template = settings && settings[settingsKey] != null ? trimExportString(settings[settingsKey]) : "";
@@ -2836,6 +3121,100 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
       return { success: false, error: 'Invalid JSON response from host', raw: str };
      }
     });
+  });
+ }
+
+  /*
+   * Token values typed by the user in the Export window, for tokens no document source can supply.
+   * Held on the service (not threaded through every export signature) so buildExportPathResolverScript
+   * can inject them into EVERY export script — preview and real export resolve identically.
+   */
+ private exportTokenOverrides: { [token: string]: string } = {};
+
+ setExportTokenOverrides(overrides: { [token: string]: string } | null | undefined): void {
+  const clean: { [token: string]: string } = {};
+  if (overrides) {
+   Object.keys(overrides).forEach((key) => {
+    const value = overrides[key] == null ? '' : String(overrides[key]).trim();
+    if (key && value !== '') clean[key] = value;
+   });
+  }
+  this.exportTokenOverrides = clean;
+  this.log('setExportTokenOverrides: ' + Object.keys(clean).length + ' override(s)');
+ }
+
+ clearExportTokenOverrides(): void {
+  this.exportTokenOverrides = {};
+ }
+
+ /*
+  * Where each enabled export WOULD write, plus the tokens that resolve to nothing. Shown in the
+  * Export window so an unresolved [Token] is caught BEFORE it becomes a folder literally named
+  * "[League]" — the resolver keeps unresolved tokens as literal text (by design, so nothing is
+  * silently mis-filed), which is invisible until you go looking for the file.
+  */
+ previewExportDestinations(): Promise<{
+  success: boolean;
+  items?: Array<{
+   key: string;
+   label: string;
+   template: string;
+   usesDefault: boolean;
+   path: string;
+   fileName: string;
+   unresolvedTokens: string[];
+   error?: string;
+  }>;
+  error?: string;
+ }> {
+  this.log('previewExportDestinations called');
+
+  return this.ensureSession().then(() => {
+   const exportPathResolverCode = this.buildExportPathResolverScript();
+   const script = `
+(function() {
+  ${exportPathResolverCode}
+  try {
+    if (!app.documents.length) {
+      return JSON.stringify({ success: false, error: "No active document found" });
+    }
+    var doc = app.activeDocument;
+    if (!doc.fullName) {
+      return JSON.stringify({ success: false, error: "Save the document first" });
+    }
+    EXPORT_PREVIEW_MODE = true;
+    var docFile = new File(doc.fullName);
+    var docFolder = docFile.parent;
+    var docName = docFile.name.replace(/\\.[^\\.]+$/, "");
+    var context = getExportVariableContext(doc);
+    var items = [];
+    items.push(previewExportDestination(
+      "printGuideFilePath", "Print Guide",
+      new File(docFolder.fsName + "/" + docName + "_PrintGuide.pdf"), doc, "pdf", context));
+    items.push(previewExportDestination(
+      "postscriptFilePath", "PostScript",
+      new File(docFolder.fsName + "/" + docName + ".ps"), doc, "ps", context));
+    items.push(previewExportDestination(
+      "separationPreviewFilePath", "Seps Preview",
+      new File(docFolder.fsName + "/" + docName + "_SeparationsPreview.pdf"), doc, "pdf", context));
+    return JSON.stringify({ success: true, items: items });
+  } catch (e) {
+    return JSON.stringify({ success: false, error: (e.message || e.toString()) });
+  }
+})();`;
+
+   return evalScript(script)
+    .then((res: any) => {
+     try {
+      return JSON.parse(res);
+     } catch (parseErr) {
+      return { success: false, error: 'Could not read the export path preview.' };
+     }
+    })
+    .catch((err: any) => ({
+     success: false,
+     error: (err && err.message) || 'Could not read the export path preview.'
+    }));
   });
  }
 
@@ -4326,17 +4705,11 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
   this.log('getBodyColor called');
 
   return this.ensureSession().then(() => {
-   return (window as any).leap
-    .scriptLoader()
-    .evalScript('handleGetBodyColor', {})
-    .then((res: string) => {
-     const result = JSON.parse(res);
-
-     return result;
-    })
-    .catch((err: any) => {
-     throw err;
-    });
+   return this.evalWithTeamJsonFallback('handleGetBodyColor', {}, (r: any) =>
+    ControllerService.TEAM_JSON_UNREADABLE.test(String(r?.error || ''))
+   ).catch((err: any) => {
+    throw err;
+   });
   });
  }
 
@@ -4383,6 +4756,43 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
    return Promise.reject(new Error('leap not available'));
   }
   return this.ensureSession().then(() => win.leap.getColorByCodeFromLookup(colorCode, basePath));
+ }
+
+ /*
+  * Can the leap bundle resolve the LEAP server base path? Every Excel/JSON lookup that is not given
+  * an explicit path depends on it (Styles, Inks, Profiles, COLOR_CODE_LOOKUP), and when it fails
+  * they all fall back to DEFAULTS on a run that still reports success — so the panel surfaces it
+  * instead of letting the wrong output through quietly. Older bundles have no such method; treat
+  * that as "cannot tell" (success) rather than warning about a build that predates the check.
+  */
+ getServerBasePathStatus(): Promise<{ success: boolean; basePath?: string; error?: string }> {
+  const win = window as any;
+  if (!win.leap || typeof win.leap.getServerBasePathStatus !== 'function') {
+   return Promise.resolve({ success: true });
+  }
+  return this.ensureSession()
+   .then(() => win.leap.getServerBasePathStatus())
+   .then((res: any) => res || { success: true })
+   .catch((err: any) => ({
+    success: false,
+    error: (err && err.message) || 'Could not check the LEAP server path.'
+   }))
+   .then((status: any) => {
+    /*
+     * Report centrally rather than at each call site: without the server path, colours, meshes and
+     * style info all fall back to DEFAULTS on a separation that still reports success.
+     */
+    if (status && status.success === false) {
+     this.dataIssues.report(
+      'server-path',
+      'LEAP server path could not be read — garment colours, meshes and style info will fall back to defaults. Check General Settings → Data Folder Path.',
+      status.error || ''
+     );
+    } else {
+     this.dataIssues.clear('server-path');
+    }
+    return status;
+   });
  }
 
  removeSeparationData(): Promise<any> {
@@ -4439,13 +4849,21 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
     params.sepsTemplateFileName = String(options.sepsTemplateFileName);
    }
 
-   return (window as any).leap
-    .scriptLoader()
-    .evalScript('handlePerformSeparation', params)
-    .then((res: string) => {
-     const result = JSON.parse(res);
+   return this.evalWithTeamJsonFallback('handlePerformSeparation', params, (r: any) =>
+    ControllerService.TEAM_JSON_UNREADABLE.test(String(r?.error || ''))
+   )
+    .then((result: any) => {
      console.log('[Controller] performSeparation result:', result);
      if (!result?.success) {
+      /*
+       * The step trace goes out as its OWN log line, as the MESSAGE rather than the detail: the
+       * detail object is stringified and truncated ("[1 items]", trailing "…"), which would cut off
+       * exactly the tail that says where splitColors stopped. On machines where the JSX-side file
+       * write never lands, this line is the only record of it.
+       */
+      if (result?.splitColorsSteps) {
+       this.leapSepsLog.logError('performSeparation splitColors', String(result.splitColorsSteps));
+      }
       this.leapSepsLog.logError('performSeparation', result?.error || 'Failed', result);
       return result;
      }

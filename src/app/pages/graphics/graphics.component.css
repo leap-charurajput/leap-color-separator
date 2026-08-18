@@ -226,8 +226,7 @@
 
 /* Inline standalone separation form (shown under the graphics list when "+" is pressed). */
 .standalone-inline {
- margin-top: 12px;
+ margin-top: 8px;
  border-top: 1px solid #3d3d3d;
- padding-top: 8px;
 }
 

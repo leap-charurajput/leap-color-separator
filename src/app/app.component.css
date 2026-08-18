@@ -11,6 +11,23 @@ app-tab-navigator {
  height: 100%;
 }
 
+/*
+ * Sits above the build stamp at the foot of the panel, spanning its width. Absolute rather than in
+ * the flow because .app-shell hands its full height to app-tab-navigator — an in-flow banner would
+ * push the tabs off the bottom.
+ */
+.app-data-issue-banner {
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: 18px;
+	z-index: 3;
+	display: block;
+	max-height: 40%;
+	overflow-y: auto;
+	box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.35);
+}
+
 .panel-build-stamp {
  position: absolute;
  right: 10px;

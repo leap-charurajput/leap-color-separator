@@ -246,7 +246,7 @@
           <button type="button" class="profile-ink-mini-btn" (click)="commitInkExceptionNameEdit()" aria-label="Save ink name" title="Save">✓</button>
          </div>
          <ng-template #inkNameView>
-          <button type="button" class="profile-ink-name-btn" [disabled]="!row.enabled" (click)="beginInkExceptionNameEdit(row)" title="Click to edit ink name">{{ row.inkName || '—' }}</button>
+          <button type="button" class="profile-ink-name-btn" [disabled]="!row.enabled" (click)="beginInkExceptionNameEdit(row)" [title]="(row.inkName || 'Ink') + ' — click to edit ink name'">{{ row.inkName || '—' }}</button>
          </ng-template>
         </div>
 

@@ -3,20 +3,42 @@
 #include "./utilities.jsx"
 
 function splitColors(_graphicName, cleanupOpts) {
+	/*
+	 * Step trace. Returned to the panel as a single STRING (not an array) so it survives the panel
+	 * logger, which truncates arrays to "[N items]" — and so it reaches leap_seps.log even on machines
+	 * where the JSX-side file write never lands (a failing run there produced zero [JSX] lines).
+	 */
+	var _steps = [];
+	function _step(msg) {
+		_steps.push(msg);
+		appendLeapSepLog("splitColors: " + msg);
+	}
+	function _selCount() {
+		try {
+			return app.selection && app.selection.length != null ? app.selection.length : -1;
+		} catch (eSel) {
+			return -1;
+		}
+	}
+	function _stepsText() {
+		return _steps.join(" | ");
+	}
+
 	try {
 		var runLeftover = cleanupOpts == null || cleanupOpts.deleteLeftoverPaths === true;
+		_step("start graphic=\"" + _graphicName + "\" doc=\"" + (app.documents.length ? app.activeDocument.name : "(none)") + "\"");
+
 		var _sizedArtLayer = app.activeDocument.layers.getByName("SIZED_ART");
 		var _sizedGraphicLayer = _sizedArtLayer.layers.getByName("SIZED_GRAPHICS");
+		_step("SIZED_GRAPHICS items=" + (_sizedGraphicLayer.pageItems ? _sizedGraphicLayer.pageItems.length : -1));
+
 		var _graphicItem = null;
 		try {
 			_graphicItem = _sizedGraphicLayer.pageItems.getByName(_graphicName);
 		} catch (nameErr) {
 			if (_sizedGraphicLayer.pageItems && _sizedGraphicLayer.pageItems.length > 0) {
 				_graphicItem = _sizedGraphicLayer.pageItems[0];
-				appendLeapSepLog(
-					"splitColors: graphic \"" + _graphicName + "\" not found; using first item \"" +
-					_graphicItem.name + "\" in SIZED_GRAPHICS"
-				);
+				_step("graphic \"" + _graphicName + "\" not found; using first item \"" + _graphicItem.name + "\"");
 			}
 		}
 		if (!_graphicItem) {
@@ -24,29 +46,86 @@ function splitColors(_graphicName, cleanupOpts) {
 				"Graphic \"" + _graphicName + "\" not found in SIZED_GRAPHICS (place graphic AI first)"
 			);
 		}
+		_step("item=\"" + _graphicItem.name + "\" type=" + _graphicItem.typename);
+
 		prepareSizedArtGraphicForProcessing(app.activeDocument, _graphicItem);
 		_graphicItem.selected = true;
 		app.redraw();
 		app.executeMenuCommand('copy');
 		app.executeMenuCommand('pasteInPlace');
 		app.redraw();
+		_step("after copy+pasteInPlace sel=" + _selCount());
 		if (app.selection && app.selection.length > 0) {
 			for (var selIdx = 0; selIdx < app.selection.length; selIdx++) {
 				unlockPageItemTreeForProcessing(app.selection[selIdx]);
 			}
 		}
 		expandObject();
+		_step("after expand sel=" + _selCount());
 		app.executeMenuCommand('group');
-		pathFinderDivide();
-		var _processItem = app.selection[0];
+		_step("after group sel=" + _selCount());
+		/* Remember the grouped art: Divide is what loses the selection on some machines, and this
+		   reference is the only way back to the same art afterwards. */
+		var _groupItem = null;
+		try {
+			_groupItem = app.selection && app.selection.length > 0 ? app.selection[0] : null;
+		} catch (eGroupRef) { }
+
+		/*
+		 * Pathfinder Divide runs the "LEAP Color Seps" ACTION SET. If that set is not installed on the
+		 * machine, doScript throws — previously the failure only showed up later as a bare
+		 * "undefined is not an object" when the empty selection was dereferenced.
+		 */
+		try {
+			pathFinderDivide();
+		} catch (divideErr) {
+			throw new Error(
+				"Pathfinder Divide action failed (is the \"LEAP Color Seps\" action set installed?): " +
+				(divideErr.message || divideErr)
+			);
+		}
+		_step("after divide sel=" + _selCount());
+
+		var _processItem = app.selection && app.selection.length > 0 ? app.selection[0] : null;
+
+		/*
+		 * Recovery: an empty selection after Divide used to be fatal one line later, inside
+		 * collectItemsByColor (undefined.typename -> "undefined is not an object") — and only AFTER
+		 * SEPARATED_ART had been created, which is exactly the half-made document users reported. The
+		 * art is still on the page; only the selection was lost, so fall back to the group captured
+		 * before Divide. Guarded: a stale reference throws on first property access and we report it.
+		 */
+		if (!_processItem && _groupItem) {
+			try {
+				var _probeType = _groupItem.typename;
+				_processItem = _groupItem;
+				_step("selection empty after divide; recovered pre-divide group (" + _probeType + ")");
+			} catch (eStale) {
+				_step("selection empty after divide; pre-divide group reference is stale");
+			}
+		}
+
+		if (!_processItem) {
+			throw new Error(
+				"Pathfinder Divide left nothing selected for \"" + _graphicName +
+				"\" — the art may be empty, locked, or the \"LEAP Color Seps\" action set is missing."
+			);
+		}
+		_step("processItem type=" + _processItem.typename);
 		app.selection = null;
 
 
 		var _separatedArtLayer = getOrCreateLayer(app.activeDocument, CONSTANTS.LAYER_NAMES.SEPARATED_ART);
+		_step("SEPARATED_ART ready");
 
 
 		var colorGroups = {};
 		collectItemsByColor(_processItem, colorGroups);
+		var _groupNames = [];
+		for (var _cg in colorGroups) {
+			if (colorGroups.hasOwnProperty(_cg)) { _groupNames.push(_cg); }
+		}
+		_step("colors found (" + _groupNames.length + "): " + (_groupNames.length ? _groupNames.join(", ") : "NONE"));
 
 
 		for (var colorName in colorGroups) {
@@ -73,14 +152,16 @@ function splitColors(_graphicName, cleanupOpts) {
 			}
 		}
 		app.redraw();
-		return JSON.stringify({ success: true });
+		return JSON.stringify({ success: true, steps: _stepsText() });
 
 	} catch (e) {
 		var msg = e.message || e.toString();
-		appendLeapSepLog("splitColors error: " + msg);
+		_steps.push("ERROR " + msg);
+		appendLeapSepLog("splitColors error: " + msg + " | steps: " + _stepsText());
 		return JSON.stringify({
 			success: false,
-			error: msg
+			error: msg,
+			steps: _stepsText()
 		});
 	}
 }

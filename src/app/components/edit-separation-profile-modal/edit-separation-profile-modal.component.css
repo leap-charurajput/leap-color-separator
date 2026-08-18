@@ -511,6 +511,11 @@
 
 .profile-ink-row {
  display: grid;
+ /*
+  * The name column keeps a 0 floor on purpose: every other column is a fixed-width control, so a
+  * real minimum here would push the delete button past the body's `overflow-x: hidden` edge on a
+  * narrow panel. The name wraps instead (see .profile-ink-name-btn).
+  */
  grid-template-columns: 26px minmax(0, 1fr) 56px 46px 64px 68px 24px;
  align-items: center;
  gap: 3px;
@@ -785,6 +790,12 @@ body.medium-light .profile-ink-pill--ub.is-matches-default:not(:disabled):not(.i
  color: #ff6060;
 }
 
+/*
+ * Ink names wrap instead of being cut off with an ellipsis. The name column is the only flexible
+ * one in a row of fixed-width controls, so in a narrow panel a long ink ("PANTONE 1235 C S24") had
+ * no room and was truncated — unreadable for the one value that identifies the row. Wrapping grows
+ * the row instead, which costs nothing horizontally and cannot clip the controls to its right.
+ */
 .profile-ink-name-btn {
  max-width: 100%;
  padding: 2px 4px;
@@ -796,9 +807,10 @@ body.medium-light .profile-ink-pill--ub.is-matches-default:not(:disabled):not(.i
  font-size: 12px;
  text-align: left;
  cursor: pointer;
- overflow: hidden;
- text-overflow: ellipsis;
- white-space: nowrap;
+ white-space: normal;
+ overflow-wrap: anywhere;
+ word-break: break-word;
+ line-height: 1.25;
 }
 
 .profile-ink-name-btn:hover:not(:disabled) {

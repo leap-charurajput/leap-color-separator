@@ -5,6 +5,13 @@
   (onMenuOptionClick)="onMenuOptionClick($event)" (onRemoveSeparationData)="openRemoveConfirmation()">
  </app-tab-navigator>
 
+ <!--
+  Data problems the user must fix in their files. Pinned to the BOTTOM of the panel: the tab
+  navigator owns the full height, so a banner in the flow would push it out of view. Invisible
+  (renders nothing) when there are no issues.
+ -->
+ <app-data-issue-banner class="app-data-issue-banner"></app-data-issue-banner>
+
  <div class="panel-build-stamp">{{panelBuildStamp}}</div>
 
  <app-confirm-dialog [isOpen]="showConfirmDialog" title="Remove Separation Data"

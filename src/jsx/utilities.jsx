@@ -1223,6 +1223,29 @@ function renameSeparationInkInDocument(doc, fromName, toName) {
  return result;
 }
 
+/*
+ * Colour of the artwork on a SEPARATED_ART plate, found by plate/layer name (case-insensitive).
+ * The GRID INFO BOX labels use it when no document swatch carries the plate's name — see
+ * updateGridColorLabels. Returns null when the plate or its art cannot be resolved.
+ */
+function getPlateArtColorByLayerName(doc, layerName) {
+ try {
+  if (!doc || !layerName) return null;
+  var separatedArtLayer = findLayerByName(doc.layers, CONSTANTS.LAYER_NAMES.SEPARATED_ART);
+  if (!separatedArtLayer || !separatedArtLayer.layers) return null;
+  var target = String(layerName).replace(/^\s+|\s+$/g, "").toUpperCase();
+  for (var i = 0; i < separatedArtLayer.layers.length; i++) {
+   var sub = separatedArtLayer.layers[i];
+   if (!sub || !sub.name) continue;
+   if (String(sub.name).replace(/^\s+|\s+$/g, "").toUpperCase() !== target) continue;
+   return getFirstFillColorFromContainer(sub);
+  }
+ } catch (e) {
+  /* Best-effort: the caller falls through to its White UB fallbacks. */
+ }
+ return null;
+}
+
 function updateGridColorLabels(doc, separationData) {
  var result = {
   updatedLabels: 0,
@@ -1261,10 +1284,29 @@ function updateGridColorLabels(doc, separationData) {
    var swatch = getSwatchByName(doc, swatchLookupName);
    if (swatch && swatch.color) {
     swatchColor = swatch.color;
-   } else {
-    var isWhiteUbVariant = /^white\s*ub(\s+(\d+))?$/i.test(String(swatchLookupName));
+   }
+   /*
+    * No swatch carries that name. The row names a PLATE, and a plate does not always have a
+    * same-named swatch: a profile with custom underbase names prints "SL White UB 2nd" on the
+    * plain "White UB" swatch, and the White-UB fallbacks below only recognise "White UB [N]".
+    * Take the colour off the plate's own art instead — by definition the ink that plate prints
+    * with — which also covers second hits, Choke and Blocker. Without this the label kept the SEP
+    * template's default text colour, [Registration], so it printed on EVERY separation.
+    */
+   if (!swatchColor) {
+    swatchColor = getPlateArtColorByLayerName(doc, swatchLookupName);
+   }
+   if (!swatchColor) {
+    /*
+     * Last resort for underbase rows. Matched on CONTAINS rather than the old
+     * "^White UB [N]$", so custom profile names ("SL White UB 2nd") reach these fallbacks
+     * instead of dropping through to the error and keeping the template's [Registration] text.
+     */
+    var lookupStr = String(swatchLookupName);
+    var isWhiteUbVariant = /white\s*ub/i.test(lookupStr);
     if (isWhiteUbVariant) {
-     var ubNumMatch = String(swatchLookupName).match(/^white\s*ub(?:\s+(\d+))?$/i);
+     /* Pass number from either spelling: "White UB 2" and "SL White UB 2nd" both give 2. */
+     var ubNumMatch = lookupStr.match(/(\d+)\s*(?:st|nd|rd|th)?\s*$/i);
      var ubNum = ubNumMatch && ubNumMatch[1] ? parseInt(ubNumMatch[1], 10) : 1;
      if (ubNum >= 2) {
       var ub2Name = getUnderbase2SwatchNameFromDocument(doc);
@@ -1378,7 +1420,10 @@ function findValueInJSON(obj, key) {
  return null;
 }
 
-// Format ISO date for [DATE] (e.g. "11/02/2026"). Parse ISO string manually for ExtendScript.
+/*
+ * Format an ISO date for [DATE] as US mm/dd/yyyy (e.g. 2026-08-17 -> "08/17/2026").
+ * Parsed manually from the ISO string because ExtendScript has no reliable date parser/formatter.
+ */
 function formatSeparationDate(isoStr) {
  if (!isoStr || typeof isoStr !== 'string') return '';
  try {
@@ -1391,7 +1436,7 @@ function formatSeparationDate(isoStr) {
   var month = parts[1];
   var day = parts[2];
   if (!year || !month || !day) return '';
-  return day + '/' + month + '/' + year;
+  return month + '/' + day + '/' + year;
  } catch (e) {
   return '';
  }
@@ -2076,6 +2121,62 @@ function resolveSeparationSourceContext(doc) {
 }
 
 /*
+ * Job folders for a separated document, WITHOUT counting parent folders.
+ *
+ * The legacy derivation assumed …/09 SEPARATIONS/<league>/<team>/<graphic>/doc.ai and walked up a
+ * fixed number of parents. A separation written to an Export-Settings location (e.g. the pattern
+ * "/SEPS/[Item_ID]" -> 09 SEPARATIONS/SEPS/doc.ai) sits at a different depth, so every derived name
+ * shifted one rung: league became "<job> ASSETS", teamCode became "09 SEPARATIONS", and the lookup
+ * went to "<LEAP FILES>/02 GRAPHICS/<job> ASSETS/CF/JSON" — a folder that cannot exist.
+ *
+ * Instead: walk UP until a folder that CONTAINS "02 GRAPHICS" is found (that is the job ASSETS root
+ * by definition, at any depth), and take league / teamCode from the document's own XMP batch row,
+ * which every separated document carries. Returns nulls when nothing can be resolved so callers keep
+ * their existing fallback.
+ */
+function resolveJobFoldersFromDocument(doc, docFile) {
+ var out = { rootFolder: null, league: "", teamCode: "" };
+ try {
+  if (!docFile) {
+   return out;
+  }
+  /* (1) Job root = the nearest ancestor holding a "02 GRAPHICS" folder. */
+  var candidate = docFile.parent;
+  var guard = 0;
+  while (candidate && guard < 12) {
+   guard++;
+   try {
+    var graphicsProbe = new Folder(candidate.fsName + "/02 GRAPHICS");
+    if (graphicsProbe.exists) {
+     out.rootFolder = candidate;
+     break;
+    }
+   } catch (eProbe) { }
+   candidate = candidate.parent;
+  }
+
+  /* (2) League / team from the separated document's own XMP batch row. */
+  try {
+   var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
+   if (xmp.isXmpCreated && xmp.doesStructFieldExist("SeparationProfileMetadata")) {
+    var meta = xmp.getStructField("SeparationProfileMetadata", true);
+    var batch = meta && meta.batchVariableSource ? meta.batchVariableSource : null;
+    if (batch) {
+     out.league = String(
+      batch["League_desc"] || batch["League"] || batch["League Desc"] || ""
+     ).replace(/^\s+|\s+$/g, "");
+     out.teamCode = String(
+      batch["Lineup Org Code"] || batch["Lineup_Org_Code"] || batch["Team Code"] ||
+      batch["TeamCode"] || batch["Org Code"] || ""
+     ).replace(/^\s+|\s+$/g, "");
+    }
+   }
+  } catch (eXmp) { }
+ } catch (e) { }
+ return out;
+}
+
+/*
  * Next version for graphic+profile, scanning the FLAT registry instead of the
  * nested folder tree. Takes the max of the registry value and whatever the
  * team document's XMP already recorded, so a job that predates the registry
@@ -2250,6 +2351,63 @@ function updateVariablesInDocument(doc, jsonData, styleCodes, profileMetadata) {
 }
 
 /*
+ * Team JSON handed down by the panel instead of read from disk by ExtendScript.
+ *
+ * On macOS File Provider mounts -- Box Drive and other cloud providers that mount under
+ * ~/Library/CloudStorage -- ExtendScript's Folder.getFiles() / File.read() cannot reliably
+ * enumerate or read the team JSON folder, while the panel's Node layer reads the very same path
+ * without trouble. When that happens the panel resolves and parses the team JSON itself and
+ * pushes the parsed object in here, so every handler that needs it keeps working without
+ * ExtendScript ever touching the mount.
+ *
+ * Keyed by the document base name (no extension) -- the same value every caller of
+ * findAndReadJSONFile() already derives -- so a stale override can never be served to a
+ * different document.
+ */
+/*
+ * A MAP, not a single slot. With one slot, opening document B would evict A's entry, and on
+ * switching back to A the panel would still believe it had already supplied A's JSON and skip the
+ * push -- leaving A broken again. Keyed by document name, every open document keeps its own entry.
+ */
+var LEAP_TEAM_JSON_OVERRIDES = {};
+
+function setTeamJsonOverride(docName, jsonData) {
+ /*
+  * Both arguments are required. An override stored without a key would be served to whatever
+  * document happened to be active next, which is exactly the class of bug this is meant to fix.
+  */
+ if (!docName || !jsonData) {
+  return false;
+ }
+ LEAP_TEAM_JSON_OVERRIDES[String(docName)] = jsonData;
+ return true;
+}
+
+function clearTeamJsonOverride(docName) {
+ /* No name clears everything -- used when the panel wants a clean slate rather than one eviction. */
+ if (docName) {
+  delete LEAP_TEAM_JSON_OVERRIDES[String(docName)];
+  return;
+ }
+ LEAP_TEAM_JSON_OVERRIDES = {};
+}
+
+function getTeamJsonOverride(docName) {
+ if (!docName) {
+  return null;
+ }
+ var key = String(docName);
+ /*
+  * hasOwnProperty guards against a document named after an Object.prototype member ("constructor",
+  * "toString") returning a function instead of team data.
+  */
+ if (!LEAP_TEAM_JSON_OVERRIDES.hasOwnProperty(key)) {
+  return null;
+ }
+ return LEAP_TEAM_JSON_OVERRIDES[key] || null;
+}
+
+/*
  * Read the team version JSON for a document.
  *
  * Normally the JSON is found by listing <leagueFolder>/JSON and matching a file name that CONTAINS
@@ -2267,8 +2425,34 @@ function updateVariablesInDocument(doc, jsonData, styleCodes, profileMetadata) {
  */
 function findAndReadJSONFile(docName, leagueFolder, preferredJsonPath) {
  findAndReadJSONFile.lastResolvedPath = "";
+ /*
+  * Reset on every call so a caller can never read a diagnostic left behind by an earlier lookup.
+  * "source" names the branch that answered; the remaining fields describe how far the disk scan
+  * got, which is what separates a genuinely missing folder from one that exists but cannot be
+  * enumerated or read -- indistinguishable before this, and the reason a Box-mount failure looked
+  * identical to a non-LEAP document.
+  */
+ findAndReadJSONFile.lastDiagnostic = {
+  source: "",
+  jsonFolderPath: "",
+  jsonFolderExists: false,
+  jsonFileCount: 0,
+  matchedFile: "",
+  bytesRead: 0,
+  parseError: ""
+ };
 
- /* Recorded path first — correct even when the document sits outside the LEAP tree. */
+ /*
+  * Panel-supplied JSON wins outright. It is only ever set after ExtendScript has already failed to
+  * read this document's team JSON from disk, so preferring it costs working setups nothing.
+  */
+ var override = getTeamJsonOverride(docName);
+ if (override) {
+  findAndReadJSONFile.lastDiagnostic.source = "panel-override";
+  return override;
+ }
+
+ /* Recorded path next -- correct even when the document sits outside the LEAP tree. */
  if (preferredJsonPath) {
   try {
    var preferredFile = new File(String(preferredJsonPath));
@@ -2279,6 +2463,9 @@ function findAndReadJSONFile(docName, leagueFolder, preferredJsonPath) {
     var preferredParsed = JSON.parse(preferredContent);
     if (preferredParsed) {
      findAndReadJSONFile.lastResolvedPath = preferredFile.fsName;
+     findAndReadJSONFile.lastDiagnostic.source = "preferred-path";
+     findAndReadJSONFile.lastDiagnostic.matchedFile = preferredFile.name;
+     findAndReadJSONFile.lastDiagnostic.bytesRead = String(preferredContent || "").length;
      return preferredParsed;
     }
    }
@@ -2286,14 +2473,19 @@ function findAndReadJSONFile(docName, leagueFolder, preferredJsonPath) {
  }
 
  if (!leagueFolder || !leagueFolder.fsName) {
+  findAndReadJSONFile.lastDiagnostic.source = "no-league-folder";
   return null;
  }
  var jsonFolder = new Folder(leagueFolder.fsName + "/JSON");
+ findAndReadJSONFile.lastDiagnostic.jsonFolderPath = jsonFolder.fsName;
  if (!jsonFolder.exists) {
+  findAndReadJSONFile.lastDiagnostic.source = "json-folder-missing";
   return null;
  }
+ findAndReadJSONFile.lastDiagnostic.jsonFolderExists = true;
 
  var jsonFiles = jsonFolder.getFiles("*.json");
+ findAndReadJSONFile.lastDiagnostic.jsonFileCount = jsonFiles ? jsonFiles.length : 0;
  var jsonFile = null;
 
  for (var i = 0; i < jsonFiles.length; i++) {
@@ -2305,24 +2497,37 @@ function findAndReadJSONFile(docName, leagueFolder, preferredJsonPath) {
  }
 
  if (!jsonFile) {
+  /*
+   * An empty listing on a folder that reports as existing is the signature of a cloud mount that
+   * ExtendScript cannot enumerate; a non-empty listing with no hit is a real naming mismatch.
+   */
+  findAndReadJSONFile.lastDiagnostic.source =
+   findAndReadJSONFile.lastDiagnostic.jsonFileCount > 0 ? "no-filename-match" : "json-folder-empty";
   return null;
  }
+ findAndReadJSONFile.lastDiagnostic.matchedFile = jsonFile.name;
 
  jsonFile.open('r');
  var jsonContent = jsonFile.read();
  jsonFile.close();
+ findAndReadJSONFile.lastDiagnostic.bytesRead = String(jsonContent || "").length;
 
  try {
   var parsed = JSON.parse(jsonContent);
   if (parsed) {
    findAndReadJSONFile.lastResolvedPath = jsonFile.fsName;
+   findAndReadJSONFile.lastDiagnostic.source = "disk-scan";
   }
   return parsed;
  } catch (e) {
+  /* A zero-byte or truncated read on a streamed placeholder lands here, not in a missing file. */
+  findAndReadJSONFile.lastDiagnostic.source = "parse-error";
+  findAndReadJSONFile.lastDiagnostic.parseError = String(e && e.message ? e.message : e);
   return null;
  }
 }
 findAndReadJSONFile.lastResolvedPath = "";
+findAndReadJSONFile.lastDiagnostic = null;
 
 function decodeURIString(str) {
  if (!str) return str;

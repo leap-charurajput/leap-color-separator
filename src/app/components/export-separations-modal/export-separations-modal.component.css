@@ -36,20 +36,33 @@
 }
 
 .modal-body {
-	padding: 16px;
+	padding: 10px 12px;
+	/* The destination list can run long on deep paths; cap it and scroll rather than growing the
+	   modal past the panel height. */
+	max-height: calc(100vh - 150px);
+	overflow-y: auto;
+}
+
+/* The two short values share one row and one separator, instead of one each. */
+.control-number-row {
+	display: flex;
+	gap: 8px;
+	margin-bottom: 8px;
+	padding-bottom: 8px;
+	border-bottom: 1px solid #555555;
 }
 
 .control-number-field {
 	display: flex;
 	flex-direction: column;
-	gap: 5px;
-	margin-bottom: 14px;
-	padding-bottom: 14px;
-	border-bottom: 1px solid #555555;
+	gap: 3px;
+	/* Equal halves that may shrink — a long label must not push the other field out of the modal. */
+	flex: 1 1 0;
+	min-width: 0;
 }
 
 .control-number-label {
-	font-size: 11px;
+	font-size: 10px;
 	font-weight: 500;
 	color: #d6d6d6;
 	font-family: 'Adobe Clean', sans-serif;
@@ -62,8 +75,8 @@
 	border: 1px solid #565656;
 	border-radius: 4px;
 	color: #ffffff;
-	font-size: 12px;
-	padding: 6px 8px;
+	font-size: 11px;
+	padding: 4px 6px;
 	outline: none;
 	font-family: 'Adobe Clean', sans-serif;
 }
@@ -75,7 +88,7 @@
 .export-options-list {
 	display: flex;
 	flex-direction: column;
-	gap: 12px;
+	gap: 6px;
 }
 
 .export-option-item {
@@ -84,13 +97,13 @@
 }
 
 .export-postscript-readiness-note {
-	margin-top: 4px;
-	padding: 8px 10px;
+	margin-top: 3px;
+	padding: 5px 7px;
 	border-radius: 4px;
 	background: rgba(255, 203, 0, 0.12);
 	border: 1px solid rgba(255, 203, 0, 0.45);
-	font-size: 11px;
-	line-height: 1.45;
+	font-size: 10px;
+	line-height: 1.35;
 	color: #ffffff;
 }
 
@@ -104,7 +117,7 @@
 }
 
 .modal-footer {
-	padding: 12px 16px;
+	padding: 8px 12px;
 	border-top: 1px solid #555555;
 	display: flex;
 	justify-content: flex-end;
@@ -115,4 +128,156 @@
 	min-width: 70px;
 	padding: 4px 12px;
 	font-size: 11px;
+}
+
+/*
+ * Destination preview.
+ *
+ * Readability first: 11px for anything the user must READ (file name, token values), 10px only for
+ * the supporting folder line and captions. The earlier 9px pass made the section compact and
+ * unusable. Density comes from tight line-height and small margins instead of small type.
+ */
+.export-destinations {
+	margin-top: 10px;
+	padding-top: 8px;
+	border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.export-destinations-title {
+	font-size: 10px;
+	font-weight: 600;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: #9a9a9a;
+	margin-bottom: 6px;
+}
+
+.export-destinations-note {
+	font-size: 11px;
+	color: #9a9a9a;
+	font-style: italic;
+}
+
+.export-destinations-error {
+	font-size: 11px;
+	color: #e08a8a;
+}
+
+/* Each destination is a block with a left rule, so three of them read as a list, not a wall. */
+.export-destination {
+	border-left: 2px solid rgba(255, 255, 255, 0.14);
+	padding: 1px 0 1px 7px;
+	margin-bottom: 7px;
+}
+
+.export-destination.is-incomplete {
+	border-left-color: rgba(224, 138, 138, 0.75);
+}
+
+.export-destination-head {
+	display: flex;
+	align-items: center;
+	gap: 5px;
+	margin-bottom: 1px;
+}
+
+.export-destination-label {
+	font-size: 10px;
+	font-weight: 600;
+	letter-spacing: 0.03em;
+	color: #9a9a9a;
+	font-family: 'Adobe Clean', sans-serif;
+}
+
+.export-destination-default {
+	font-size: 9px;
+	color: #8a8a8a;
+	border: 1px solid rgba(255, 255, 255, 0.18);
+	border-radius: 8px;
+	padding: 0 5px;
+	line-height: 1.5;
+}
+
+/* The file name is what people scan for — brightest thing in the block. */
+.export-destination-file {
+	font-size: 11px;
+	line-height: 1.35;
+	color: #e2e2e2;
+	word-break: break-all;
+	overflow-wrap: anywhere;
+	font-family: 'Adobe Clean', sans-serif;
+}
+
+/* Folder is context: dimmer and a size down, but still legible. */
+.export-destination-folder {
+	font-size: 10px;
+	line-height: 1.3;
+	color: #8f8f8f;
+	word-break: break-all;
+	overflow-wrap: anywhere;
+	font-family: 'Adobe Clean', sans-serif;
+}
+
+/* The whole point of the preview: an unresolved token must be impossible to miss. */
+.export-path-token {
+	color: #ffb4b4;
+	font-weight: 600;
+	background: rgba(224, 138, 138, 0.18);
+	border-radius: 2px;
+	padding: 0 2px;
+}
+
+.export-token-fields {
+	margin-top: 8px;
+	padding: 7px 8px;
+	border-radius: 4px;
+	background: rgba(224, 138, 138, 0.09);
+	border: 1px solid rgba(224, 138, 138, 0.32);
+}
+
+.export-token-fields-title {
+	display: flex;
+	align-items: center;
+	gap: 5px;
+	font-size: 11px;
+	color: #e8c4c4;
+	margin-bottom: 6px;
+}
+
+.export-token-warn {
+	flex: 0 0 auto;
+	width: 13px;
+	height: 13px;
+	border-radius: 50%;
+	background: rgba(224, 138, 138, 0.85);
+	color: #2b2b2b;
+	font-size: 10px;
+	font-weight: 700;
+	line-height: 13px;
+	text-align: center;
+}
+
+.export-token-field {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-bottom: 4px;
+}
+
+.export-token-field:last-child {
+	margin-bottom: 0;
+}
+
+/* Label beside the input, not above it: half the vertical cost, and the pairing stays obvious. */
+.export-token-label {
+	flex: 0 0 34%;
+	font-size: 11px;
+	color: #d6d6d6;
+	font-family: 'Adobe Clean', sans-serif;
+	word-break: break-word;
+}
+
+.export-token-input {
+	flex: 1 1 auto;
+	min-width: 0;
 }

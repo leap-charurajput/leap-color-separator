@@ -82,13 +82,15 @@
  font-style: italic;
 }
 
-.standalone-optional-title {
- margin-top: 10px;
- margin-bottom: 2px;
- font-size: 11px;
- letter-spacing: 0.04em;
- text-transform: uppercase;
- opacity: 0.55;
+/*
+ * A note tied to the field above it: indented to the input column so it reads as part of that row
+ * rather than as page-level text.
+ */
+.standalone-field-hint {
+ margin: -2px 0 2px 118px;
+ font-size: 10px;
+ line-height: 1.4;
+ opacity: 0.6;
 }
 
 .standalone-warning {

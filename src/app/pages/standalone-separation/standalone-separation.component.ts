@@ -20,13 +20,27 @@ export interface StandaloneSeparationPayload {
  league: string;
  styleCode: string;
  profileName: string;
+ /*
+  * Full LEAP item id (e.g. "FM02-127A-58-KPN"): <style>-<color code>-<org code>-<graphic code>.
+  * Entering it fills those four fields; it is also emitted as the [Item ID] / [Item_ID] token.
+  */
+ itemId?: string;
  /* Optional SEP-grid token fields; blank-fallback so any token can be supplied manually. */
  teamName: string;
  concept: string;
+ /*
+  * Garment color TEXT for [Garm Colors] / [Colorway_Desc]. No longer a form field — taken from the
+  * LICENSING sheet's "Color" value when present, otherwise the Color Code below.
+  */
  garmentColors: string;
  /* Additional page-variable tokens supplied by the form (blank-fallback). */
  graphicName?: string;
  graphicCode?: string;
+ /* Read from the LICENSING sheet (no form field) — see the component's field declarations. */
+ player?: string;
+ productLine?: string;
+ season?: string;
+ artRevisions?: string;
  /* Garment/body color CODE (COLOR_CODE_LOOKUP.xlsx) that sets the GARMENT swatch. */
  garmentColorCode?: string;
  /* Set after the selection has been exported (so generate can separate from the ASSETS file). */
@@ -84,7 +98,14 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
  @Input() presetJob: any = null;
 
  /* ----- Form fields ----- */
+ /*
+  * Full LEAP item id, e.g. "FM02-127A-58-KPN". Typing/pasting one fills Style Code (FM02),
+  * Color Code (127A), Team/Org Code (58) and Graphic Code (KPN) — see applyItemId(). When the
+  * document supplies those four separately instead, the id is composed back from them.
+  */
+ itemId = '';
  position = '';
+ /* The org code (LICENSING "Org code"); feeds [Team Code] / [Lineup_Org_Code] / [Team_Org_Code]. */
  teamCode = '';
  league = '';
  styleCode = '';
@@ -97,19 +118,29 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
  /* Optional token fields (see StandaloneSeparationPayload). */
  teamName = '';
  concept = '';
- garmentColors = '';
  /*
-  * Additional SEP-grid page-variable tokens the team JSON normally supplies. Brand / ORG-GRP /
-  * Template were dropped from the UI (not needed for standalone) — buildJsonData() still emits
-  * them as empty strings so their [Token]s are blanked, never left literal.
+  * Garment color TEXT for the [Garm Colors] / [Colorway_Desc] tokens. NOT a form field: it comes
+  * from the LICENSING sheet's "Color" value (or a restored job), and buildJsonData() falls back to
+  * the Color Code when it is empty. The Color Code below is what the user actually edits.
   */
- /* Feeds the [Graphic Name] / [Art Code] document tokens (NOT the internal pipeline graphicName, which stays = position). */
+ garmentColors = '';
+ /* Feeds the [Graphic Name] / [Art Code] / [Design Name] tokens (NOT the internal pipeline graphicName, which stays = position). */
  graphicName = '';
+ /* Feeds the [Graphic Code] / [Graphic_code] document tokens. */
  graphicCode = '';
  /*
-  * Garment/body color CODE looked up in COLOR_CODE_LOOKUP.xlsx (same as the LEAP flow) to set the
-  * GARMENT swatch. Blank -> the swatch keeps the default gray. Distinct from the free-text
-  * garmentColors label above.
+  * Read from the LICENSING sheet, no form field: nobody fills these by hand, but when the document
+  * carries them the matching [Player] / [Product Line] / [Season] / [Art Revisions] tokens should
+  * still print. Empty otherwise, which blanks the token rather than leaving it literal.
+  */
+ player = '';
+ productLine = '';
+ season = '';
+ artRevisions = '';
+ /*
+  * Style color CODE (the "Color Code" field, e.g. 127A / 0484) — the second segment of the Item ID.
+  * Looked up in COLOR_CODE_LOOKUP.xlsx (same as the LEAP flow) to set the GARMENT swatch, and
+  * emitted as [Color Code] / [Style_Color_Code]. Blank -> the swatch keeps the default gray.
   */
  garmentColorCode = '';
 
@@ -196,6 +227,7 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
  ngOnInit(): void {
   this.startSelectionPolling();
   this.loadPositionOptions();
+  this.checkServerBasePath();
   /*
    * Expose a prefill hook so the Graphics "+" button can refresh the form from the active
    * document each time it opens this tab. force=true: a "+" always re-reads for the current
@@ -211,6 +243,20 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
   if (!this.presetJob) {
    this.prefillForActiveDocument(true);
   }
+ }
+
+ /*
+  * Trigger the LEAP-server-path check. The controller reports the outcome into DataIssuesService,
+  * which the shell renders as the red banner — no local copy of the warning here, so the user is
+  * never shown the same problem twice.
+  */
+ private checkServerBasePath(): void {
+  if (this.isRunningInBrowser || typeof this.controller.getServerBasePathStatus !== 'function') {
+   return;
+  }
+  this.controller.getServerBasePathStatus().catch(() => {
+   /* Diagnostic only — never block the form on it. */
+  });
  }
 
  ngOnChanges(changes: SimpleChanges): void {
@@ -383,6 +429,67 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
  }
 
  /*
+  * The user typed / pasted an Item ID (fires on change, blur and — via a 0ms defer, so ngModel has
+  * caught up — on paste). Splits it into the four codes it is built from.
+  */
+ onItemIdChange(): void {
+  if (this.applyItemId(this.itemId)) {
+   /* Style Code changed with it: re-resolve the profile and invalidate a stale export. */
+   this.onStyleCodeChange();
+  }
+  this.cdr.detectChanges();
+ }
+
+ /* Paste fires BEFORE the input value updates, so read the model on the next tick. */
+ onItemIdPaste(): void {
+  setTimeout(() => this.onItemIdChange(), 0);
+ }
+
+ /*
+  * Split a LEAP item id into its four codes and write them onto the form.
+  *
+  *   FM02-127A-58-KPN  ->  Style Code FM02 | Color Code 127A | Team/Org Code 58 | Graphic Code KPN
+  *
+  * A graphic code containing dashes is preserved by joining everything after the third segment, so
+  * only the first three separators are structural. Anything shorter than four segments is left
+  * alone (a partially typed id must not wipe fields the user already filled in).
+  * Returns true when the fields were updated.
+  */
+ private applyItemId(raw: string): boolean {
+  const id = (raw || '').trim();
+  if (!id) {
+   return false;
+  }
+  const parts = id.split('-').map((p) => p.trim()).filter((p) => p.length > 0);
+  if (parts.length < 4) {
+   return false;
+  }
+  this.styleCode = parts[0];
+  this.garmentColorCode = parts[1];
+  this.teamCode = parts[2];
+  this.graphicCode = parts.slice(3).join('-');
+  /* Keep the field showing the canonical (trimmed) id the codes were taken from. */
+  this.itemId = id;
+  return true;
+ }
+
+ /*
+  * Compose the Item ID from the four codes when the document supplied them separately (LICENSING
+  * sheet / restored job) and no id is set yet, so the field is never blank when it is derivable.
+  */
+ private composeItemIdFromParts(): void {
+  if (this.itemId.trim()) {
+   return;
+  }
+  const parts = [this.styleCode, this.garmentColorCode, this.teamCode, this.graphicCode].map((p) =>
+   (p || '').trim()
+  );
+  if (parts.every((p) => p.length > 0)) {
+   this.itemId = parts.join('-');
+  }
+ }
+
+ /*
   * Entry point for (re)prefilling the form from the ACTIVE document.
   * - force = true  (first load, Graphics "+"): always re-read the sheet and clear the export view
   *   for the current selection; document-level manual fields are kept when the document is unchanged.
@@ -483,6 +590,7 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
   if (!this.exportedFilePath) return;
 
   const job = {
+   itemId: this.itemId.trim(),
    position: this.position.trim(),
    teamCode: this.teamCode.trim(),
    league: this.league.trim(),
@@ -494,6 +602,10 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
    garmentColorCode: this.garmentColorCode.trim(),
    graphicName: this.graphicName.trim(),
    graphicCode: this.graphicCode.trim(),
+   player: this.player.trim(),
+   productLine: this.productLine.trim(),
+   season: this.season.trim(),
+   artRevisions: this.artRevisions.trim(),
    exportedFileName: this.exportedFileName,
    exportedFilePath: this.exportedFilePath,
    colors: Array.isArray(colors) ? colors : [],
@@ -573,6 +685,7 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
     const scSource = this.normalizeDocPath(String(sc.sourceDocumentPath || ''));
     if (!scSource || scSource !== this.normalizeDocPath(activeDocPath)) continue;
     /* Apply the stored form values (they were user-confirmed at export time). */
+    this.itemId = String(sc.itemId || '');
     this.position = String(sc.position || '');
     this.teamCode = String(sc.teamCode || '');
     this.league = String(sc.league || '');
@@ -584,6 +697,12 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
     this.garmentColorCode = String(sc.garmentColorCode || '');
     this.graphicName = String(sc.graphicName || '');
     this.graphicCode = String(sc.graphicCode || '');
+    this.player = String(sc.player || '');
+    this.productLine = String(sc.productLine || '');
+    this.season = String(sc.season || '');
+    this.artRevisions = String(sc.artRevisions || '');
+    /* Sidecars written before the Item ID field existed still have the four codes. */
+    this.composeItemIdFromParts();
     this.exported = true;
     this.exportedFileName = String(sc.exportedFileName || '');
     this.exportedFilePath = String(sc.exportedFilePath || '');
@@ -617,6 +736,7 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
 
  /* Clear every editable field + the export view when moving to a DIFFERENT document. */
  private resetFormForNewDocument(): void {
+  this.itemId = '';
   this.position = '';
   this.teamCode = '';
   this.league = '';
@@ -629,6 +749,10 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
   this.garmentColorCode = '';
   this.graphicName = '';
   this.graphicCode = '';
+  this.player = '';
+  this.productLine = '';
+  this.season = '';
+  this.artRevisions = '';
   this.resetExportState();
  }
 
@@ -760,7 +884,11 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
   const rows = infoColumn.slice().sort((a, b) => b.y - a.y);
   const at = (i: number): string => (i >= 0 && i < rows.length ? rows[i].t : '');
 
+  out.designName = at(0);
   out.conceptCode = at(1);
+  out.player = at(2);
+  /* Row 3 is the sheet's date and row 4 the artist — both come from settings / the run itself. */
+  out.productLine = at(5);
   out.teamName = at(6);
   out.style = at(7);
   out.color = at(8);
@@ -886,11 +1014,24 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
   const style = pick(raw.style);
   const color = pick(raw.color);
   const placement = pick(raw.placement);
+  /* Remaining LICENSING labels, each backing a form field / [Token] of the same name. */
+  const designName = pick(raw.designName);
+  const graphicCode = pick(raw.graphicCode);
+  const player = pick(raw.player);
+  const productLine = pick(raw.productLine);
+  const season = pick(raw.season);
+  const artRevisions = pick(raw.artRevisions);
 
   if (orgCode) this.teamCode = orgCode; /* Team Code = Org code, per the LICENSING sheet. */
   if (teamName) this.teamName = teamName;
   if (conceptCode) this.concept = conceptCode;
   if (style) this.styleCode = style;
+  if (designName) this.graphicName = designName;
+  if (graphicCode) this.graphicCode = graphicCode;
+  if (player) this.player = player;
+  if (productLine) this.productLine = productLine;
+  if (season) this.season = season;
+  if (artRevisions) this.artRevisions = artRevisions;
   if (color) {
    /*
     * The sheet's "Color" field carries garment color CODES (e.g. "0484, 0042") — the same codes
@@ -907,6 +1048,12 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
 
   const mappedPosition = this.mapPlacementToPosition(placement);
   if (mappedPosition) this.position = mappedPosition;
+
+  /*
+   * The LICENSING sheet has no Item ID row, but it carries the four codes the id is built from —
+   * show the composed id so the user sees (and can correct) the same value the [Item ID] token gets.
+   */
+  this.composeItemIdFromParts();
  }
 
  /*
@@ -1107,6 +1254,7 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
  /* Base payload built from the current form values (shared by export + generate). */
  private buildPayload(): StandaloneSeparationPayload {
   return {
+   itemId: this.effectiveItemId,
    position: this.position.trim(),
    teamCode: this.teamCode.trim(),
    league: this.league.trim(),
@@ -1117,9 +1265,37 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
    garmentColors: this.garmentColors.trim(),
    graphicName: this.graphicName.trim(),
    graphicCode: this.graphicCode.trim(),
+   player: this.player.trim(),
+   productLine: this.productLine.trim(),
+   season: this.season.trim(),
+   artRevisions: this.artRevisions.trim(),
    garmentColorCode: this.garmentColorCode.trim(),
    exportedFilePath: this.exportedFilePath || undefined
   };
+ }
+
+ /*
+  * Garment color TEXT for [Garm Colors] / [Colorway_Desc] and the "no spot inks" message. The
+  * Garment Colors input was removed, so this is the LICENSING sheet's "Color" value when the
+  * document had one, and otherwise the Color Code the user entered.
+  */
+ private get garmentColorsText(): string {
+  return this.garmentColors.trim() || this.garmentColorCode.trim();
+ }
+
+ /*
+  * The Item ID to publish: what the user entered, or — when they entered nothing — the id composed
+  * from the four codes, so [Item ID] resolves even on a form filled field-by-field.
+  */
+ private get effectiveItemId(): string {
+  const typed = this.itemId.trim();
+  if (typed) {
+   return typed;
+  }
+  const parts = [this.styleCode, this.garmentColorCode, this.teamCode, this.graphicCode].map((p) =>
+   (p || '').trim()
+  );
+  return parts.every((p) => p.length > 0) ? parts.join('-') : '';
  }
 
  /*
@@ -1239,7 +1415,7 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
     profileName: profile,
     styleCodes: [style],
     colors: Array.isArray(colors) ? colors : [],
-    garmentColors: this.garmentColors.trim(),
+    garmentColors: this.garmentColorsText,
     isGenerating: false,
     status: '',
     error: ''
@@ -1338,21 +1514,43 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
   const l = this.league.trim();
   const tn = this.teamName.trim();
   const c = this.concept.trim();
-  const gc = this.garmentColors.trim();
   const pos = this.position.trim();
-  /* No UI fields for these anymore: [Graphic Name]/[Art Code] default to Position (the same value
-     the pipeline uses as graphicName); a sidecar-restored value still wins when present. */
+  const style = this.styleCode.trim();
+  const colorCode = this.garmentColorCode.trim();
+  const gc = this.garmentColorsText;
+  /* [Graphic Name]/[Art Code]/[Design Name] fall back to Position (the value the pipeline uses
+     as graphicName) when the Graphic Name field is left empty. */
   const gn = this.graphicName.trim() || pos;
   const gcode = this.graphicCode.trim();
+  const item = this.effectiveItemId;
+  const player = this.player.trim();
+  const productLine = this.productLine.trim();
+  const season = this.season.trim();
+  const artRev = this.artRevisions.trim();
   return {
+   /* Item ID, and the four codes it is composed of. */
+   Item_ID: item,
+   'Item ID': item,
    TeamCode: t,
    'Team Code': t,
+   'Org Code': t,
    League: l,
+   League_desc: l,
    TeamName: tn,
    'Team Name': tn,
+   Graphic_Org_Name: tn,
    Concept: c,
    ConceptNumber: c,
-   Styles: this.styleCode.trim(),
+   'Concept Code': c,
+   Styles: style,
+   Style: style,
+   'Style#': style,
+   'Style Code': style,
+   Lineup_Style_Code: style,
+   'Color Code': colorCode,
+   Style_Color_Code: colorCode,
+   Color: gc,
+   Color_Desc: gc,
    GarmColors: gc,
    'Garm Colors': gc,
    Position: pos,
@@ -1360,8 +1558,23 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
    GraphicName: gn,
    'Graphic Name': gn,
    'Art Code': gn,
+   'Design Name': gn,
+   Graphic_Name: gn,
    'Graphic Code': gcode,
    Graphic_code: gcode,
+   Player: player,
+   'Player Name': player,
+   'Player Jersey Name': player,
+   'Product Line': productLine,
+   ProductLine: productLine,
+   Season: season,
+   Style_Season: season,
+   'Art Revisions': artRev,
+   /* No source at all in standalone — emitted empty so their [Token]s are blanked, not left literal. */
+   Brand: '',
+   'ORG-GRP': '',
+   ORGGRP: '',
+   Template: '',
    /*
     * SEP-template tokens under their EXACT document spelling (findValueInJSON matches
     * hasOwnProperty first): concept, org code and colorway all come from the form.
@@ -1370,13 +1583,15 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
    Graphic_Concept_Code: c,
    Lineup_Org_Code: t,
    LINEUP_ORG_CODE: t,
+   Team_Org_Code: t,
+   True_Org_Code: t,
    Colorway_Desc: gc,
-   COLORWAY_DESC: gc,
-   /* No UI for these (dropped as not needed) — emit empty so their [Token]s are blanked, not literal. */
-   Brand: '',
-   'ORG-GRP': '',
-   ORGGRP: '',
-   Template: ''
+   COLORWAY_DESC: gc
+   /*
+    * NOT emitted here, on purpose: [DATE], [ARTIST], [Artist Initials], [POS] and [STYLE_CODE] are
+    * filled by the host from profileMetadata (updateVariablesInDocument special-cases them), and
+    * [C#], [V#] and [CONTROL] are calculated at separation / export time.
+    */
   };
  }
 
@@ -1405,6 +1620,7 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
   try {
    this.licensingDebug = 'RESTORED FROM XMP JOB:\n' + JSON.stringify(job, null, 2);
   } catch (e) { /* debug only */ }
+  this.itemId = job.itemId ? String(job.itemId) : '';
   this.position = job.position ? String(job.position) : '';
   this.teamCode = job.teamCode ? String(job.teamCode) : '';
   this.league = job.league ? String(job.league) : '';
@@ -1416,6 +1632,12 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
   this.garmentColorCode = job.garmentColorCode ? String(job.garmentColorCode) : '';
   this.graphicName = job.graphicName ? String(job.graphicName) : '';
   this.graphicCode = job.graphicCode ? String(job.graphicCode) : '';
+  this.player = job.player ? String(job.player) : '';
+  this.productLine = job.productLine ? String(job.productLine) : '';
+  this.season = job.season ? String(job.season) : '';
+  this.artRevisions = job.artRevisions ? String(job.artRevisions) : '';
+  /* Jobs recorded before the Item ID field existed still carry the four codes. */
+  this.composeItemIdFromParts();
   this.exportedFileName = job.exportedFileName ? String(job.exportedFileName) : '';
   this.exportedFilePath = job.exportedFilePath ? String(job.exportedFilePath) : '';
   this.sourceDocumentPath = job.sourceDocumentPath ? String(job.sourceDocumentPath) : '';
@@ -1427,7 +1649,7 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
        profileName: this.profileName,
        styleCodes: this.styleCode ? [this.styleCode] : [],
        colors: colors,
-       garmentColors: this.garmentColors,
+       garmentColors: this.garmentColorsText,
        isGenerating: false,
        status: '',
        error: ''

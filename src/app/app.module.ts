@@ -6,6 +6,7 @@ import { BrowserModule } from '@angular/platform-browser';
 import { OverlayModule } from '@angular/cdk/overlay';
 
 import { AppComponent } from './app.component';
+import { DataIssueBannerComponent } from './components/data-issue-banner/data-issue-banner.component';
 import { ButtonComponent } from './components/button/button.component';
 import { CheckboxComponent } from './components/checkbox/checkbox.component';
 import { ConfirmDialogComponent } from './components/confirm-dialog/confirm-dialog.component';
@@ -41,6 +42,7 @@ import { ControllerService } from './services/controller.service';
 
 @NgModule({
  declarations: [
+		DataIssueBannerComponent,
   AppComponent,
   TabNavigatorComponent,
   SubMenuComponent,

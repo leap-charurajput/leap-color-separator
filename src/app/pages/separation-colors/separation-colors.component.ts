@@ -1371,15 +1371,37 @@ private getProfileBlockerMesh(profileInfo?: any): string {
   const whiteTemplate = sortedWhiteRows[0];
   const baseWhiteName = (whiteTemplate.colorName || 'White UB').replace(/\s+\d+$/g, '').trim();
 
+  /* Custom per-pass underbase names from the profile, e.g. ["SL White UB", "SL White UB 2nd", …]. */
+  const profileUbNames: string[] = Array.isArray(this.documentProfileMetadata?.underbaseNames)
+   ? this.documentProfileMetadata.underbaseNames.map((n: any) => (n == null ? '' : String(n).trim()))
+   : [];
+
   const expandedWhiteRows: ColorRow[] = [];
   for (let i = 0; i < expandedCount; i++) {
    const sourceRow = sortedWhiteRows[i] || whiteTemplate;
    const meshFromProfile = underbaseMeshes[i] || '';
-   const rowColorName = i === 0 ? baseWhiteName : `${baseWhiteName} ${i + 1}`;
+   /*
+    * Name this pass after what the DOCUMENT actually calls it, then the profile's custom name,
+    * and only invent "<base> <n>" as a last resort.
+    *
+    * The synthesized name used to win unconditionally, which renamed a real plate out of
+    * existence: a profile with custom underbase names has pass 2 on the layer/swatch
+    * "SL White UB 2nd", and overwriting it with "SL White UB 2" left every downstream lookup
+    * hunting for a swatch that does not exist — updateGridColorLabels then found nothing, skipped
+    * the colour, and the GRID INFO BOX label kept the SEP template's [Registration] text
+    * ("Swatch 'SL White UB 2' not found for group '2'" in leap_seps.log).
+    */
+   const existingName = sortedWhiteRows[i] ? this.hostLayerName(sortedWhiteRows[i]).trim() : '';
+   const rowColorName =
+    existingName ||
+    profileUbNames[i] ||
+    (i === 0 ? baseWhiteName : `${baseWhiteName} ${i + 1}`);
    const hexFromDocument = this.getSwatchHexByName(rowColorName);
    expandedWhiteRows.push({
     ...sourceRow,
     colorName: rowColorName,
+    /* The name above IS the document name, so no swatchName override is needed (or wanted). */
+    swatchName: undefined,
     mesh: meshFromProfile || sourceRow.mesh,
     layerColor: hexFromDocument || sourceRow.layerColor
    });

@@ -73,9 +73,43 @@ class ScriptLoader {
 
 var scriptLoader = new ScriptLoader();
 let cachedServerBasePath = null;
+/*
+ * Why the last resolution failed, for getServerBasePathStatus(). Without it a failure was
+ * indistinguishable from "no path configured": every caller reported the same flat
+ * "Server base path not found" and the panel quietly fell back to defaults.
+ */
+let lastServerBasePathFailure = '';
 
 function sleep(ms) {
  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/*
+ * Home directory for the settings lookup.
+ *
+ * MUST go through the CEP bridge, exactly like fs / path at the top of this file. A bare
+ * require('os') is left as a literal require() by webpack (target: node + nodeExternals) and throws
+ * in the panel's page context, where that require is not Node's. The throw was swallowed by an empty
+ * catch, so getServerBasePath() returned null and EVERY Excel/JSON read silently fell back to
+ * defaults — gray garment swatch, default meshes, no style info — on a machine whose LEAP server
+ * folder was present and readable the whole time. process.env.HOME is the last resort.
+ */
+function getHomeDirectory() {
+ try {
+  const os = window.cep_node.require('os');
+  const home = os && typeof os.homedir === 'function' ? String(os.homedir() || '').trim() : '';
+  if (home) {
+   return home;
+  }
+ } catch (error) {
+  /* Fall through to the environment variable below. */
+ }
+ try {
+  const env = typeof process !== 'undefined' && process.env ? process.env : {};
+  return String(env.HOME || env.USERPROFILE || '').trim();
+ } catch (error) {
+  return '';
+ }
 }
 
 function getServerBasePath() {
@@ -85,27 +119,39 @@ function getServerBasePath() {
  //  }
 
  try {
-  const os = require('os');
-  const homeDir = os.homedir();
-  const settingsPath = path.join(
-   homeDir,
-   'Documents',
-   'LEAP Settings',
-   'logobaseDataPathSettings.json'
-  );
+  const homeDir = getHomeDirectory();
+  if (!homeDir) {
+   lastServerBasePathFailure = 'Could not determine the home directory (os.homedir / HOME both unavailable).';
+  } else {
+   const settingsPath = path.join(
+    homeDir,
+    'Documents',
+    'LEAP Settings',
+    'logobaseDataPathSettings.json'
+   );
 
-  if (fs.existsSync(settingsPath)) {
-   const content = fs.readFileSync(settingsPath, 'utf8');
-   const parsed = JSON.parse(content);
-   if (parsed && parsed.basePath) {
-    const resolvedBasePath = String(parsed.basePath).trim();
-    if (resolvedBasePath !== '' && fs.existsSync(resolvedBasePath)) {
+   if (!fs.existsSync(settingsPath)) {
+    lastServerBasePathFailure = 'Settings file not found: ' + settingsPath;
+   } else {
+    const content = fs.readFileSync(settingsPath, 'utf8');
+    const parsed = JSON.parse(content);
+    const resolvedBasePath = parsed && parsed.basePath ? String(parsed.basePath).trim() : '';
+    if (resolvedBasePath === '') {
+     lastServerBasePathFailure = 'No "basePath" set in ' + settingsPath;
+    } else if (!fs.existsSync(resolvedBasePath)) {
+     lastServerBasePathFailure = 'Configured path does not exist / is not readable: ' + resolvedBasePath;
+    } else {
      cachedServerBasePath = resolvedBasePath;
+     lastServerBasePathFailure = '';
      return resolvedBasePath;
     }
    }
   }
- } catch (error) {}
+ } catch (error) {
+  /* Record it — swallowing this is what made the original failure invisible. */
+  lastServerBasePathFailure =
+   'Error reading the LEAP path settings: ' + ((error && error.message) || String(error));
+ }
 
  /*
   * Once a base path has been resolved, keep returning it even if a later existsSync() momentarily
@@ -137,6 +183,7 @@ async function getServerBasePathWithRetry() {
   }
  }
 
+ console.warn('[LEAP] Server base path could not be resolved: ' + (lastServerBasePathFailure || 'unknown reason'));
  return null;
 }
 
@@ -354,6 +401,122 @@ function findTeamJsonFileNearDocument(documentPath, teamCode) {
   return null;
  } catch (error) {
   return null;
+ }
+}
+
+/*
+ * Locate the team JSON for a document when the TEAM CODE IS NOT KNOWN YET.
+ *
+ * findTeamJsonFileNearDocument() above is the team-code-first resolver: given "7G" it looks for
+ * 7G_*.json. That is useless at version-document detection time, because the team code is the very
+ * thing we are trying to read out of the JSON. Worse, called with no team code it falls back to
+ * jsonFiles[0] -- the alphabetically first file -- which in a 29-team folder is almost always the
+ * wrong team.
+ *
+ * So match the way the ExtendScript side matches: the JSON file name CONTAINS the document base
+ * name. For NFLF_0H8M_CM52_7GHJE.ai that selects 7G_NFLF_0H8M_CM52_7GHJE.json unambiguously.
+ * A supplied team code still wins, so callers that know it keep the stricter behaviour.
+ */
+function resolveTeamJsonPathForDocument(documentPath, teamCode) {
+ try {
+  if (!documentPath) {
+   return null;
+  }
+
+  /* A team code, when known, is the more precise key -- try the existing resolver first. */
+  if (String(teamCode || '').trim()) {
+   const byTeamCode = findTeamJsonFileNearDocument(documentPath, teamCode);
+   if (byTeamCode) {
+    return byTeamCode;
+   }
+  }
+
+  const docBaseName = path.basename(documentPath).replace(/\.[^.]+$/, '');
+  if (!docBaseName) {
+   return null;
+  }
+
+  const matchInFolder = (jsonFolderPath) => {
+   try {
+    if (!fs.existsSync(jsonFolderPath) || !fs.statSync(jsonFolderPath).isDirectory()) {
+     return null;
+    }
+    const match = fs
+     .readdirSync(jsonFolderPath)
+     .filter((entry) => entry.toLowerCase().endsWith('.json'))
+     .sort()
+     .find((entry) => entry.indexOf(docBaseName) !== -1);
+    return match ? path.join(jsonFolderPath, match) : null;
+   } catch (folderError) {
+    return null;
+   }
+  };
+
+  /* Usual layout: 01 TEAMOUTS/<league>/AI/doc.ai with the JSON folder alongside AI. */
+  const aiFolderPath = path.dirname(documentPath);
+  const beside = matchInFolder(path.join(aiFolderPath, 'JSON'));
+  if (beside) {
+   return beside;
+  }
+
+  /* Older / relocated structures: walk upward looking for a JSON folder that holds a match. */
+  let currentDir = path.dirname(aiFolderPath);
+  while (currentDir) {
+   const found = matchInFolder(path.join(currentDir, 'JSON'));
+   if (found) {
+    return found;
+   }
+   const parentDir = path.dirname(currentDir);
+   if (!parentDir || parentDir === currentDir) break;
+   currentDir = parentDir;
+  }
+
+  return null;
+ } catch (error) {
+  return null;
+ }
+}
+
+/*
+ * Read and parse the team JSON for a document using Node's fs.
+ *
+ * This is the Box / File Provider escape hatch. ExtendScript's Folder.getFiles() and File.read()
+ * are unreliable on mounts under ~/Library/CloudStorage, so a document sitting in Box is reported
+ * as "JSON file not found or invalid" and the panel treats a valid LEAP version document as a
+ * standalone job. Node reads those same paths without trouble -- the panel's own Excel lookups
+ * already do it on every Box job -- so when ExtendScript comes back empty the panel reads the JSON
+ * here and hands the parsed object to the host via handleSetTeamJsonOverride.
+ */
+function readTeamJsonNearDocument(documentPath, teamCode) {
+ try {
+  const jsonPath = resolveTeamJsonPathForDocument(documentPath, teamCode);
+  if (!jsonPath || !fs.existsSync(jsonPath)) {
+   return {
+    success: false,
+    error: 'Team JSON not found near document: ' + String(documentPath || '(no path)')
+   };
+  }
+
+  const raw = fs.readFileSync(jsonPath, 'utf8');
+  const parsed = JSON.parse(raw);
+  if (!parsed || typeof parsed !== 'object') {
+   return {
+    success: false,
+    error: 'Team JSON parsed to a non-object: ' + jsonPath
+   };
+  }
+
+  return {
+   success: true,
+   jsonPath: jsonPath,
+   bytesRead: raw.length,
+   data: parsed
+  };
+ } catch (error) {
+  return {
+   success: false,
+   error: error && error.message ? error.message : String(error)
+  };
  }
 }
 
@@ -1884,6 +2047,39 @@ class Leap {
   }
  }
 
+ /*
+  * Panel-side team JSON read, used as the fallback when the host cannot read it from disk.
+  * Resolves the document path from the host when the caller does not supply one, exactly as the
+  * Excel lookups below do -- handleGetActiveDocumentPath reads doc.fullName and touches no disk, so
+  * it stays reliable on the cloud mounts this fallback exists for.
+  */
+ async readTeamJsonNearDocument(documentPath, teamCode) {
+  try {
+   if (!documentPath) {
+    try {
+     const docPathResult = await scriptLoader.evalScript('handleGetActiveDocumentPath', {});
+     const docPathData = JSON.parse(docPathResult);
+     if (docPathData.success && docPathData.documentPath) {
+      documentPath = docPathData.documentPath;
+     }
+    } catch (docPathError) {
+     this.log(`Could not get document path from host: ${docPathError.message}`);
+    }
+   }
+
+   const result = readTeamJsonNearDocument(documentPath, teamCode);
+   this.log(
+    `readTeamJsonNearDocument -> ${result.success ? 'found ' + result.jsonPath : 'not found: ' + result.error}`
+   );
+   return result;
+  } catch (error) {
+   return {
+    success: false,
+    error: error.message
+   };
+  }
+ }
+
  async getStyleCodesFromExcel(teamCode, documentPath) {
   try {
    if (!documentPath) {
@@ -2034,13 +2230,39 @@ class Leap {
   }
  }
 
- async getColorByCodeFromLookup(colorCode) {
+ /*
+  * basePath is the panel-resolved override (see getProfileInformation). It used to be dropped here,
+  * so the standalone form's working path never reached the lookup and the GARMENT swatch silently
+  * stayed the default gray whenever the bundle's own resolver failed.
+  */
+ async getColorByCodeFromLookup(colorCode, basePath) {
   try {
-   const result = await getColorByCodeFromLookup(colorCode);
+   const result = await getColorByCodeFromLookup(colorCode, basePath);
    return result;
   } catch (error) {
    console.error('[Leap.getColorByCodeFromLookup] Error:', error);
    return { success: false, error: error.message };
+  }
+ }
+
+ /*
+  * Whether the LEAP server base path can be resolved, and why not when it cannot. The panel shows
+  * this to the user: without it a resolver failure degrades silently into wrong output (default
+  * garment swatch, default meshes, missing style info) on a separation that reports success.
+  */
+ async getServerBasePathStatus() {
+  try {
+   const basePath = await getServerBasePathWithRetry();
+   if (basePath) {
+    return { success: true, basePath: basePath };
+   }
+   return {
+    success: false,
+    basePath: '',
+    error: lastServerBasePathFailure || 'Server base path not found'
+   };
+  } catch (error) {
+   return { success: false, basePath: '', error: (error && error.message) || String(error) };
   }
  }
 

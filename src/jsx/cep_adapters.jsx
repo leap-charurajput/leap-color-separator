@@ -846,6 +846,19 @@ function resolveGraphicAssetPaths(rootFolder, league, graphicName, docName, prof
  return result;
 }
 
+/* The step trace splitColors returns, as one string (arrays get truncated by the panel logger). */
+function parseSplitColorsSteps(splitResultRaw) {
+ try {
+  if (typeof splitResultRaw === "string") {
+   var parsed = JSON.parse(splitResultRaw);
+   if (parsed && parsed.steps) {
+    return String(parsed.steps);
+   }
+  }
+ } catch (e) { }
+ return "";
+}
+
 function parseSplitColorsResult(splitResultRaw) {
  if (!splitResultRaw) return null;
  try {
@@ -1119,7 +1132,27 @@ function duplicatePlateLayerForSecondHit(sourceLayerName) {
   }
   var newLayerName = String(sourceLayer.name) + " 2";
   var newLayer = getSeparatedArtSubLayerByNameCaseInsensitive(separatedArtLayer, newLayerName);
-  if (newLayer) {
+  var createdNewLayer = false;
+  if (!newLayer) {
+   newLayer = separatedArtLayer.layers.add();
+   newLayer.name = newLayerName;
+   createdNewLayer = true;
+  }
+
+  /*
+   * The second hit sits ABOVE its own ink in the Layers panel — "PANTONE 127 C 2" over
+   * "PANTONE 127 C" — matching the underbase convention (… UB 2nd above … UB). PLACEBEFORE means
+   * earlier in the stack, i.e. HIGHER; this was PLACEAFTER, which buried each second hit under its
+   * source ink. Applied on every run, not just on creation, so a document whose "… 2" layer already
+   * exists in the old position is reordered too.
+   */
+  try {
+   newLayer.move(sourceLayer, ElementPlacement.PLACEBEFORE);
+  } catch (moveErr) {
+   appendLeapSepLog("2nd hit: could not place '" + newLayerName + "' above '" + String(sourceLayer.name) + "': " + (moveErr.message || moveErr));
+  }
+
+  if (!createdNewLayer) {
    var existingCount = 0;
    try { existingCount = newLayer.pageItems ? newLayer.pageItems.length : 0; } catch (ecErr) { }
    if (existingCount > 0) {
@@ -1127,12 +1160,6 @@ function duplicatePlateLayerForSecondHit(sourceLayerName) {
     return true;
    }
    appendLeapSepLog("2nd hit: repopulating empty existing layer '" + newLayerName + "'");
-  } else {
-   newLayer = separatedArtLayer.layers.add();
-   newLayer.name = newLayerName;
-   try {
-    newLayer.move(sourceLayer, ElementPlacement.PLACEAFTER);
-   } catch (moveErr) { }
   }
   sourceLayer.visible = true;
   sourceLayer.locked = false;
@@ -2273,6 +2300,43 @@ function handlePerformSeparation(params_string) {
   }
   var sepDocFile = new File(sepDoc.fullName);
   var sepDocPath = sepDocFile.fsName;
+
+  /*
+   * Record the reopen context NOW, not only on success.
+   *
+   * The full sidecar write happens at the end of this handler; a run that throws midway (plate
+   * splitting, ink lookup, …) used to leave a saved separated .ai with NO context at all, and every
+   * later lookup then fell back to counting parent folders — which is wrong for a separation written
+   * to a configured path, and surfaced as "JSON folder not found: …/02 GRAPHICS/<job> ASSETS/CF/JSON".
+   * This early write costs one small file; the write at the end overwrites it with the complete
+   * descriptor (version, profile, …) once the separation actually finishes.
+   */
+  try {
+   var earlyContext = writeSeparationSidecar({
+    jobRoot: rootFolder && rootFolder.fsName ? rootFolder.fsName : "",
+    teamoutsRoot: teamOutsFolder && teamOutsFolder.fsName ? teamOutsFolder.fsName : "",
+    separationsRoot: rootFolder && rootFolder.fsName ? (rootFolder.fsName + "/09 SEPARATIONS") : "",
+    teamJsonPath: teamJsonPath,
+    sourceDocumentPath: originalDocFile && originalDocFile.fsName ? originalDocFile.fsName : "",
+    league: league,
+    teamCode: teamCode,
+    graphicName: graphicName,
+    profileName: profileMetadata ? profileMetadata.profileName : "",
+    profileCode: profileMetadata ? profileMetadata.profileCode : "",
+    separationFilePath: sepDocPath,
+    createdAtConfiguredPath: createdAtConfiguredPath
+   });
+   if (earlyContext) {
+    persistSeparationSourceContextOnDoc(sepDoc, earlyContext.data);
+    appendLeapSepLog(
+     "Separation sidecar (early): beside=" + (earlyContext.besideWritten ? "ok" : "FAILED") +
+     " registry=" + (earlyContext.registryWritten ? "ok" : "FAILED")
+    );
+   }
+  } catch (eEarlySidecar) {
+   appendLeapSepLog("Separation sidecar (early) error: " + (eEarlySidecar.message || eEarlySidecar));
+  }
+
   appendLeapSepLog(
    "handlePerformSeparation: graphic=" +
    graphicName +
@@ -2356,15 +2420,20 @@ function handlePerformSeparation(params_string) {
 
   sepDoc.save();
   loadLEAPColorSepsActions();
-  var splitColorsError = parseSplitColorsResult(splitColors(graphicName));
+  var splitColorsRaw = splitColors(graphicName);
+  var splitColorsSteps = parseSplitColorsSteps(splitColorsRaw);
+  var splitColorsError = parseSplitColorsResult(splitColorsRaw);
   if (splitColorsError) {
    try {
     unloadLEAPColorSepsActions();
    } catch (unloadErr2) { }
-   appendLeapSepLog("splitColors failed: " + splitColorsError);
+   appendLeapSepLog("splitColors failed: " + splitColorsError + " | steps: " + splitColorsSteps);
    return JSON.stringify({
     success: false,
     error: splitColorsError,
+    /* The step trace travels in the RESPONSE as well as the JSX log: on a machine where the JSX file
+       write never lands, this is the only way the detail reaches leap_seps.log. */
+    splitColorsSteps: splitColorsSteps,
     aiFilePath: aiFilePath,
     graphicName: graphicName,
     graphicAssets: graphicAssets,
@@ -2430,6 +2499,7 @@ function handlePerformSeparation(params_string) {
     success: false,
     error:
      "Separation plates were not created. Verify graphic colors and SEP_ART placement.",
+    splitColorsSteps: splitColorsSteps,
     aiFilePath: aiFilePath,
     graphicName: graphicName,
     layerNames: layerNames,
@@ -3648,9 +3718,14 @@ function handleGetTemplateInfo(params_string) {
   }
   var jsonData = findAndReadJSONFile(docName, leagueFolder, sepContext.teamJsonPath);
   if (!jsonData) {
+   /*
+    * _debug says WHICH step failed. Without it a cloud-mount read failure is indistinguishable
+    * from a genuinely non-LEAP document, and the panel silently falls back to standalone mode.
+    */
    return JSON.stringify({
     success: false,
-    error: "JSON file not found or invalid for document: " + docName
+    error: "JSON file not found or invalid for document: " + docName,
+    _debug: findAndReadJSONFile.lastDiagnostic
    });
   }
   var templateInfo = {
@@ -3668,7 +3743,8 @@ function handleGetTemplateInfo(params_string) {
    success: true,
    hasDocument: true,
    documentPath: docPath,
-   data: templateInfo
+   data: templateInfo,
+   _debug: findAndReadJSONFile.lastDiagnostic
   });
  } catch (e) {
   return JSON.stringify({
@@ -3677,6 +3753,75 @@ function handleGetTemplateInfo(params_string) {
   });
  }
 }
+/*
+ * Accept a team JSON that the panel resolved and parsed on the Node side, and serve it to every
+ * later findAndReadJSONFile() call for this document.
+ *
+ * Why this exists: on macOS File Provider mounts (Box Drive et al) ExtendScript cannot reliably
+ * enumerate or read <leagueFolder>/JSON, so handleGetTemplateInfo returns no teamCode, the panel
+ * decides the document is not a LEAP version document, and Graphics / Separations stay hidden on a
+ * document that is perfectly valid. Node reads the same path without trouble, so the panel does the
+ * read and pushes the result down here.
+ *
+ * Set once per document, this also repairs handleGetGraphicSwatches, handleGetBodyColor and
+ * handlePerformSeparation, which read the same team JSON through the same helper -- so detection and
+ * the separation that follows it succeed or fail together, rather than the UI appearing and the
+ * separation then dying at the same wall.
+ */
+function handleSetTeamJsonOverride(params_string) {
+ try {
+  var params = JSON.parse(params_string);
+  var docName = params.docName || "";
+  var jsonData = params.jsonData;
+
+  /*
+   * Derive the key from the active document when the caller did not supply one, so the override is
+   * always tied to a specific document and can never leak to the next one opened.
+   */
+  if (!docName && app.documents.length) {
+   var activeDoc = app.activeDocument;
+   var docFile = new File(activeDoc.fullName);
+   docName = docFile.name.replace(/\.[^\.]+$/, '');
+  }
+
+  if (!docName || !jsonData) {
+   return JSON.stringify({
+    success: false,
+    error: "docName and jsonData are both required"
+   });
+  }
+
+  var stored = setTeamJsonOverride(docName, jsonData);
+  return JSON.stringify({
+   success: !!stored,
+   docName: docName
+  });
+ } catch (e) {
+  return JSON.stringify({
+   success: false,
+   error: e.message || e.toString()
+  });
+ }
+}
+
+/*
+ * Drop the override so a later document is never served another document's team JSON. The panel
+ * calls this when the active document changes.
+ */
+function handleClearTeamJsonOverride(params_string) {
+ try {
+  var params = params_string ? JSON.parse(params_string) : {};
+  /* No docName clears every entry; a docName evicts just that document. */
+  clearTeamJsonOverride(params.docName || "");
+  return JSON.stringify({ success: true });
+ } catch (e) {
+  return JSON.stringify({
+   success: false,
+   error: e.message || e.toString()
+  });
+ }
+}
+
 function handleGetActiveDocumentPath(params_string) {
  try {
   if (!app.documents.length) {
@@ -4143,13 +4288,26 @@ function handleGetGraphicSwatches(params_string) {
    teamCode = sepContext.teamCode;
    leagueFolder = sepContext.leagueFolder;
   } else if (docPath.indexOf("09 SEPARATIONS") !== -1) {
-   var graphicFolder = docFile.parent;
-   var teamCodeFolder = graphicFolder.parent;
-   var leagueSepFolder = teamCodeFolder.parent;
-   var separationsFolder = leagueSepFolder.parent;
-   rootFolder = separationsFolder.parent;
-   league = leagueSepFolder.name;
-   teamCode = teamCodeFolder.name;
+   /*
+    * Depth-independent first: find the job root by looking for "02 GRAPHICS" and take league/team
+    * from the document's own XMP. The fixed-depth walk below only holds for the legacy layout
+    * …/09 SEPARATIONS/<league>/<team>/<graphic>/doc.ai — a separation written to a configured path
+    * (e.g. 09 SEPARATIONS/SEPS/doc.ai) sits two rungs higher, so every name it derives is shifted.
+    */
+   var jobFolders = resolveJobFoldersFromDocument(activeDoc, docFile);
+   if (jobFolders.rootFolder && jobFolders.league && jobFolders.teamCode) {
+    rootFolder = jobFolders.rootFolder;
+    league = jobFolders.league;
+    teamCode = jobFolders.teamCode;
+   } else {
+    var graphicFolder = docFile.parent;
+    var teamCodeFolder = graphicFolder.parent;
+    var leagueSepFolder = teamCodeFolder.parent;
+    var separationsFolder = leagueSepFolder.parent;
+    rootFolder = separationsFolder.parent;
+    league = leagueSepFolder.name;
+    teamCode = teamCodeFolder.name;
+   }
   } else {
    var aiFolder = docFile.parent;
    leagueFolder = aiFolder.parent;
