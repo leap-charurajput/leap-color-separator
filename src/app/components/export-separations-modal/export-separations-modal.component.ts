@@ -113,8 +113,18 @@ export class ExportSeparationsModalComponent implements OnInit, OnChanges {
 			.catch(() => {});
 	}
 
+	/*
+	 * Typing only updates the value. The path preview re-resolves on BLUR (or Enter), not per
+	 * keystroke — a host round-trip per key redrew the destination list under the user's cursor and
+	 * read as flicker. Blur alone is used rather than blur+change: change is a subset of blur on a
+	 * text input, so pairing them just fired the refresh twice. Same rule as the token inputs.
+	 */
 	handleVersionNumberChange(event: Event): void {
 		this.versionNumber = (event.target as HTMLInputElement).value;
+	}
+
+	/** Re-resolve the paths once the user has left the Control / Version field. */
+	handleControlVersionCommit(): void {
 		this.refreshDestinations();
 	}
 
@@ -128,7 +138,6 @@ export class ExportSeparationsModalComponent implements OnInit, OnChanges {
 
 	handleControlNumberChange(event: Event): void {
 		this.controlNumber = (event.target as HTMLInputElement).value;
-		this.refreshDestinations();
 	}
 
 	/** Destinations for the exports that are actually ticked — nothing else is worth previewing. */

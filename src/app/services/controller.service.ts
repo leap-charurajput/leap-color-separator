@@ -13,328 +13,328 @@ import { getSelectionCount as getHostSelectionCount } from '../../lib/scripts/ge
 import { LeapSepsLogService } from './leap-seps-log.service';
 
 @Injectable({
- providedIn: 'root'
+	providedIn: 'root'
 })
 export class ControllerService {
- constructor(private leapSepsLog: LeapSepsLogService, private dataIssues: DataIssuesService) {
-  this.init();
- }
+	constructor(private leapSepsLog: LeapSepsLogService, private dataIssues: DataIssuesService) {
+		this.init();
+	}
 
- private init(): void {
-  this.log('client controller is initing...');
-  this.log(`do we have leap ? ${this.hasSession()}`);
+	private init(): void {
+		this.log('client controller is initing...');
+		this.log(`do we have leap ? ${this.hasSession()}`);
 
-  const isInCEP = !!(window as any).__adobe_cep__;
-  this.log(`are we in CEP environment ? ${isInCEP}`);
+		const isInCEP = !!(window as any).__adobe_cep__;
+		this.log(`are we in CEP environment ? ${isInCEP}`);
 
-  if (!this.hasSession()) {
-   this.waitForSession()
-    .then(() => {
-     this.log('Leap is now available');
-    })
-    .catch(() => {
-     if (isInCEP) {
-     }
-    });
-  }
+		if (!this.hasSession()) {
+			this.waitForSession()
+				.then(() => {
+					this.log('Leap is now available');
+				})
+				.catch(() => {
+					if (isInCEP) {
+					}
+				});
+		}
 
-  this.log('client controller has inited');
- }
+		this.log('client controller has inited');
+	}
 
- private waitForSession(maxRetries: number = 50, delayMs: number = 100): Promise<void> {
-  return new Promise((resolve, reject) => {
-   let retries = 0;
-   const checkSession = () => {
-    if (this.hasSession()) {
-     resolve();
-    } else if (retries < maxRetries) {
-     retries++;
-     setTimeout(checkSession, delayMs);
-    } else {
-     reject(new Error('Leap not available after retries'));
-    }
-   };
-   checkSession();
-  });
- }
+	private waitForSession(maxRetries: number = 50, delayMs: number = 100): Promise<void> {
+		return new Promise((resolve, reject) => {
+			let retries = 0;
+			const checkSession = () => {
+				if (this.hasSession()) {
+					resolve();
+				} else if (retries < maxRetries) {
+					retries++;
+					setTimeout(checkSession, delayMs);
+				} else {
+					reject(new Error('Leap not available after retries'));
+				}
+			};
+			checkSession();
+		});
+	}
 
- invokePlugin(options: any): Promise<any> {
-  this.log('invokePlugin');
+	invokePlugin(options: any): Promise<any> {
+		this.log('invokePlugin');
 
-  return this.ensureSession().then(() => {
-   return (window as any).leap
-    .invokePlugin(options)
-    .then((res: any) => {
-     return res;
-    })
-    .catch((err: any) => {
-     throw err;
-    });
-  });
- }
+		return this.ensureSession().then(() => {
+			return (window as any).leap
+				.invokePlugin(options)
+				.then((res: any) => {
+					return res;
+				})
+				.catch((err: any) => {
+					throw err;
+				});
+		});
+	}
 
- getGraphicsList(): Promise<any> {
-  this.log('getGraphicsList called');
+	getGraphicsList(): Promise<any> {
+		this.log('getGraphicsList called');
 
-  return this.ensureSession().then(() => {
-   return (window as any).leap
-    .scriptLoader()
-    .evalScript('handleGetGraphicsList', {})
-    .then((res: string) => {
-     const result = JSON.parse(res);
+		return this.ensureSession().then(() => {
+			return (window as any).leap
+				.scriptLoader()
+				.evalScript('handleGetGraphicsList', {})
+				.then((res: string) => {
+					const result = JSON.parse(res);
 
-     return result;
-    })
-    .catch((err: any) => {
-     throw err;
-    });
-  });
- }
+					return result;
+				})
+				.catch((err: any) => {
+					throw err;
+				});
+		});
+	}
 
- /** White spot swatches used as fills in a graphic's LIVE_ART GRAPHIC:* / SIZED_GRAPHICS art. */
- getGraphicsArtWhiteSwatches(
-  graphicName?: string
- ): Promise<{ success: boolean; swatches: string[]; error?: string }> {
-  this.log('getGraphicsArtWhiteSwatches called' + (graphicName ? ' for ' + graphicName : ''));
+	/** White spot swatches used as fills in a graphic's LIVE_ART GRAPHIC:* / SIZED_GRAPHICS art. */
+	getGraphicsArtWhiteSwatches(
+		graphicName?: string
+	): Promise<{ success: boolean; swatches: string[]; error?: string }> {
+		this.log('getGraphicsArtWhiteSwatches called' + (graphicName ? ' for ' + graphicName : ''));
 
-  return this.ensureSession().then(() => {
-   const params = graphicName ? { graphicName } : {};
-   return (window as any).leap
-    .scriptLoader()
-    .evalScript('handleGetGraphicsArtWhiteSwatches', params)
-    .then((res: string) => JSON.parse(res))
-    .catch((err: any) => {
-     throw err;
-    });
-  });
- }
+		return this.ensureSession().then(() => {
+			const params = graphicName ? { graphicName } : {};
+			return (window as any).leap
+				.scriptLoader()
+				.evalScript('handleGetGraphicsArtWhiteSwatches', params)
+				.then((res: string) => JSON.parse(res))
+				.catch((err: any) => {
+					throw err;
+				});
+		});
+	}
 
- getSelectionCount(): Promise<number> {
-  if ((window as any).__adobe_cep__) {
-   return getHostSelectionCount().catch(() => 0);
-  }
-  return this.ensureSession()
-   .then(() => getHostSelectionCount())
-   .catch(() => 0);
- }
+	getSelectionCount(): Promise<number> {
+		if ((window as any).__adobe_cep__) {
+			return getHostSelectionCount().catch(() => 0);
+		}
+		return this.ensureSession()
+			.then(() => getHostSelectionCount())
+			.catch(() => 0);
+	}
 
- hasActiveIllustratorDocument(): Promise<boolean> {
-  if ((window as any).__adobe_cep__) {
-   return hasHostActiveDocument().catch(() => false);
-  }
-  return this.ensureSession()
-   .then(() => hasHostActiveDocument())
-   .catch(() => false);
- }
+	hasActiveIllustratorDocument(): Promise<boolean> {
+		if ((window as any).__adobe_cep__) {
+			return hasHostActiveDocument().catch(() => false);
+		}
+		return this.ensureSession()
+			.then(() => hasHostActiveDocument())
+			.catch(() => false);
+	}
 
- createGraphicFromSelection(payload: {
-  position: string;
-  name: string;
-  width: number;
-  height: number;
- }): Promise<any> {
-  this.log('createGraphicFromSelection called');
+	createGraphicFromSelection(payload: {
+		position: string;
+		name: string;
+		width: number;
+		height: number;
+	}): Promise<any> {
+		this.log('createGraphicFromSelection called');
 
-  const runCreate = () => {
-   const graphicKey = this.resolveGraphicPositionAbbreviation(payload.position);
-   return this.ensureSession().then(() =>
-    createGraphicFromSelection({
-     ...payload,
-     graphicKey: graphicKey || payload.position
-    })
-   );
-  };
+		const runCreate = () => {
+			const graphicKey = this.resolveGraphicPositionAbbreviation(payload.position);
+			return this.ensureSession().then(() =>
+				createGraphicFromSelection({
+					...payload,
+					graphicKey: graphicKey || payload.position
+				})
+			);
+		};
 
-  if (this.graphicPositionLookup.length > 0) {
-   return runCreate();
-  }
+		if (this.graphicPositionLookup.length > 0) {
+			return runCreate();
+		}
 
-  return this.getGraphicPositionOptionsFromJson().then(() => runCreate());
- }
+		return this.getGraphicPositionOptionsFromJson().then(() => runCreate());
+	}
 
- /*
-  * Standalone (non-LEAP) mode: read the LICENSING submission sheet from the active document so
-  * the Standalone form can be prefilled on "+". Returns the raw label/value pairs (orgCode,
-  * teamName, conceptCode, style, color, placement, …). Never throws — resolves to a
-  * { success:false } shape on error so the form simply stays empty.
-  */
- getLicensingInfo(): Promise<any> {
-  this.log('getLicensingInfo called');
-  return this.ensureSession()
-   .then(() => getLicensingInfoFromDocument())
-   .catch((err: any) => ({
-    success: false,
-    error: err?.message || 'Unknown error reading licensing info'
-   }));
- }
+	/*
+	 * Standalone (non-LEAP) mode: read the LICENSING submission sheet from the active document so
+	 * the Standalone form can be prefilled on "+". Returns the raw label/value pairs (orgCode,
+	 * teamName, conceptCode, style, color, placement, …). Never throws — resolves to a
+	 * { success:false } shape on error so the form simply stays empty.
+	 */
+	getLicensingInfo(): Promise<any> {
+		this.log('getLicensingInfo called');
+		return this.ensureSession()
+			.then(() => getLicensingInfoFromDocument())
+			.catch((err: any) => ({
+				success: false,
+				error: err?.message || 'Unknown error reading licensing info'
+			}));
+	}
 
- /*
-  * Standalone (non-LEAP) mode: export the current selection to <activeDocFolder>/ASSETS/<name>.ai
-  * and leave that exported document open. Does not modify the active document.
-  */
- exportSelectionToAssets(payload: {
-  teamCode?: string;
-  styleCode?: string;
-  position?: string;
- }): Promise<any> {
-  this.log('exportSelectionToAssets called');
-  return this.ensureSession().then(() => exportSelectionToAssets(payload));
- }
+	/*
+	 * Standalone (non-LEAP) mode: export the current selection to <activeDocFolder>/ASSETS/<name>.ai
+	 * and leave that exported document open. Does not modify the active document.
+	 */
+	exportSelectionToAssets(payload: {
+		teamCode?: string;
+		styleCode?: string;
+		position?: string;
+	}): Promise<any> {
+		this.log('exportSelectionToAssets called');
+		return this.ensureSession().then(() => exportSelectionToAssets(payload));
+	}
 
- /*
-  * Standalone (non-LEAP) profile lookup that passes an explicit LEAP Data base path (resolved via
-  * getLeapServerDataPath) to the leap bundle, avoiding the Node-side getServerBasePath() existsSync
-  * gate that can fail on cold/cloud-synced drives. Returns { success, profileMap } / { success:false }.
-  */
- getProfileNamesFromExcelAtPath(styleCodes: string[], basePath: string): Promise<any> {
-  this.log('getProfileNamesFromExcelAtPath called');
-  return this.ensureSession().then(() =>
-   (window as any).leap.getProfileNamesFromExcelAtPath(styleCodes, basePath)
-  );
- }
+	/*
+	 * Standalone (non-LEAP) profile lookup that passes an explicit LEAP Data base path (resolved via
+	 * getLeapServerDataPath) to the leap bundle, avoiding the Node-side getServerBasePath() existsSync
+	 * gate that can fail on cold/cloud-synced drives. Returns { success, profileMap } / { success:false }.
+	 */
+	getProfileNamesFromExcelAtPath(styleCodes: string[], basePath: string): Promise<any> {
+		this.log('getProfileNamesFromExcelAtPath called');
+		return this.ensureSession().then(() =>
+			(window as any).leap.getProfileNamesFromExcelAtPath(styleCodes, basePath)
+		);
+	}
 
- /*
-  * Standalone (non-LEAP) mode: run the separation on the exported ASSETS graphic. Reuses the loaded
-  * separation engine via the inline script; writes to a flat SEPARATIONS folder next to ASSETS.
-  */
- generateStandaloneSeparation(payload: {
-  graphicName: string;
-  styleCodes: string[];
-  profileMetadata: any;
-  jsonData: any;
-  sepsTemplateFileName?: string;
-  exportedFilePath: string;
-  cadPngPath?: string;
- }): Promise<any> {
-  this.log('generateStandaloneSeparation called');
-  return this.ensureSession().then(() => runStandaloneSeparation(payload));
- }
+	/*
+	 * Standalone (non-LEAP) mode: run the separation on the exported ASSETS graphic. Reuses the loaded
+	 * separation engine via the inline script; writes to a flat SEPARATIONS folder next to ASSETS.
+	 */
+	generateStandaloneSeparation(payload: {
+		graphicName: string;
+		styleCodes: string[];
+		profileMetadata: any;
+		jsonData: any;
+		sepsTemplateFileName?: string;
+		exportedFilePath: string;
+		cadPngPath?: string;
+	}): Promise<any> {
+		this.log('generateStandaloneSeparation called');
+		return this.ensureSession().then(() => runStandaloneSeparation(payload));
+	}
 
- toggleLayerVisibility(layerName: string): Promise<any> {
-  this.log('toggleLayerVisibility called for layer: ' + layerName);
+	toggleLayerVisibility(layerName: string): Promise<any> {
+		this.log('toggleLayerVisibility called for layer: ' + layerName);
 
-  return this.ensureSession().then(() => {
-   const params = { layerName: layerName };
-   return (window as any).leap
-    .scriptLoader()
-    .evalScript('handleToggleLayerVisibility', params)
-    .then((res: string) => {
-     const result = JSON.parse(res);
+		return this.ensureSession().then(() => {
+			const params = { layerName: layerName };
+			return (window as any).leap
+				.scriptLoader()
+				.evalScript('handleToggleLayerVisibility', params)
+				.then((res: string) => {
+					const result = JSON.parse(res);
 
-     return result;
-    })
-    .catch((err: any) => {
-     throw err;
-    });
-  });
- }
+					return result;
+				})
+				.catch((err: any) => {
+					throw err;
+				});
+		});
+	}
 
- toggleInkVisibility(inkName: string): Promise<any> {
-  this.log('toggleInkVisibility called for ink: ' + inkName);
+	toggleInkVisibility(inkName: string): Promise<any> {
+		this.log('toggleInkVisibility called for ink: ' + inkName);
 
-  return this.ensureSession().then(() => {
-   const params = { inkName: inkName };
-   return (window as any).leap
-    .scriptLoader()
-    .evalScript('handleToggleInkVisibility', params)
-    .then((res: string) => {
-     const result = JSON.parse(res);
-     return result;
-    })
-    .catch((err: any) => {
-     throw err;
-    });
-  });
- }
+		return this.ensureSession().then(() => {
+			const params = { inkName: inkName };
+			return (window as any).leap
+				.scriptLoader()
+				.evalScript('handleToggleInkVisibility', params)
+				.then((res: string) => {
+					const result = JSON.parse(res);
+					return result;
+				})
+				.catch((err: any) => {
+					throw err;
+				});
+		});
+	}
 
- resetInkVisibility(): Promise<any> {
-  this.log('resetInkVisibility called');
+	resetInkVisibility(): Promise<any> {
+		this.log('resetInkVisibility called');
 
-  return this.ensureSession().then(() => {
-   return (window as any).leap
-    .scriptLoader()
-    .evalScript('handleResetInkVisibility', {})
-    .then((res: string) => {
-     const result = JSON.parse(res);
-     return result;
-    })
-    .catch((err: any) => {
-     throw err;
-    });
-  });
- }
+		return this.ensureSession().then(() => {
+			return (window as any).leap
+				.scriptLoader()
+				.evalScript('handleResetInkVisibility', {})
+				.then((res: string) => {
+					const result = JSON.parse(res);
+					return result;
+				})
+				.catch((err: any) => {
+					throw err;
+				});
+		});
+	}
 
- reorderSeparatedArtLayers(orderedNames: string[]): Promise<any> {
-  this.log('reorderSeparatedArtLayers called');
+	reorderSeparatedArtLayers(orderedNames: string[]): Promise<any> {
+		this.log('reorderSeparatedArtLayers called');
 
-  return this.ensureSession().then(() => {
-   const params = { orderedNames };
-   return (window as any).leap
-    .scriptLoader()
-    .evalScript('handleReorderSeparatedArtLayers', params)
-    .then((res: string) => {
-     if (res == null || String(res).trim() === '') {
-      return { success: false, error: 'Empty response from Illustrator for reorder' };
-     }
-     try {
-      return JSON.parse(String(res));
-     } catch (parseErr: any) {
-      console.error('[Controller] reorderSeparatedArtLayers JSON.parse failed:', res, parseErr);
-      return { success: false, error: 'Invalid JSON from Illustrator: ' + String(res).slice(0, 200) };
-     }
-    })
-    .catch((err: any) => {
-     console.error('[Controller] reorderSeparatedArtLayers evalScript failed:', err);
-     throw err;
-    });
-  });
- }
+		return this.ensureSession().then(() => {
+			const params = { orderedNames };
+			return (window as any).leap
+				.scriptLoader()
+				.evalScript('handleReorderSeparatedArtLayers', params)
+				.then((res: string) => {
+					if (res == null || String(res).trim() === '') {
+						return { success: false, error: 'Empty response from Illustrator for reorder' };
+					}
+					try {
+						return JSON.parse(String(res));
+					} catch (parseErr: any) {
+						console.error('[Controller] reorderSeparatedArtLayers JSON.parse failed:', res, parseErr);
+						return { success: false, error: 'Invalid JSON from Illustrator: ' + String(res).slice(0, 200) };
+					}
+				})
+				.catch((err: any) => {
+					console.error('[Controller] reorderSeparatedArtLayers evalScript failed:', err);
+					throw err;
+				});
+		});
+	}
 
- removeSeparationInkArtifacts(
-  tryNames: string[],
-  removeSublayer: boolean,
-  removeSwatch: boolean
- ): Promise<any> {
-  this.log('removeSeparationInkArtifacts called');
+	removeSeparationInkArtifacts(
+		tryNames: string[],
+		removeSublayer: boolean,
+		removeSwatch: boolean
+	): Promise<any> {
+		this.log('removeSeparationInkArtifacts called');
 
-  return this.ensureSession().then(() => {
-   const normalized = Array.isArray(tryNames)
-    ? tryNames.map((n) => String(n || '').trim()).filter((n) => n.length > 0)
-    : [];
-   const params = {
-    tryNames: normalized,
-    inkSublayerName: normalized.length > 0 ? normalized[0] : '',
-    removeSublayer: !!removeSublayer,
-    removeSwatch: !!removeSwatch
-   };
-   return (window as any).leap
-    .scriptLoader()
-    .evalScript('handleRemoveSeparationInkArtifacts', params)
-    .then((res: string) => {
-     if (res == null || String(res).trim() === '') {
-      return { success: false, error: 'Empty response from Illustrator' };
-     }
-     try {
-      return JSON.parse(String(res));
-     } catch (parseErr: any) {
-      console.error('[Controller] removeSeparationInkArtifacts JSON.parse failed:', res, parseErr);
-      return { success: false, error: 'Invalid JSON from Illustrator: ' + String(res).slice(0, 200) };
-     }
-    })
-    .catch((err: any) => {
-     console.error('[Controller] removeSeparationInkArtifacts evalScript failed:', err);
-     throw err;
-    });
-  });
- }
+		return this.ensureSession().then(() => {
+			const normalized = Array.isArray(tryNames)
+				? tryNames.map((n) => String(n || '').trim()).filter((n) => n.length > 0)
+				: [];
+			const params = {
+				tryNames: normalized,
+				inkSublayerName: normalized.length > 0 ? normalized[0] : '',
+				removeSublayer: !!removeSublayer,
+				removeSwatch: !!removeSwatch
+			};
+			return (window as any).leap
+				.scriptLoader()
+				.evalScript('handleRemoveSeparationInkArtifacts', params)
+				.then((res: string) => {
+					if (res == null || String(res).trim() === '') {
+						return { success: false, error: 'Empty response from Illustrator' };
+					}
+					try {
+						return JSON.parse(String(res));
+					} catch (parseErr: any) {
+						console.error('[Controller] removeSeparationInkArtifacts JSON.parse failed:', res, parseErr);
+						return { success: false, error: 'Invalid JSON from Illustrator: ' + String(res).slice(0, 200) };
+					}
+				})
+				.catch((err: any) => {
+					console.error('[Controller] removeSeparationInkArtifacts evalScript failed:', err);
+					throw err;
+				});
+		});
+	}
 
- showHostAlert(title: string, message: string): Promise<any> {
-  this.log('showHostAlert called');
+	showHostAlert(title: string, message: string): Promise<any> {
+		this.log('showHostAlert called');
 
-  return this.ensureSession().then(() => {
-   const safeTitle = String(title || 'Alert').replace(/'/g, "\\'");
-   const safeMessage = String(message || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-   const script = `
+		return this.ensureSession().then(() => {
+			const safeTitle = String(title || 'Alert').replace(/'/g, "\\'");
+			const safeMessage = String(message || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+			const script = `
 (function() {
   try {
     var alertTitle = '${safeTitle}';
@@ -358,22 +358,22 @@ export class ControllerService {
   }
 })();
 `;
-   return evalScript(script).then((res: any) => {
-    const str = typeof res === 'string' ? res : '';
-    try {
-     return str ? JSON.parse(str) : { success: false, error: 'Empty response from host' };
-    } catch (_e) {
-     return { success: false, error: 'Invalid response from host' };
-    }
-   });
-  });
- }
+			return evalScript(script).then((res: any) => {
+				const str = typeof res === 'string' ? res : '';
+				try {
+					return str ? JSON.parse(str) : { success: false, error: 'Empty response from host' };
+				} catch (_e) {
+					return { success: false, error: 'Invalid response from host' };
+				}
+			});
+		});
+	}
 
- inspectSelectionForSeparationInk(): Promise<any> {
-  this.log('inspectSelectionForSeparationInk called');
+	inspectSelectionForSeparationInk(): Promise<any> {
+		this.log('inspectSelectionForSeparationInk called');
 
-  return this.ensureSession().then(() => {
-   const script = `
+		return this.ensureSession().then(() => {
+			const script = `
 (function() {
   try {
     if (!app.documents.length) {
@@ -505,23 +505,23 @@ export class ControllerService {
 })();
 `;
 
-   return evalScript(script).then((res: any) => {
-    const str = typeof res === 'string' ? res : '';
-    try {
-     return str ? JSON.parse(str) : { success: false, canAdd: false, message: 'Empty response' };
-    } catch (_e) {
-     return { success: false, canAdd: false, message: 'Invalid response from host' };
-    }
-   });
-  });
- }
+			return evalScript(script).then((res: any) => {
+				const str = typeof res === 'string' ? res : '';
+				try {
+					return str ? JSON.parse(str) : { success: false, canAdd: false, message: 'Empty response' };
+				} catch (_e) {
+					return { success: false, canAdd: false, message: 'Invalid response from host' };
+				}
+			});
+		});
+	}
 
- addSelectionToSeparationInk(inkName: string): Promise<any> {
-  this.log('addSelectionToSeparationInk called for: ' + inkName);
+	addSelectionToSeparationInk(inkName: string): Promise<any> {
+		this.log('addSelectionToSeparationInk called for: ' + inkName);
 
-  return this.ensureSession().then(() => {
-   const safeInkName = String(inkName || '').replace(/'/g, "\\'");
-   const script = `
+		return this.ensureSession().then(() => {
+			const safeInkName = String(inkName || '').replace(/'/g, "\\'");
+			const script = `
 (function() {
   try {
     if (!app.documents.length) {
@@ -645,344 +645,344 @@ export class ControllerService {
 })();
 `;
 
-   return evalScript(script).then((res: any) => {
-    const str = typeof res === 'string' ? res : '';
-    try {
-     return str ? JSON.parse(str) : { success: false, message: 'Empty response' };
-    } catch (_e) {
-     return { success: false, message: 'Invalid response from host' };
-    }
-   });
-  });
- }
+			return evalScript(script).then((res: any) => {
+				const str = typeof res === 'string' ? res : '';
+				try {
+					return str ? JSON.parse(str) : { success: false, message: 'Empty response' };
+				} catch (_e) {
+					return { success: false, message: 'Invalid response from host' };
+				}
+			});
+		});
+	}
 
- updateSepTable(separationData: any[]): Promise<any> {
-  this.log('updateSepTable called with ' + separationData.length + ' rows');
+	updateSepTable(separationData: any[]): Promise<any> {
+		this.log('updateSepTable called with ' + separationData.length + ' rows');
 
-  return this.ensureSession().then(() => {
-   const params = { separationData: separationData };
-   return (window as any).leap
-    .scriptLoader()
-    .evalScript('handleUpdateSepTable', params)
-    .then((res: string) => {
-     const result = JSON.parse(res);
-     this.reportSepTableIssues(result);
+		return this.ensureSession().then(() => {
+			const params = { separationData: separationData };
+			return (window as any).leap
+				.scriptLoader()
+				.evalScript('handleUpdateSepTable', params)
+				.then((res: string) => {
+					const result = JSON.parse(res);
+					this.reportSepTableIssues(result);
 
-     return result;
-    })
-    .catch((err: any) => {
-     throw err;
-    });
-  });
- }
+					return result;
+				})
+				.catch((err: any) => {
+					throw err;
+				});
+		});
+	}
 
- /*
-  * Every host handler that reads the team JSON fails with this exact message when it cannot get at
-  * the file, so one predicate covers handleGetTemplateInfo, handleGetGraphicSwatches,
-  * handleGetBodyColor and handlePerformSeparation.
-  */
- private static readonly TEAM_JSON_UNREADABLE = /JSON file not found or invalid for document/i;
+	/*
+	 * Every host handler that reads the team JSON fails with this exact message when it cannot get at
+	 * the file, so one predicate covers handleGetTemplateInfo, handleGetGraphicSwatches,
+	 * handleGetBodyColor and handlePerformSeparation.
+	 */
+	private static readonly TEAM_JSON_UNREADABLE = /JSON file not found or invalid for document/i;
 
- /*
-  * Document whose team JSON has already been pushed to the host, and the in-flight read for it.
-  * checkVersionDocument fires from several components at once (the log shows getTemplateInfo called
-  * four to six times inside 100ms), so without the in-flight promise the same file would be read and
-  * pushed once per caller.
-  */
- private readonly teamJsonOverrideDocPaths = new Set<string>();
- private readonly teamJsonOverrideInFlight = new Map<string, Promise<boolean>>();
+	/*
+	 * Document whose team JSON has already been pushed to the host, and the in-flight read for it.
+	 * checkVersionDocument fires from several components at once (the log shows getTemplateInfo called
+	 * four to six times inside 100ms), so without the in-flight promise the same file would be read and
+	 * pushed once per caller.
+	 */
+	private readonly teamJsonOverrideDocPaths = new Set<string>();
+	private readonly teamJsonOverrideInFlight = new Map<string, Promise<boolean>>();
 
- /*
-  * Read the team JSON on the panel side and hand it to the host, so the handlers that need it stop
-  * depending on ExtendScript's own disk access.
-  *
-  * This exists because ExtendScript's Folder.getFiles() / File.read() are unreliable on macOS File
-  * Provider mounts -- confirmed on Box Drive, where a valid LEAP version document under
-  * ~/Library/CloudStorage was reported as "JSON file not found or invalid" and the panel fell back
-  * to standalone mode, while the very same job opened from a local disk worked. Node reads those
-  * paths without trouble, which the panel's own Excel lookups already prove on every Box job.
-  *
-  * Returns false when there is nothing to push (no document, or the JSON genuinely is not there),
-  * leaving the caller with the host's original result rather than masking a real failure.
-  */
- private async ensureTeamJsonOverride(): Promise<boolean> {
-  const documentPath = await this.getActiveDocumentPathForClient();
-  if (!documentPath) {
-   return false;
-  }
+	/*
+	 * Read the team JSON on the panel side and hand it to the host, so the handlers that need it stop
+	 * depending on ExtendScript's own disk access.
+	 *
+	 * This exists because ExtendScript's Folder.getFiles() / File.read() are unreliable on macOS File
+	 * Provider mounts -- confirmed on Box Drive, where a valid LEAP version document under
+	 * ~/Library/CloudStorage was reported as "JSON file not found or invalid" and the panel fell back
+	 * to standalone mode, while the very same job opened from a local disk worked. Node reads those
+	 * paths without trouble, which the panel's own Excel lookups already prove on every Box job.
+	 *
+	 * Returns false when there is nothing to push (no document, or the JSON genuinely is not there),
+	 * leaving the caller with the host's original result rather than masking a real failure.
+	 */
+	private async ensureTeamJsonOverride(): Promise<boolean> {
+		const documentPath = await this.getActiveDocumentPathForClient();
+		if (!documentPath) {
+			return false;
+		}
 
-  /* Already pushed for this document -- a retry would read and re-send the same bytes. */
-  if (this.teamJsonOverrideDocPaths.has(documentPath)) {
-   return true;
-  }
-  const pending = this.teamJsonOverrideInFlight.get(documentPath);
-  if (pending) {
-   return pending;
-  }
+		/* Already pushed for this document -- a retry would read and re-send the same bytes. */
+		if (this.teamJsonOverrideDocPaths.has(documentPath)) {
+			return true;
+		}
+		const pending = this.teamJsonOverrideInFlight.get(documentPath);
+		if (pending) {
+			return pending;
+		}
 
-  const read$ = (async () => {
-   try {
-    const read = await (window as any).leap.readTeamJsonNearDocument(documentPath);
-    if (!read?.success || !read?.data) {
-     console.log(
-      '[Controller] team JSON panel-side fallback found nothing:',
-      read?.error || '(no error reported)'
-     );
-     return false;
-    }
+		const read$ = (async () => {
+			try {
+				const read = await (window as any).leap.readTeamJsonNearDocument(documentPath);
+				if (!read?.success || !read?.data) {
+					console.log(
+						'[Controller] team JSON panel-side fallback found nothing:',
+						read?.error || '(no error reported)'
+					);
+					return false;
+				}
 
-    const docName = String(documentPath.split('/').pop() || '').replace(/\.[^.]+$/, '');
-    const res = await (window as any).leap
-     .scriptLoader()
-     .evalScript('handleSetTeamJsonOverride', { docName: docName, jsonData: read.data });
-    const applied = JSON.parse(res)?.success === true;
+				const docName = String(documentPath.split('/').pop() || '').replace(/\.[^.]+$/, '');
+				const res = await (window as any).leap
+					.scriptLoader()
+					.evalScript('handleSetTeamJsonOverride', { docName: docName, jsonData: read.data });
+				const applied = JSON.parse(res)?.success === true;
 
-    if (applied) {
-     this.teamJsonOverrideDocPaths.add(documentPath);
-     console.log(
-      '[Controller] team JSON supplied to host from panel side (host could not read it):',
-      read.jsonPath
-     );
-     this.leapSepsLog.logProcess('Team JSON panel-side fallback applied', {
-      jsonPath: read.jsonPath,
-      bytes: read.bytesRead,
-      documentPath: documentPath
-     });
-    }
-    return applied;
-   } catch (error) {
-    console.log('[Controller] team JSON panel-side fallback failed:', error);
-    return false;
-   } finally {
-    this.teamJsonOverrideInFlight.delete(documentPath);
-   }
-  })();
+				if (applied) {
+					this.teamJsonOverrideDocPaths.add(documentPath);
+					console.log(
+						'[Controller] team JSON supplied to host from panel side (host could not read it):',
+						read.jsonPath
+					);
+					this.leapSepsLog.logProcess('Team JSON panel-side fallback applied', {
+						jsonPath: read.jsonPath,
+						bytes: read.bytesRead,
+						documentPath: documentPath
+					});
+				}
+				return applied;
+			} catch (error) {
+				console.log('[Controller] team JSON panel-side fallback failed:', error);
+				return false;
+			} finally {
+				this.teamJsonOverrideInFlight.delete(documentPath);
+			}
+		})();
 
-  this.teamJsonOverrideInFlight.set(documentPath, read$);
-  return read$;
- }
+		this.teamJsonOverrideInFlight.set(documentPath, read$);
+		return read$;
+	}
 
- /*
-  * Drop the pushed team JSON so a different document is never served the previous one's data. The
-  * host keeps its own document-name guard as well; this just stops the panel short-circuiting on a
-  * stale "already applied" flag.
-  */
- async clearTeamJsonOverride(): Promise<void> {
-  this.teamJsonOverrideDocPaths.clear();
-  try {
-   await (window as any).leap.scriptLoader().evalScript('handleClearTeamJsonOverride', {});
-  } catch (_) {
-   /* Nothing to do: a failed clear only means the host keeps a value its own guard will reject. */
-  }
- }
+	/*
+	 * Drop the pushed team JSON so a different document is never served the previous one's data. The
+	 * host keeps its own document-name guard as well; this just stops the panel short-circuiting on a
+	 * stale "already applied" flag.
+	 */
+	async clearTeamJsonOverride(): Promise<void> {
+		this.teamJsonOverrideDocPaths.clear();
+		try {
+			await (window as any).leap.scriptLoader().evalScript('handleClearTeamJsonOverride', {});
+		} catch (_) {
+			/* Nothing to do: a failed clear only means the host keeps a value its own guard will reject. */
+		}
+	}
 
- /*
-  * Run a host handler that reads the team JSON, retrying once through the panel-side fallback when
-  * the host could not read it. The first call is untouched, so setups where ExtendScript reads the
-  * JSON fine pay nothing -- no extra evalScript, no extra disk access.
-  */
- private async evalWithTeamJsonFallback(
-  handlerName: string,
-  params: any,
-  needsFallback: (result: any) => boolean
- ): Promise<any> {
-  await this.ensureSession();
-  const first = JSON.parse(
-   await (window as any).leap.scriptLoader().evalScript(handlerName, params ?? {})
-  );
-  if (!needsFallback(first)) {
-   return first;
-  }
+	/*
+	 * Run a host handler that reads the team JSON, retrying once through the panel-side fallback when
+	 * the host could not read it. The first call is untouched, so setups where ExtendScript reads the
+	 * JSON fine pay nothing -- no extra evalScript, no extra disk access.
+	 */
+	private async evalWithTeamJsonFallback(
+		handlerName: string,
+		params: any,
+		needsFallback: (result: any) => boolean
+	): Promise<any> {
+		await this.ensureSession();
+		const first = JSON.parse(
+			await (window as any).leap.scriptLoader().evalScript(handlerName, params ?? {})
+		);
+		if (!needsFallback(first)) {
+			return first;
+		}
 
-  const applied = await this.ensureTeamJsonOverride();
-  if (!applied) {
-   return first;
-  }
+		const applied = await this.ensureTeamJsonOverride();
+		if (!applied) {
+			return first;
+		}
 
-  const second = JSON.parse(
-   await (window as any).leap.scriptLoader().evalScript(handlerName, params ?? {})
-  );
-  if (second && typeof second === 'object') {
-   second._teamJsonFallbackUsed = true;
-  }
-  return second;
- }
+		const second = JSON.parse(
+			await (window as any).leap.scriptLoader().evalScript(handlerName, params ?? {})
+		);
+		if (second && typeof second === 'object') {
+			second._teamJsonFallbackUsed = true;
+		}
+		return second;
+	}
 
- /*
-  * Turn a failed team-JSON lookup into a user-facing warning — but ONLY when it is a data problem.
-  *
-  * A document outside a LEAP tree has no JSON folder at all and is simply a non-LEAP document; the
-  * standalone flow handles it and a red banner there would be noise. The states worth shouting about
-  * are a JSON folder that EXISTS but holds nothing matching this document (the batch was exported
-  * incompletely, or the file was renamed), one that cannot be enumerated (cloud mount), and a file
-  * that is present but unreadable.
-  */
- private reportTeamJsonIssue(result: any): void {
-  const id = 'team-json';
-  const debug = result && result._debug;
-  const source = debug && debug.source ? String(debug.source) : '';
-  const docPath = result && result.documentPath ? String(result.documentPath) : '';
-  const docName = docPath ? docPath.split(/[\\/]/).pop() || docPath : '';
-  /* getTemplateInfo runs on every document activate, so this is where a doc switch is noticed. */
-  this.dataIssues.setScope(docPath);
+	/*
+	 * Turn a failed team-JSON lookup into a user-facing warning — but ONLY when it is a data problem.
+	 *
+	 * A document outside a LEAP tree has no JSON folder at all and is simply a non-LEAP document; the
+	 * standalone flow handles it and a red banner there would be noise. The states worth shouting about
+	 * are a JSON folder that EXISTS but holds nothing matching this document (the batch was exported
+	 * incompletely, or the file was renamed), one that cannot be enumerated (cloud mount), and a file
+	 * that is present but unreadable.
+	 */
+	private reportTeamJsonIssue(result: any): void {
+		const id = 'team-json';
+		const debug = result && result._debug;
+		const source = debug && debug.source ? String(debug.source) : '';
+		const docPath = result && result.documentPath ? String(result.documentPath) : '';
+		const docName = docPath ? docPath.split(/[\\/]/).pop() || docPath : '';
+		/* getTemplateInfo runs on every document activate, so this is where a doc switch is noticed. */
+		this.dataIssues.setScope(docPath);
 
-  if (!result || result.success !== false || result.hasDocument === false) {
-   this.dataIssues.clear(id);
-   return;
-  }
+		if (!result || result.success !== false || result.hasDocument === false) {
+			this.dataIssues.clear(id);
+			return;
+		}
 
-  if (source === 'no-filename-match') {
-   this.dataIssues.report(
-    id,
-    'No team JSON for this document — it will be treated as a non-LEAP file.' +
-     (docName ? ' Looked for a file named after "' + docName.replace(/\.[^.]+$/, '') + '".' : ''),
-    (debug.jsonFileCount || 0) + ' file(s) in ' + (debug.jsonFolderPath || 'the JSON folder') + ', none match.'
-   );
-   return;
-  }
+		if (source === 'no-filename-match') {
+			this.dataIssues.report(
+				id,
+				'No team JSON for this document — it will be treated as a non-LEAP file.' +
+				(docName ? ' Looked for a file named after "' + docName.replace(/\.[^.]+$/, '') + '".' : ''),
+				(debug.jsonFileCount || 0) + ' file(s) in ' + (debug.jsonFolderPath || 'the JSON folder') + ', none match.'
+			);
+			return;
+		}
 
-  if (source === 'json-folder-empty') {
-   this.dataIssues.report(
-    id,
-    'The team JSON folder could not be read — if it is on a cloud drive, open it in Finder once and try again.',
-    debug.jsonFolderPath || ''
-   );
-   return;
-  }
+		if (source === 'json-folder-empty') {
+			this.dataIssues.report(
+				id,
+				'The team JSON folder could not be read — if it is on a cloud drive, open it in Finder once and try again.',
+				debug.jsonFolderPath || ''
+			);
+			return;
+		}
 
-  if (source === 'parse-error') {
-   this.dataIssues.report(
-    id,
-    'The team JSON for this document could not be read (the file may be incomplete or still syncing).',
-    (debug.matchedFile || '') + (debug.parseError ? ' — ' + debug.parseError : '')
-   );
-   return;
-  }
+		if (source === 'parse-error') {
+			this.dataIssues.report(
+				id,
+				'The team JSON for this document could not be read (the file may be incomplete or still syncing).',
+				(debug.matchedFile || '') + (debug.parseError ? ' — ' + debug.parseError : '')
+			);
+			return;
+		}
 
-  /* Any other source (no JSON folder / not in a LEAP tree) is a normal non-LEAP document. */
-  this.dataIssues.clear(id);
- }
+		/* Any other source (no JSON folder / not in a LEAP tree) is a normal non-LEAP document. */
+		this.dataIssues.clear(id);
+	}
 
- /*
-  * The SEP table writer returns per-row errors ("Swatch 'X' not found for group 'N'") in a success
-  * response. They used to reach only the log, while the visible result was a grid label silently
-  * printed in [Registration] — the failure that looks most like success.
-  */
- private reportSepTableIssues(result: any): void {
-  const id = 'sep-table';
-  const errors: string[] = result && Array.isArray(result.errors) ? result.errors : [];
-  if (errors.length === 0) {
-   this.dataIssues.clear(id);
-   return;
-  }
-  this.dataIssues.report(
-   id,
-   errors.length === 1
-    ? 'A grid label could not be filled in correctly.'
-    : errors.length + ' grid labels could not be filled in correctly.',
-   errors.slice(0, 3).join(' · ') + (errors.length > 3 ? ' …' : '')
-  );
- }
+	/*
+	 * The SEP table writer returns per-row errors ("Swatch 'X' not found for group 'N'") in a success
+	 * response. They used to reach only the log, while the visible result was a grid label silently
+	 * printed in [Registration] — the failure that looks most like success.
+	 */
+	private reportSepTableIssues(result: any): void {
+		const id = 'sep-table';
+		const errors: string[] = result && Array.isArray(result.errors) ? result.errors : [];
+		if (errors.length === 0) {
+			this.dataIssues.clear(id);
+			return;
+		}
+		this.dataIssues.report(
+			id,
+			errors.length === 1
+				? 'A grid label could not be filled in correctly.'
+				: errors.length + ' grid labels could not be filled in correctly.',
+			errors.slice(0, 3).join(' · ') + (errors.length > 3 ? ' …' : '')
+		);
+	}
 
- async getTemplateInfo(): Promise<any> {
-  this.log('getTemplateInfo called');
+	async getTemplateInfo(): Promise<any> {
+		this.log('getTemplateInfo called');
 
-  /*
-   * teamCode is the single field the whole version-document decision hangs on, so retry whenever it
-   * is missing rather than only on an explicit error. hasDocument === false is the one case that is
-   * genuinely nothing to do with the JSON.
-   */
-  const result = await this.evalWithTeamJsonFallback(
-   'handleGetTemplateInfo',
-   {},
-   (r: any) => r?.hasDocument !== false && !r?.data?.teamCode
-  );
+		/*
+		 * teamCode is the single field the whole version-document decision hangs on, so retry whenever it
+		 * is missing rather than only on an explicit error. hasDocument === false is the one case that is
+		 * genuinely nothing to do with the JSON.
+		 */
+		const result = await this.evalWithTeamJsonFallback(
+			'handleGetTemplateInfo',
+			{},
+			(r: any) => r?.hasDocument !== false && !r?.data?.teamCode
+		);
 
-  console.log(
-   '[Controller] getTemplateInfo result:',
-   JSON.stringify(
-    {
-     success: result?.success,
-     hasDocument: result?.hasDocument,
-     teamCode: result?.data?.teamCode || '(none)',
-     documentPath: result?.documentPath,
-     error: result?.error,
-     resolvedVia: result?._teamJsonFallbackUsed ? 'panel-side fallback' : 'host',
-     _debug: result?._debug
-    },
-    null,
-    2
-   )
-  );
+		console.log(
+			'[Controller] getTemplateInfo result:',
+			JSON.stringify(
+				{
+					success: result?.success,
+					hasDocument: result?.hasDocument,
+					teamCode: result?.data?.teamCode || '(none)',
+					documentPath: result?.documentPath,
+					error: result?.error,
+					resolvedVia: result?._teamJsonFallbackUsed ? 'panel-side fallback' : 'host',
+					_debug: result?._debug
+				},
+				null,
+				2
+			)
+		);
 
-  this.reportTeamJsonIssue(result);
+		this.reportTeamJsonIssue(result);
 
-  return result;
- }
+		return result;
+	}
 
- getGraphicSwatches(graphicName: string): Promise<any> {
-  this.log('getGraphicSwatches called for: ' + graphicName);
+	getGraphicSwatches(graphicName: string): Promise<any> {
+		this.log('getGraphicSwatches called for: ' + graphicName);
 
-  return this.ensureSession().then(() => {
-   const params = { graphicName: graphicName };
-   return this.evalWithTeamJsonFallback('handleGetGraphicSwatches', params, (r: any) =>
-    ControllerService.TEAM_JSON_UNREADABLE.test(String(r?.error || ''))
-   ).catch((err: any) => {
-    throw err;
-   });
-  });
- }
+		return this.ensureSession().then(() => {
+			const params = { graphicName: graphicName };
+			return this.evalWithTeamJsonFallback('handleGetGraphicSwatches', params, (r: any) =>
+				ControllerService.TEAM_JSON_UNREADABLE.test(String(r?.error || ''))
+			).catch((err: any) => {
+				throw err;
+			});
+		});
+	}
 
- checkSeparatedDocument(): Promise<any> {
-  this.log('checkSeparatedDocument called');
+	checkSeparatedDocument(): Promise<any> {
+		this.log('checkSeparatedDocument called');
 
-  return this.ensureSession().then(() => {
-   return (window as any).leap
-    .scriptLoader()
-    .evalScript('handleCheckSeparatedDocument', {})
-    .then((res: string) => {
-     const result = JSON.parse(res);
-     return this.enrichSeparatedDocWithLinks(result);
-    })
-    .catch((err: any) => {
-     throw err;
-    });
-  });
- }
+		return this.ensureSession().then(() => {
+			return (window as any).leap
+				.scriptLoader()
+				.evalScript('handleCheckSeparatedDocument', {})
+				.then((res: string) => {
+					const result = JSON.parse(res);
+					return this.enrichSeparatedDocWithLinks(result);
+				})
+				.catch((err: any) => {
+					throw err;
+				});
+		});
+	}
 
- private enrichSeparatedDocWithLinks(result: any): Promise<any> {
-  if (
-   !result?.success ||
-   !result?.data?.isSeparatedDoc ||
-   result.data.teamVersionPath ||
-   result.data.leapTemplatePath
-  ) {
-   return Promise.resolve(result);
-  }
+	private enrichSeparatedDocWithLinks(result: any): Promise<any> {
+		if (
+			!result?.success ||
+			!result?.data?.isSeparatedDoc ||
+			result.data.teamVersionPath ||
+			result.data.leapTemplatePath
+		) {
+			return Promise.resolve(result);
+		}
 
-  const docPath = result.data.docPath;
-  if (!docPath) return Promise.resolve(result);
+		const docPath = result.data.docPath;
+		if (!docPath) return Promise.resolve(result);
 
-  const script = this.buildGetSeparatedDocumentLinksScript(docPath);
-  return evalScript(script)
-   .then((linksRes: any) => {
-    try {
-     const links = JSON.parse(linksRes || '{}');
-     if (links?.success && result.data) {
-      if (links.teamVersionPath) result.data.teamVersionPath = links.teamVersionPath;
-      if (links.teamVersionName) result.data.teamVersionName = links.teamVersionName;
-      if (links.leapTemplatePath) result.data.leapTemplatePath = links.leapTemplatePath;
-      if (links.leapTemplateName) result.data.leapTemplateName = links.leapTemplateName;
-     }
-    } catch (_) { }
-    return result;
-   })
-   .catch(() => result);
- }
+		const script = this.buildGetSeparatedDocumentLinksScript(docPath);
+		return evalScript(script)
+			.then((linksRes: any) => {
+				try {
+					const links = JSON.parse(linksRes || '{}');
+					if (links?.success && result.data) {
+						if (links.teamVersionPath) result.data.teamVersionPath = links.teamVersionPath;
+						if (links.teamVersionName) result.data.teamVersionName = links.teamVersionName;
+						if (links.leapTemplatePath) result.data.leapTemplatePath = links.leapTemplatePath;
+						if (links.leapTemplateName) result.data.leapTemplateName = links.leapTemplateName;
+					}
+				} catch (_) { }
+				return result;
+			})
+			.catch(() => result);
+	}
 
- private buildGetSeparatedDocumentLinksScript(docPath: string): string {
-  const escapedPath = JSON.stringify(docPath);
-  return `
+	private buildGetSeparatedDocumentLinksScript(docPath: string): string {
+		const escapedPath = JSON.stringify(docPath);
+		return `
 (function() {
   var docPath = ${escapedPath};
   if (!docPath || docPath.indexOf('09 SEPARATIONS') === -1) {
@@ -1021,551 +1021,551 @@ export class ControllerService {
   return JSON.stringify(result);
 })();
 `;
- }
+	}
 
- getSeparationProfiles(): Promise<any> {
-  this.log('getSeparationProfiles called');
+	getSeparationProfiles(): Promise<any> {
+		this.log('getSeparationProfiles called');
 
-  return this.ensureSession().then(() => {
-   return (window as any).leap
-    .scriptLoader()
-    .evalScript('handleGetSeparationProfiles', {})
-    .then((res: string) => {
-     const result = JSON.parse(res);
+		return this.ensureSession().then(() => {
+			return (window as any).leap
+				.scriptLoader()
+				.evalScript('handleGetSeparationProfiles', {})
+				.then((res: string) => {
+					const result = JSON.parse(res);
 
-     return result;
-    })
-    .catch((err: any) => {
-     throw err;
-    });
-  });
- }
+					return result;
+				})
+				.catch((err: any) => {
+					throw err;
+				});
+		});
+	}
 
- saveSeparationProfiles(profiles: any[]): Promise<any> {
-  this.log('saveSeparationProfiles called with ' + profiles.length + ' profiles');
+	saveSeparationProfiles(profiles: any[]): Promise<any> {
+		this.log('saveSeparationProfiles called with ' + profiles.length + ' profiles');
 
-  return this.ensureSession().then(() => {
-   const params = { profiles: profiles };
-   return (window as any).leap
-    .scriptLoader()
-    .evalScript('handleSaveSeparationProfiles', params)
-    .then((res: string) => {
-     const result = JSON.parse(res);
+		return this.ensureSession().then(() => {
+			const params = { profiles: profiles };
+			return (window as any).leap
+				.scriptLoader()
+				.evalScript('handleSaveSeparationProfiles', params)
+				.then((res: string) => {
+					const result = JSON.parse(res);
 
-     return result;
-    })
-    .catch((err: any) => {
-     throw err;
-    });
-  });
- }
+					return result;
+				})
+				.catch((err: any) => {
+					throw err;
+				});
+		});
+	}
 
- private getProfileInkExceptionsFilePath(basePath: string): string {
-  const path = (window as any).cep_node?.require('path');
-  if (!path || !basePath) return '';
-  const normalized = String(basePath).replace(/\/$/, '');
-  return path.join(normalized, 'SETTINGS', 'LEAP_SEPS', 'Data', 'profile_ink_exceptions.json');
- }
+	private getProfileInkExceptionsFilePath(basePath: string): string {
+		const path = (window as any).cep_node?.require('path');
+		if (!path || !basePath) return '';
+		const normalized = String(basePath).replace(/\/$/, '');
+		return path.join(normalized, 'SETTINGS', 'LEAP_SEPS', 'Data', 'profile_ink_exceptions.json');
+	}
 
- private inkJsonEntryToRow(entry: any, index: number): any | null {
-  if (!entry || typeof entry !== 'object') return null;
-  const inkColor = entry.Ink_Color != null ? String(entry.Ink_Color).trim() : '';
-  const profile = entry.Profile != null ? String(entry.Profile).trim() : '';
-  const meshRaw = entry.Color_Mesh;
-  const mesh = meshRaw == null || meshRaw === '' ? '' : String(meshRaw).trim();
-  /*
-   * "Two Hits" is value-driven (no longer Y/N): any non-empty value (except N/No/False/0) means a
-   * second hit is required. A numeric value is the second-hit mesh; a legacy Y/Yes carries no mesh.
-   */
-  const twoHitsRaw = entry.Two_Hits != null ? String(entry.Two_Hits).trim() : '';
-  const twoHitsIsNegative = /^(n|no|false|0)$/i.test(twoHitsRaw);
-  const hitsCount = twoHitsRaw !== '' && !twoHitsIsNegative ? 2 : 1;
-  const secondHitMesh =
-   /^(y|yes|true)$/i.test(twoHitsRaw) || twoHitsIsNegative ? '' : twoHitsRaw;
-  let underbaseCount = entry.underbase_count != null ? parseInt(entry.underbase_count, 10) : 1;
-  if (isNaN(underbaseCount) || underbaseCount < 1) underbaseCount = 1;
-  if (underbaseCount > 4) underbaseCount = 4;
-  const profileCode = entry.profileCode != null ? String(entry.profileCode).trim() : '';
-  return {
-   id: `ink-${profile}-${inkColor}-${index}`,
-   enabled: true,
-   inkName: inkColor,
-   mesh,
-   underbaseCount,
-   hitsCount,
-   secondHitMesh,
-   printMethod: entry.Print_Method != null ? String(entry.Print_Method).trim() : '',
-   profile,
-   profileCode
-  };
- }
+	private inkJsonEntryToRow(entry: any, index: number): any | null {
+		if (!entry || typeof entry !== 'object') return null;
+		const inkColor = entry.Ink_Color != null ? String(entry.Ink_Color).trim() : '';
+		const profile = entry.Profile != null ? String(entry.Profile).trim() : '';
+		const meshRaw = entry.Color_Mesh;
+		const mesh = meshRaw == null || meshRaw === '' ? '' : String(meshRaw).trim();
+		/*
+		 * "Two Hits" is value-driven (no longer Y/N): any non-empty value (except N/No/False/0) means a
+		 * second hit is required. A numeric value is the second-hit mesh; a legacy Y/Yes carries no mesh.
+		 */
+		const twoHitsRaw = entry.Two_Hits != null ? String(entry.Two_Hits).trim() : '';
+		const twoHitsIsNegative = /^(n|no|false|0)$/i.test(twoHitsRaw);
+		const hitsCount = twoHitsRaw !== '' && !twoHitsIsNegative ? 2 : 1;
+		const secondHitMesh =
+			/^(y|yes|true)$/i.test(twoHitsRaw) || twoHitsIsNegative ? '' : twoHitsRaw;
+		let underbaseCount = entry.underbase_count != null ? parseInt(entry.underbase_count, 10) : 1;
+		if (isNaN(underbaseCount) || underbaseCount < 1) underbaseCount = 1;
+		if (underbaseCount > 4) underbaseCount = 4;
+		const profileCode = entry.profileCode != null ? String(entry.profileCode).trim() : '';
+		return {
+			id: `ink-${profile}-${inkColor}-${index}`,
+			enabled: true,
+			inkName: inkColor,
+			mesh,
+			underbaseCount,
+			hitsCount,
+			secondHitMesh,
+			printMethod: entry.Print_Method != null ? String(entry.Print_Method).trim() : '',
+			profile,
+			profileCode
+		};
+	}
 
- private inkRowToJsonEntry(row: any, profileName: string, profileCode: string): any {
-  const inkColor = row?.inkName != null ? String(row.inkName).trim() : '';
-  const enabled = row?.enabled !== false;
-  const meshTrimmed = enabled && row?.mesh != null ? String(row.mesh).trim() : '';
-  let colorMesh: string | number | null = null;
-  if (meshTrimmed !== '') {
-   const numeric = parseFloat(meshTrimmed);
-   colorMesh = isNaN(numeric) ? meshTrimmed : numeric;
-  }
-  let hitsCount = enabled && row?.hitsCount != null ? parseInt(row.hitsCount, 10) : 1;
-  if (isNaN(hitsCount) || hitsCount < 1) hitsCount = 1;
-  /*
-   * "Two Hits" now stores the raw second-hit value: a numeric mesh means a second hit is required
-   * (and is the second-hit mesh); '' means single hit. A legacy row with only hitsCount writes 'Y'.
-   */
-  const secondHitMeshTrimmed =
-   enabled && row?.secondHitMesh != null ? String(row.secondHitMesh).trim() : '';
-  const twoHitsValue =
-   hitsCount >= 2 ? (secondHitMeshTrimmed !== '' ? secondHitMeshTrimmed : 'Y') : '';
-  let underbaseCount = enabled && row?.underbaseCount != null ? parseInt(row.underbaseCount, 10) : 1;
-  if (isNaN(underbaseCount) || underbaseCount < 1) underbaseCount = 1;
-  if (underbaseCount > 4) underbaseCount = 4;
-  /* Prefer the row's own profileCode/Profile (carried from the imported Excel), else the passed defaults. */
-  const rowProfileCode =
-   row?.profileCode != null && String(row.profileCode).trim() !== ''
-    ? String(row.profileCode).trim()
-    : (profileCode != null ? String(profileCode).trim() : '');
-  const rowProfile =
-   row?.profile != null && String(row.profile).trim() !== ''
-    ? String(row.profile).trim()
-    : profileName;
-  return {
-   Color_Mesh: colorMesh,
-   Ink_Color: inkColor,
-   Print_Method: row?.printMethod != null ? String(row.printMethod).trim() : '',
-   Profile: rowProfile,
-   profileCode: rowProfileCode,
-   Two_Hits: twoHitsValue,
-   underbase_count: underbaseCount
-  };
- }
+	private inkRowToJsonEntry(row: any, profileName: string, profileCode: string): any {
+		const inkColor = row?.inkName != null ? String(row.inkName).trim() : '';
+		const enabled = row?.enabled !== false;
+		const meshTrimmed = enabled && row?.mesh != null ? String(row.mesh).trim() : '';
+		let colorMesh: string | number | null = null;
+		if (meshTrimmed !== '') {
+			const numeric = parseFloat(meshTrimmed);
+			colorMesh = isNaN(numeric) ? meshTrimmed : numeric;
+		}
+		let hitsCount = enabled && row?.hitsCount != null ? parseInt(row.hitsCount, 10) : 1;
+		if (isNaN(hitsCount) || hitsCount < 1) hitsCount = 1;
+		/*
+		 * "Two Hits" now stores the raw second-hit value: a numeric mesh means a second hit is required
+		 * (and is the second-hit mesh); '' means single hit. A legacy row with only hitsCount writes 'Y'.
+		 */
+		const secondHitMeshTrimmed =
+			enabled && row?.secondHitMesh != null ? String(row.secondHitMesh).trim() : '';
+		const twoHitsValue =
+			hitsCount >= 2 ? (secondHitMeshTrimmed !== '' ? secondHitMeshTrimmed : 'Y') : '';
+		let underbaseCount = enabled && row?.underbaseCount != null ? parseInt(row.underbaseCount, 10) : 1;
+		if (isNaN(underbaseCount) || underbaseCount < 1) underbaseCount = 1;
+		if (underbaseCount > 4) underbaseCount = 4;
+		/* Prefer the row's own profileCode/Profile (carried from the imported Excel), else the passed defaults. */
+		const rowProfileCode =
+			row?.profileCode != null && String(row.profileCode).trim() !== ''
+				? String(row.profileCode).trim()
+				: (profileCode != null ? String(profileCode).trim() : '');
+		const rowProfile =
+			row?.profile != null && String(row.profile).trim() !== ''
+				? String(row.profile).trim()
+				: profileName;
+		return {
+			Color_Mesh: colorMesh,
+			Ink_Color: inkColor,
+			Print_Method: row?.printMethod != null ? String(row.printMethod).trim() : '',
+			Profile: rowProfile,
+			profileCode: rowProfileCode,
+			Two_Hits: twoHitsValue,
+			underbase_count: underbaseCount
+		};
+	}
 
- private profileMatchesInkEntry(entry: any, profileCodeKey: string): boolean {
-  if (!entry || !profileCodeKey) return false;
-  const entryCode = entry.profileCode != null ? String(entry.profileCode).trim().toUpperCase() : '';
-  return entryCode !== '' && entryCode === profileCodeKey;
- }
+	private profileMatchesInkEntry(entry: any, profileCodeKey: string): boolean {
+		if (!entry || !profileCodeKey) return false;
+		const entryCode = entry.profileCode != null ? String(entry.profileCode).trim().toUpperCase() : '';
+		return entryCode !== '' && entryCode === profileCodeKey;
+	}
 
- /**
-  * Load ink exceptions for one separation profile (matched by unique profileCode).
-  */
- getInkExceptions(profileCode: string, profileName?: string): Promise<any> {
-  this.log('getInkExceptions called for code: ' + profileCode);
+	/**
+	 * Load ink exceptions for one separation profile (matched by unique profileCode).
+	 */
+	getInkExceptions(profileCode: string, profileName?: string): Promise<any> {
+		this.log('getInkExceptions called for code: ' + profileCode);
 
-  return this.getLeapServerDataPath().then((basePath) => {
-   if (!basePath || !String(basePath).trim()) {
-    return {
-     success: false,
-     error: 'LEAP Data folder path is not set. Set it under General Settings → Data Folder Path.'
-    };
-   }
+		return this.getLeapServerDataPath().then((basePath) => {
+			if (!basePath || !String(basePath).trim()) {
+				return {
+					success: false,
+					error: 'LEAP Data folder path is not set. Set it under General Settings → Data Folder Path.'
+				};
+			}
 
-   const cep = (window as any).cep;
-   const fs = (window as any).cep_node?.require('fs');
-   if (!cep || !fs) {
-    return this.ensureSession().then(() => {
-     const params = {
-      profileCode: profileCode || '',
-      profileName: profileName || ''
-     };
-     return (window as any).leap
-      .scriptLoader()
-      .evalScript('handleGetInkExceptions', params)
-      .then((res: any) => this.parseHostJsonResult(res));
-    });
-   }
+			const cep = (window as any).cep;
+			const fs = (window as any).cep_node?.require('fs');
+			if (!cep || !fs) {
+				return this.ensureSession().then(() => {
+					const params = {
+						profileCode: profileCode || '',
+						profileName: profileName || ''
+					};
+					return (window as any).leap
+						.scriptLoader()
+						.evalScript('handleGetInkExceptions', params)
+						.then((res: any) => this.parseHostJsonResult(res));
+				});
+			}
 
-   try {
-    const filePath = this.getProfileInkExceptionsFilePath(basePath);
-    if (!filePath || !fs.existsSync(filePath)) {
-     return { success: true, inkExceptions: [] };
-    }
-    const content = fs.readFileSync(filePath, 'utf8');
-    const allEntries = JSON.parse(content);
-    if (!Array.isArray(allEntries)) {
-     return { success: false, error: 'profile_ink_exceptions.json does not contain an array' };
-    }
+			try {
+				const filePath = this.getProfileInkExceptionsFilePath(basePath);
+				if (!filePath || !fs.existsSync(filePath)) {
+					return { success: true, inkExceptions: [] };
+				}
+				const content = fs.readFileSync(filePath, 'utf8');
+				const allEntries = JSON.parse(content);
+				if (!Array.isArray(allEntries)) {
+					return { success: false, error: 'profile_ink_exceptions.json does not contain an array' };
+				}
 
-    const codeKey = profileCode != null ? String(profileCode).trim().toUpperCase() : '';
-    if (!codeKey) {
-     return { success: true, inkExceptions: [] };
-    }
+				const codeKey = profileCode != null ? String(profileCode).trim().toUpperCase() : '';
+				if (!codeKey) {
+					return { success: true, inkExceptions: [] };
+				}
 
-    const rows: any[] = [];
-    for (let i = 0; i < allEntries.length; i++) {
-     const entry = allEntries[i];
-     if (!this.profileMatchesInkEntry(entry, codeKey)) continue;
-     const row = this.inkJsonEntryToRow(entry, i);
-     if (row) rows.push(row);
-    }
-    return { success: true, inkExceptions: rows };
-   } catch (err: any) {
-    return {
-     success: false,
-     error: err?.message || String(err) || 'Failed to read profile_ink_exceptions.json'
-    };
-   }
-  });
- }
+				const rows: any[] = [];
+				for (let i = 0; i < allEntries.length; i++) {
+					const entry = allEntries[i];
+					if (!this.profileMatchesInkEntry(entry, codeKey)) continue;
+					const row = this.inkJsonEntryToRow(entry, i);
+					if (row) rows.push(row);
+				}
+				return { success: true, inkExceptions: rows };
+			} catch (err: any) {
+				return {
+					success: false,
+					error: err?.message || String(err) || 'Failed to read profile_ink_exceptions.json'
+				};
+			}
+		});
+	}
 
- /**
-  * Distinct profileCodes / profileNames present in profile_ink_exceptions.json (UPPERCASE).
-  * Used by the Separations page to flag profiles whose ink information has not been imported.
-  */
- getInkExceptionProfileCodes(): Promise<{ success: boolean; profileCodes: string[]; profileNames: string[]; error?: string }> {
-  return this.getLeapServerDataPath().then((basePath) => {
-   if (!basePath || !String(basePath).trim()) {
-    return { success: false, profileCodes: [], profileNames: [] };
-   }
-   const fs = (window as any).cep_node?.require('fs');
-   if (!fs) {
-    /* Non-CEP (browser/dev): the Separations page guards this behind isRunningInBrowser. */
-    return { success: true, profileCodes: [], profileNames: [] };
-   }
-   try {
-    const filePath = this.getProfileInkExceptionsFilePath(basePath);
-    if (!filePath || !fs.existsSync(filePath)) {
-     return { success: true, profileCodes: [], profileNames: [] };
-    }
-    const allEntries = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-    if (!Array.isArray(allEntries)) {
-     return { success: false, profileCodes: [], profileNames: [], error: 'profile_ink_exceptions.json does not contain an array' };
-    }
-    const codeSet: { [key: string]: true } = {};
-    const nameSet: { [key: string]: true } = {};
-    for (let i = 0; i < allEntries.length; i++) {
-     const entry = allEntries[i];
-     const code = entry && entry.profileCode != null ? String(entry.profileCode).trim().toUpperCase() : '';
-     const name = entry && entry.Profile != null ? String(entry.Profile).trim().toUpperCase() : '';
-     if (code) codeSet[code] = true;
-     if (name) nameSet[name] = true;
-    }
-    return { success: true, profileCodes: Object.keys(codeSet), profileNames: Object.keys(nameSet) };
-   } catch (err: any) {
-    return { success: false, profileCodes: [], profileNames: [], error: err?.message || String(err) };
-   }
-  });
- }
+	/**
+	 * Distinct profileCodes / profileNames present in profile_ink_exceptions.json (UPPERCASE).
+	 * Used by the Separations page to flag profiles whose ink information has not been imported.
+	 */
+	getInkExceptionProfileCodes(): Promise<{ success: boolean; profileCodes: string[]; profileNames: string[]; error?: string }> {
+		return this.getLeapServerDataPath().then((basePath) => {
+			if (!basePath || !String(basePath).trim()) {
+				return { success: false, profileCodes: [], profileNames: [] };
+			}
+			const fs = (window as any).cep_node?.require('fs');
+			if (!fs) {
+				/* Non-CEP (browser/dev): the Separations page guards this behind isRunningInBrowser. */
+				return { success: true, profileCodes: [], profileNames: [] };
+			}
+			try {
+				const filePath = this.getProfileInkExceptionsFilePath(basePath);
+				if (!filePath || !fs.existsSync(filePath)) {
+					return { success: true, profileCodes: [], profileNames: [] };
+				}
+				const allEntries = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+				if (!Array.isArray(allEntries)) {
+					return { success: false, profileCodes: [], profileNames: [], error: 'profile_ink_exceptions.json does not contain an array' };
+				}
+				const codeSet: { [key: string]: true } = {};
+				const nameSet: { [key: string]: true } = {};
+				for (let i = 0; i < allEntries.length; i++) {
+					const entry = allEntries[i];
+					const code = entry && entry.profileCode != null ? String(entry.profileCode).trim().toUpperCase() : '';
+					const name = entry && entry.Profile != null ? String(entry.Profile).trim().toUpperCase() : '';
+					if (code) codeSet[code] = true;
+					if (name) nameSet[name] = true;
+				}
+				return { success: true, profileCodes: Object.keys(codeSet), profileNames: Object.keys(nameSet) };
+			} catch (err: any) {
+				return { success: false, profileCodes: [], profileNames: [], error: err?.message || String(err) };
+			}
+		});
+	}
 
- /**
-  * Let the user pick an Excel/CSV from their own system and parse it into ink-exception rows.
-  * Columns are matched case-insensitively (Ink Name / Mesh / Underbase Count / Hits / Print Method).
-  * Returns { success, rows, filePath } or { canceled: true } when the picker is dismissed.
-  */
- importInkExceptionsFromExcel(): Promise<{ success: boolean; rows?: any[]; filePath?: string; error?: string; canceled?: boolean }> {
-  return new Promise((resolve) => {
-   try {
-    const cep = (window as any).cep;
-    if (!cep || !cep.fs) {
-     resolve({ success: false, error: 'File system not available' });
-     return;
-    }
-    /* File picker (not a folder); filter to spreadsheet types where supported. */
-    const dialog = cep.fs.showOpenDialog(false, false, 'Select Ink Exceptions Excel', null, ['xlsx', 'xls', 'csv']);
-    if (!dialog || dialog.err !== 0) {
-     resolve({ success: false, error: 'Could not open file dialog (' + (dialog ? dialog.err : 'no response') + ')' });
-     return;
-    }
-    if (!dialog.data || dialog.data.length === 0) {
-     resolve({ success: false, canceled: true });
-     return;
-    }
-    let filePath = String(dialog.data[0] || '');
-    if (filePath.indexOf('file://') === 0) {
-     try { filePath = decodeURIComponent(filePath.replace('file://', '')); } catch (_) { filePath = filePath.replace('file://', ''); }
-    }
-    /*
-     * Read the Excel through the leap bundle (window.leap.readExcelRows). The `xlsx` module is
-     * webpacked into the bundle, so it is NOT resolvable via cep_node.require('xlsx') from here.
-     */
-    const leap = (window as any).leap;
-    if (!leap || typeof leap.readExcelRows !== 'function') {
-     resolve({ success: false, error: 'Excel reader unavailable — rebuild the LEAP bundle (npm run build-and-setup).' });
-     return;
-    }
-    Promise.all([
-     Promise.resolve(leap.readExcelRows(filePath)),
-     this.getSeparationProfiles().catch(() => null)
-    ])
-     .then(([read, profilesResult]: any[]) => {
-      if (!read || !read.success) {
-       resolve({ success: false, error: (read && read.error) || 'Failed to read the selected file' });
-       return;
-      }
-      let rows = this.mapInkExceptionExcelRows(Array.isArray(read.rows) ? read.rows : []);
-      /*
-       * The authoritative profileCode comes from Profiles.json, matched by the Excel's Profile NAME —
-       * so the Excel no longer needs a Profile Code column. This keeps imported exceptions keyed by the
-       * real code (e.g. FAN_PLST, JER_WB) that the app matches on.
-       */
-      rows = this.applyProfileCodesFromProfilesJson(rows, profilesResult);
-      if (rows.length === 0) {
-       resolve({ success: false, error: 'No ink rows found. Expected a header row with an "Ink Name" (or "Ink") column.' });
-       return;
-      }
-      resolve({ success: true, rows, filePath });
-     })
-     .catch((e: any) => resolve({ success: false, error: e?.message || String(e) }));
-   } catch (e: any) {
-    resolve({ success: false, error: e?.message || String(e) });
-   }
-  });
- }
+	/**
+	 * Let the user pick an Excel/CSV from their own system and parse it into ink-exception rows.
+	 * Columns are matched case-insensitively (Ink Name / Mesh / Underbase Count / Hits / Print Method).
+	 * Returns { success, rows, filePath } or { canceled: true } when the picker is dismissed.
+	 */
+	importInkExceptionsFromExcel(): Promise<{ success: boolean; rows?: any[]; filePath?: string; error?: string; canceled?: boolean }> {
+		return new Promise((resolve) => {
+			try {
+				const cep = (window as any).cep;
+				if (!cep || !cep.fs) {
+					resolve({ success: false, error: 'File system not available' });
+					return;
+				}
+				/* File picker (not a folder); filter to spreadsheet types where supported. */
+				const dialog = cep.fs.showOpenDialog(false, false, 'Select Ink Exceptions Excel', null, ['xlsx', 'xls', 'csv']);
+				if (!dialog || dialog.err !== 0) {
+					resolve({ success: false, error: 'Could not open file dialog (' + (dialog ? dialog.err : 'no response') + ')' });
+					return;
+				}
+				if (!dialog.data || dialog.data.length === 0) {
+					resolve({ success: false, canceled: true });
+					return;
+				}
+				let filePath = String(dialog.data[0] || '');
+				if (filePath.indexOf('file://') === 0) {
+					try { filePath = decodeURIComponent(filePath.replace('file://', '')); } catch (_) { filePath = filePath.replace('file://', ''); }
+				}
+				/*
+				 * Read the Excel through the leap bundle (window.leap.readExcelRows). The `xlsx` module is
+				 * webpacked into the bundle, so it is NOT resolvable via cep_node.require('xlsx') from here.
+				 */
+				const leap = (window as any).leap;
+				if (!leap || typeof leap.readExcelRows !== 'function') {
+					resolve({ success: false, error: 'Excel reader unavailable — rebuild the LEAP bundle (npm run build-and-setup).' });
+					return;
+				}
+				Promise.all([
+					Promise.resolve(leap.readExcelRows(filePath)),
+					this.getSeparationProfiles().catch(() => null)
+				])
+					.then(([read, profilesResult]: any[]) => {
+						if (!read || !read.success) {
+							resolve({ success: false, error: (read && read.error) || 'Failed to read the selected file' });
+							return;
+						}
+						let rows = this.mapInkExceptionExcelRows(Array.isArray(read.rows) ? read.rows : []);
+						/*
+						 * The authoritative profileCode comes from Profiles.json, matched by the Excel's Profile NAME —
+						 * so the Excel no longer needs a Profile Code column. This keeps imported exceptions keyed by the
+						 * real code (e.g. FAN_PLST, JER_WB) that the app matches on.
+						 */
+						rows = this.applyProfileCodesFromProfilesJson(rows, profilesResult);
+						if (rows.length === 0) {
+							resolve({ success: false, error: 'No ink rows found. Expected a header row with an "Ink Name" (or "Ink") column.' });
+							return;
+						}
+						resolve({ success: true, rows, filePath });
+					})
+					.catch((e: any) => resolve({ success: false, error: e?.message || String(e) }));
+			} catch (e: any) {
+				resolve({ success: false, error: e?.message || String(e) });
+			}
+		});
+	}
 
- /* Map raw spreadsheet objects (keyed by header) to ink-exception rows with flexible header names. */
- private mapInkExceptionExcelRows(raw: any[]): any[] {
-  const pick = (obj: any, keys: string[]): string => {
-   const lowerMap: any = {};
-   Object.keys(obj || {}).forEach((k) => {
-    lowerMap[String(k).trim().toLowerCase()] = obj[k];
-   });
-   for (const key of keys) {
-    const v = lowerMap[key];
-    if (v != null && String(v).trim() !== '') return String(v).trim();
-   }
-   return '';
-  };
-  /*
-   * Count filled "WUB Mesh 1".."WUB Mesh 4" columns (the underbase passes in the Inks.xlsx layout)
-   * so the underbase count is derived when there is no explicit numeric underbase column.
-   */
-  const countWubMeshColumns = (obj: any): number => {
-   const lowerMap: any = {};
-   Object.keys(obj || {}).forEach((k) => {
-    lowerMap[String(k).trim().toLowerCase()] = obj[k];
-   });
-   let n = 0;
-   for (let i = 1; i <= 4; i++) {
-    const v = lowerMap['wub mesh ' + i];
-    if (v != null && String(v).trim() !== '') n++;
-   }
-   return n;
-  };
-  const out: any[] = [];
-  for (const r of raw) {
-   if (!r || typeof r !== 'object') continue;
-   /* Ink identifier — supports the Inks.xlsx header ("Ink Color") and the raw source headers. */
-   const inkName = pick(r, [
-    'ink name', 'ink', 'ink_color', 'inkcolor', 'ink color', 'color', 'colour',
-    'pantone', 'pantone color', 'csi color'
-   ]);
-   if (!inkName) continue;
-   /* Mesh — includes the Inks.xlsx "Color Mesh" and the source "HSWB MESH". */
-   const mesh = pick(r, ['mesh', 'mesh count', 'mesh_count', 'color mesh', 'hswb mesh']);
-   const ubRaw = pick(r, ['underbase count', 'underbase', 'underbase_count', 'underbases', 'ub count']);
-   /* Hits — numeric column, or the Inks.xlsx "Two Hits" (Y/N) flag. */
-   const hitsRaw = pick(r, ['hits count', 'hits', 'hit', 'hits_count', 'no of hits', 'number of hits', 'two hits']);
-   const printMethod = pick(r, ['print method', 'method', 'print_method', 'printmethod']);
-   /* profileCode comes from the Excel and is kept on every JSON entry so exceptions load per profile. */
-   const profileCodeRaw = pick(r, ['profilecode', 'profile code', 'profile_code', 'code']);
-   const profileRaw = pick(r, ['profile', 'profile name', 'profile_name']);
-   /* Garment/substrate type (Cotton/Poly/Jersey) — used to build a profile code from Profile + Type. */
-   const typeRaw = pick(r, ['type', 'garment', 'garment type', 'substrate', 'material', 'fabric']);
-   /*
-    * Effective profile code: an explicit profileCode column wins; otherwise derive it from the
-    * ProfileName + Type combo (e.g. "Fanatics-Plastisol" + "Cotton" -> "Fanatics-Plastisol_Cotton").
-    */
-   const effectiveProfileCode =
-    profileCodeRaw !== ''
-     ? profileCodeRaw
-     : profileRaw !== ''
-      ? typeRaw !== ''
-       ? profileRaw + '_' + typeRaw
-       : profileRaw
-      : '';
-   const enabledRaw = pick(r, ['enabled', 'active']);
+	/* Map raw spreadsheet objects (keyed by header) to ink-exception rows with flexible header names. */
+	private mapInkExceptionExcelRows(raw: any[]): any[] {
+		const pick = (obj: any, keys: string[]): string => {
+			const lowerMap: any = {};
+			Object.keys(obj || {}).forEach((k) => {
+				lowerMap[String(k).trim().toLowerCase()] = obj[k];
+			});
+			for (const key of keys) {
+				const v = lowerMap[key];
+				if (v != null && String(v).trim() !== '') return String(v).trim();
+			}
+			return '';
+		};
+		/*
+		 * Count filled "WUB Mesh 1".."WUB Mesh 4" columns (the underbase passes in the Inks.xlsx layout)
+		 * so the underbase count is derived when there is no explicit numeric underbase column.
+		 */
+		const countWubMeshColumns = (obj: any): number => {
+			const lowerMap: any = {};
+			Object.keys(obj || {}).forEach((k) => {
+				lowerMap[String(k).trim().toLowerCase()] = obj[k];
+			});
+			let n = 0;
+			for (let i = 1; i <= 4; i++) {
+				const v = lowerMap['wub mesh ' + i];
+				if (v != null && String(v).trim() !== '') n++;
+			}
+			return n;
+		};
+		const out: any[] = [];
+		for (const r of raw) {
+			if (!r || typeof r !== 'object') continue;
+			/* Ink identifier — supports the Inks.xlsx header ("Ink Color") and the raw source headers. */
+			const inkName = pick(r, [
+				'ink name', 'ink', 'ink_color', 'inkcolor', 'ink color', 'color', 'colour',
+				'pantone', 'pantone color', 'csi color'
+			]);
+			if (!inkName) continue;
+			/* Mesh — includes the Inks.xlsx "Color Mesh" and the source "HSWB MESH". */
+			const mesh = pick(r, ['mesh', 'mesh count', 'mesh_count', 'color mesh', 'hswb mesh']);
+			const ubRaw = pick(r, ['underbase count', 'underbase', 'underbase_count', 'underbases', 'ub count']);
+			/* Hits — numeric column, or the Inks.xlsx "Two Hits" (Y/N) flag. */
+			const hitsRaw = pick(r, ['hits count', 'hits', 'hit', 'hits_count', 'no of hits', 'number of hits', 'two hits']);
+			const printMethod = pick(r, ['print method', 'method', 'print_method', 'printmethod']);
+			/* profileCode comes from the Excel and is kept on every JSON entry so exceptions load per profile. */
+			const profileCodeRaw = pick(r, ['profilecode', 'profile code', 'profile_code', 'code']);
+			const profileRaw = pick(r, ['profile', 'profile name', 'profile_name']);
+			/* Garment/substrate type (Cotton/Poly/Jersey) — used to build a profile code from Profile + Type. */
+			const typeRaw = pick(r, ['type', 'garment', 'garment type', 'substrate', 'material', 'fabric']);
+			/*
+			 * Effective profile code: an explicit profileCode column wins; otherwise derive it from the
+			 * ProfileName + Type combo (e.g. "Fanatics-Plastisol" + "Cotton" -> "Fanatics-Plastisol_Cotton").
+			 */
+			const effectiveProfileCode =
+				profileCodeRaw !== ''
+					? profileCodeRaw
+					: profileRaw !== ''
+						? typeRaw !== ''
+							? profileRaw + '_' + typeRaw
+							: profileRaw
+						: '';
+			const enabledRaw = pick(r, ['enabled', 'active']);
 
-   /* Underbase count: explicit numeric column first, otherwise the number of filled WUB Mesh columns. */
-   let underbaseCount = 1;
-   const ubNum = parseInt(ubRaw, 10);
-   if (!isNaN(ubNum)) {
-    underbaseCount = Math.max(1, Math.min(4, ubNum));
-   } else {
-    const wubCount = countWubMeshColumns(r);
-    if (wubCount > 0) underbaseCount = Math.max(1, Math.min(4, wubCount));
-   }
+			/* Underbase count: explicit numeric column first, otherwise the number of filled WUB Mesh columns. */
+			let underbaseCount = 1;
+			const ubNum = parseInt(ubRaw, 10);
+			if (!isNaN(ubNum)) {
+				underbaseCount = Math.max(1, Math.min(4, ubNum));
+			} else {
+				const wubCount = countWubMeshColumns(r);
+				if (wubCount > 0) underbaseCount = Math.max(1, Math.min(4, wubCount));
+			}
 
-   /*
-    * Second hit is driven by the PRESENCE of a value in "Two Hits": empty -> single hit; any value
-    * (except N/No/False/0) -> second hit. A numeric value is the second-hit mesh; a legacy Y/Yes has none.
-    */
-   const hitsValue = String(hitsRaw == null ? '' : hitsRaw).trim();
-   const hitsIsNegative = /^(n|no|false|0)$/i.test(hitsValue);
-   const hitsHasValue = hitsValue !== '' && !hitsIsNegative;
-   const hitsCount = hitsHasValue ? 2 : 1;
-   const secondHitMesh = /^(y|yes|true)$/i.test(hitsValue) ? '' : (hitsHasValue ? hitsValue : '');
+			/*
+			 * Second hit is driven by the PRESENCE of a value in "Two Hits": empty -> single hit; any value
+			 * (except N/No/False/0) -> second hit. A numeric value is the second-hit mesh; a legacy Y/Yes has none.
+			 */
+			const hitsValue = String(hitsRaw == null ? '' : hitsRaw).trim();
+			const hitsIsNegative = /^(n|no|false|0)$/i.test(hitsValue);
+			const hitsHasValue = hitsValue !== '' && !hitsIsNegative;
+			const hitsCount = hitsHasValue ? 2 : 1;
+			const secondHitMesh = /^(y|yes|true)$/i.test(hitsValue) ? '' : (hitsHasValue ? hitsValue : '');
 
-   out.push({
-    inkName,
-    mesh,
-    underbaseCount,
-    hitsCount,
-    secondHitMesh,
-    printMethod,
-    profileCode: effectiveProfileCode,
-    profile: profileRaw,
-    type: typeRaw,
-    enabled: enabledRaw === '' ? true : /^(y|yes|true|1|enabled|active|on)$/i.test(enabledRaw)
-   });
-  }
-  return out;
- }
+			out.push({
+				inkName,
+				mesh,
+				underbaseCount,
+				hitsCount,
+				secondHitMesh,
+				printMethod,
+				profileCode: effectiveProfileCode,
+				profile: profileRaw,
+				type: typeRaw,
+				enabled: enabledRaw === '' ? true : /^(y|yes|true|1|enabled|active|on)$/i.test(enabledRaw)
+			});
+		}
+		return out;
+	}
 
- /*
-  * Overwrite each imported row's profileCode with the code from Profiles.json, matched by the Excel's
-  * Profile NAME (case-insensitive; unicode dashes and whitespace normalized the same way the app's
-  * profile lookup does). The Excel only needs a Profile name column — the authoritative code
-  * (e.g. FAN_PLST, JER_WB) lives in Profiles.json. Falls back to a code match, then to whatever the row
-  * already carried, so nothing breaks when a profile isn't found.
-  */
- private applyProfileCodesFromProfilesJson(rows: any[], profilesResult: any): any[] {
-  const profiles =
-   profilesResult && profilesResult.success && Array.isArray(profilesResult.profiles)
-    ? profilesResult.profiles
-    : Array.isArray(profilesResult)
-     ? profilesResult
-     : [];
-  if (!Array.isArray(rows) || rows.length === 0 || profiles.length === 0) {
-   return rows;
-  }
-  const norm = (v: any) =>
-   String(v == null ? '' : v)
-    .replace(/[\u2010-\u2015]/g, '-')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toUpperCase();
-  const codeByName = new Map<string, string>();
-  const codeByCode = new Map<string, string>();
-  for (const pf of profiles) {
-   if (!pf) continue;
-   const nameKey = norm(
-    pf['Profile Name'] != null ? pf['Profile Name'] : pf.profileName != null ? pf.profileName : pf.name
-   );
-   const codeRaw =
-    pf['Profile Code'] != null ? pf['Profile Code'] : pf.profileCode != null ? pf.profileCode : pf.code;
-   const code = codeRaw != null ? String(codeRaw).trim() : '';
-   if (code === '') continue;
-   if (nameKey) codeByName.set(nameKey, code);
-   codeByCode.set(norm(code), code);
-  }
-  return rows.map((r) => {
-   if (!r || typeof r !== 'object') return r;
-   const resolved =
-    codeByName.get(norm(r.profile)) ||
-    codeByCode.get(norm(r.profileCode)) ||
-    (r.profileCode != null ? String(r.profileCode) : '');
-   return { ...r, profileCode: resolved };
-  });
- }
+	/*
+	 * Overwrite each imported row's profileCode with the code from Profiles.json, matched by the Excel's
+	 * Profile NAME (case-insensitive; unicode dashes and whitespace normalized the same way the app's
+	 * profile lookup does). The Excel only needs a Profile name column — the authoritative code
+	 * (e.g. FAN_PLST, JER_WB) lives in Profiles.json. Falls back to a code match, then to whatever the row
+	 * already carried, so nothing breaks when a profile isn't found.
+	 */
+	private applyProfileCodesFromProfilesJson(rows: any[], profilesResult: any): any[] {
+		const profiles =
+			profilesResult && profilesResult.success && Array.isArray(profilesResult.profiles)
+				? profilesResult.profiles
+				: Array.isArray(profilesResult)
+					? profilesResult
+					: [];
+		if (!Array.isArray(rows) || rows.length === 0 || profiles.length === 0) {
+			return rows;
+		}
+		const norm = (v: any) =>
+			String(v == null ? '' : v)
+				.replace(/[\u2010-\u2015]/g, '-')
+				.replace(/\s+/g, ' ')
+				.trim()
+				.toUpperCase();
+		const codeByName = new Map<string, string>();
+		const codeByCode = new Map<string, string>();
+		for (const pf of profiles) {
+			if (!pf) continue;
+			const nameKey = norm(
+				pf['Profile Name'] != null ? pf['Profile Name'] : pf.profileName != null ? pf.profileName : pf.name
+			);
+			const codeRaw =
+				pf['Profile Code'] != null ? pf['Profile Code'] : pf.profileCode != null ? pf.profileCode : pf.code;
+			const code = codeRaw != null ? String(codeRaw).trim() : '';
+			if (code === '') continue;
+			if (nameKey) codeByName.set(nameKey, code);
+			codeByCode.set(norm(code), code);
+		}
+		return rows.map((r) => {
+			if (!r || typeof r !== 'object') return r;
+			const resolved =
+				codeByName.get(norm(r.profile)) ||
+				codeByCode.get(norm(r.profileCode)) ||
+				(r.profileCode != null ? String(r.profileCode) : '');
+			return { ...r, profileCode: resolved };
+		});
+	}
 
- saveInkExceptions(profileCode: string, inkRows: any[], profileName?: string): Promise<any> {
-  this.log('saveInkExceptions called for code: ' + profileCode);
+	saveInkExceptions(profileCode: string, inkRows: any[], profileName?: string): Promise<any> {
+		this.log('saveInkExceptions called for code: ' + profileCode);
 
-  return this.getLeapServerDataPath().then((basePath) => {
-   if (!basePath || !String(basePath).trim()) {
-    return {
-     success: false,
-     error: 'LEAP Data folder path is not set. Set it under General Settings → Data Folder Path.'
-    };
-   }
+		return this.getLeapServerDataPath().then((basePath) => {
+			if (!basePath || !String(basePath).trim()) {
+				return {
+					success: false,
+					error: 'LEAP Data folder path is not set. Set it under General Settings → Data Folder Path.'
+				};
+			}
 
-   const cep = (window as any).cep;
-   const fs = (window as any).cep_node?.require('fs');
-   if (!cep || !fs) {
-    return this.ensureSession().then(() => {
-     const params = {
-      profileCode: profileCode || '',
-      profileName: profileName || '',
-      inkRows: inkRows || []
-     };
-     return (window as any).leap
-      .scriptLoader()
-      .evalScript('handleSaveInkExceptions', params)
-      .then((res: any) => this.parseHostJsonResult(res));
-    });
-   }
+			const cep = (window as any).cep;
+			const fs = (window as any).cep_node?.require('fs');
+			if (!cep || !fs) {
+				return this.ensureSession().then(() => {
+					const params = {
+						profileCode: profileCode || '',
+						profileName: profileName || '',
+						inkRows: inkRows || []
+					};
+					return (window as any).leap
+						.scriptLoader()
+						.evalScript('handleSaveInkExceptions', params)
+						.then((res: any) => this.parseHostJsonResult(res));
+				});
+			}
 
-   try {
-    const filePath = this.getProfileInkExceptionsFilePath(basePath);
-    if (!filePath) {
-     return { success: false, error: 'Could not resolve profile_ink_exceptions.json path' };
-    }
+			try {
+				const filePath = this.getProfileInkExceptionsFilePath(basePath);
+				if (!filePath) {
+					return { success: false, error: 'Could not resolve profile_ink_exceptions.json path' };
+				}
 
-    let allEntries: any[] = [];
-    if (fs.existsSync(filePath)) {
-     const content = fs.readFileSync(filePath, 'utf8');
-     const parsed = JSON.parse(content);
-     allEntries = Array.isArray(parsed) ? parsed : [];
-    }
+				let allEntries: any[] = [];
+				if (fs.existsSync(filePath)) {
+					const content = fs.readFileSync(filePath, 'utf8');
+					const parsed = JSON.parse(content);
+					allEntries = Array.isArray(parsed) ? parsed : [];
+				}
 
-    const codeKey = profileCode != null ? String(profileCode).trim().toUpperCase() : '';
-    if (!codeKey) {
-     return { success: false, error: 'Profile code is required to save ink exceptions' };
-    }
+				const codeKey = profileCode != null ? String(profileCode).trim().toUpperCase() : '';
+				if (!codeKey) {
+					return { success: false, error: 'Profile code is required to save ink exceptions' };
+				}
 
-    const remaining = allEntries.filter((entry) => !this.profileMatchesInkEntry(entry, codeKey));
+				const remaining = allEntries.filter((entry) => !this.profileMatchesInkEntry(entry, codeKey));
 
-    let defaultPrintMethod = '';
-    for (let i = 0; i < allEntries.length; i++) {
-     const sample = allEntries[i];
-     if (this.profileMatchesInkEntry(sample, codeKey) && sample?.Print_Method) {
-      defaultPrintMethod = String(sample.Print_Method).trim();
-      break;
-     }
-    }
+				let defaultPrintMethod = '';
+				for (let i = 0; i < allEntries.length; i++) {
+					const sample = allEntries[i];
+					if (this.profileMatchesInkEntry(sample, codeKey) && sample?.Print_Method) {
+						defaultPrintMethod = String(sample.Print_Method).trim();
+						break;
+					}
+				}
 
-    const updatedProfileEntries: any[] = [];
-    for (const row of inkRows || []) {
-     if (!row) continue;
-     const inkName = row.inkName != null ? String(row.inkName).trim() : '';
-     if (!inkName) continue;
-     const rowWithMethod = {
-      ...row,
-      printMethod:
-       row.printMethod != null && String(row.printMethod).trim() !== ''
-        ? String(row.printMethod).trim()
-        : defaultPrintMethod
-     };
-     updatedProfileEntries.push(
-      this.inkRowToJsonEntry(rowWithMethod, profileName || '', profileCode)
-     );
-    }
+				const updatedProfileEntries: any[] = [];
+				for (const row of inkRows || []) {
+					if (!row) continue;
+					const inkName = row.inkName != null ? String(row.inkName).trim() : '';
+					if (!inkName) continue;
+					const rowWithMethod = {
+						...row,
+						printMethod:
+							row.printMethod != null && String(row.printMethod).trim() !== ''
+								? String(row.printMethod).trim()
+								: defaultPrintMethod
+					};
+					updatedProfileEntries.push(
+						this.inkRowToJsonEntry(rowWithMethod, profileName || '', profileCode)
+					);
+				}
 
-    const merged = remaining.concat(updatedProfileEntries);
-    const dir = (window as any).cep_node.require('path').dirname(filePath);
-    if (!fs.existsSync(dir)) {
-     fs.mkdirSync(dir, { recursive: true });
-    }
-    fs.writeFileSync(filePath, JSON.stringify(merged, null, 2), 'utf8');
-    return { success: true, message: 'Ink exceptions saved successfully' };
-   } catch (err: any) {
-    return {
-     success: false,
-     error: err?.message || String(err) || 'Failed to save profile_ink_exceptions.json'
-    };
-   }
-  });
- }
+				const merged = remaining.concat(updatedProfileEntries);
+				const dir = (window as any).cep_node.require('path').dirname(filePath);
+				if (!fs.existsSync(dir)) {
+					fs.mkdirSync(dir, { recursive: true });
+				}
+				fs.writeFileSync(filePath, JSON.stringify(merged, null, 2), 'utf8');
+				return { success: true, message: 'Ink exceptions saved successfully' };
+			} catch (err: any) {
+				return {
+					success: false,
+					error: err?.message || String(err) || 'Failed to save profile_ink_exceptions.json'
+				};
+			}
+		});
+	}
 
- private parseHostJsonResult(res: any): any {
-  if (res == null) return { success: false, error: 'Empty response from host' };
-  if (typeof res === 'object') return res;
-  if (typeof res !== 'string') return { success: false, error: String(res) };
-  const trimmed = res.trim();
-  if (!trimmed) return { success: false, error: 'Empty response from host' };
-  try {
-   return JSON.parse(trimmed);
-  } catch {
-   return { success: false, error: trimmed };
-  }
- }
+	private parseHostJsonResult(res: any): any {
+		if (res == null) return { success: false, error: 'Empty response from host' };
+		if (typeof res === 'object') return res;
+		if (typeof res !== 'string') return { success: false, error: String(res) };
+		const trimmed = res.trim();
+		if (!trimmed) return { success: false, error: 'Empty response from host' };
+		try {
+			return JSON.parse(trimmed);
+		} catch {
+			return { success: false, error: trimmed };
+		}
+	}
 
- async saveAppVersion(origin: string) {
-  await checkForJSXUpdates(origin + '/');
+	async saveAppVersion(origin: string) {
+		await checkForJSXUpdates(origin + '/');
 
-  const script = `
+		const script = `
     var folderPaths = "{\\n" +
       "  \\"origin\\": \\"" + "${origin}" + "\\"\\n" +
     "}";
@@ -1586,16 +1586,16 @@ export class ControllerService {
     }
   `;
 
-  try {
-   const result = await evalScript(script);
-   return result;
-  } catch (err) {
-   throw err;
-  }
- }
+		try {
+			const result = await evalScript(script);
+			return result;
+		} catch (err) {
+			throw err;
+		}
+	}
 
- async getAppVersion() {
-  const script = `
+	async getAppVersion() {
+		const script = `
     function getAppVersion() {
       var file = new File(Folder.myDocuments + "/LEAP Settings/LEAP_Seps/ColorSep_Folder_Paths.json");
 
@@ -1617,25 +1617,25 @@ export class ControllerService {
     getAppVersion();
   `;
 
-  try {
-   const result = await evalScript(script);
+		try {
+			const result = await evalScript(script);
 
-   console.log('[GET APP VERSION] Raw result:', { result });
-   if (!result || result === 'undefined' || result === '') return null;
-   return result;
-  } catch (err) {
-   console.error('Failed to get app version:', err);
-   return null;
-  }
- }
+			console.log('[GET APP VERSION] Raw result:', { result });
+			if (!result || result === 'undefined' || result === '') return null;
+			return result;
+		} catch (err) {
+			console.error('Failed to get app version:', err);
+			return null;
+		}
+	}
 
- async generateUnderbaseLayer(sourceLayerName: string, newNameLayer: string): Promise<string> {
-  await this.ensureSession();
+	async generateUnderbaseLayer(sourceLayerName: string, newNameLayer: string): Promise<string> {
+		await this.ensureSession();
 
-  const safeSource = sourceLayerName.replace(/'/g, "\\'");
-  const safeNew = newNameLayer.replace(/'/g, "\\'");
+		const safeSource = sourceLayerName.replace(/'/g, "\\'");
+		const safeNew = newNameLayer.replace(/'/g, "\\'");
 
-  const script = `
+		const script = `
 		(function() {
 		function duplicateSeparatedArtLayer(sourceLayerName, newNameLayer) {
 		  var doc = app.activeDocument;
@@ -1770,522 +1770,522 @@ export class ControllerService {
 		})();
 	  `;
 
-  try {
-   const result = await (window as any).leap.scriptLoader().evalScript(script);
+		try {
+			const result = await (window as any).leap.scriptLoader().evalScript(script);
 
-   return result;
-  } catch (err) {
-   throw err;
-  }
- }
+			return result;
+		} catch (err) {
+			throw err;
+		}
+	}
 
- getColorCodesFromExcel(teamCode: string, documentPath?: string): Promise<any> {
-  this.log('getColorCodesFromExcel called for team: ' + teamCode);
+	getColorCodesFromExcel(teamCode: string, documentPath?: string): Promise<any> {
+		this.log('getColorCodesFromExcel called for team: ' + teamCode);
 
-  return this.ensureSession().then(() => {
-   return (window as any).leap
-    .getColorCodesFromExcel(teamCode, documentPath)
-    .then((result: any) => {
-     return result;
-    })
-    .catch((err: any) => {
-     throw err;
-    });
-  });
- }
+		return this.ensureSession().then(() => {
+			return (window as any).leap
+				.getColorCodesFromExcel(teamCode, documentPath)
+				.then((result: any) => {
+					return result;
+				})
+				.catch((err: any) => {
+					throw err;
+				});
+		});
+	}
 
- getStyleCodesFromExcel(teamCode: string, documentPath?: string): Promise<any> {
-  this.log('getStyleCodesFromExcel called for team: ' + teamCode);
-  console.log(
-   '[Separations] getStyleCodesFromExcel – teamCode:',
-   teamCode,
-   '| documentPath:',
-   documentPath ?? '(missing)'
-  );
+	getStyleCodesFromExcel(teamCode: string, documentPath?: string): Promise<any> {
+		this.log('getStyleCodesFromExcel called for team: ' + teamCode);
+		console.log(
+			'[Separations] getStyleCodesFromExcel – teamCode:',
+			teamCode,
+			'| documentPath:',
+			documentPath ?? '(missing)'
+		);
 
-  return this.ensureSession().then(() => {
-   return (window as any).leap
-    .getStyleCodesFromExcel(teamCode, documentPath)
-    .then((result: any) => {
-     const count = result?.styleCodes?.length ?? 0;
-     console.log(
-      '[Separations] getStyleCodesFromExcel result – success:',
-      !!result?.success,
-      '| styleCodes count:',
-      count,
-      result?.error ? '| error: ' + result.error : ''
-     );
-     return result;
-    })
-    .catch((err: any) => {
-     throw err;
-    });
-  });
- }
+		return this.ensureSession().then(() => {
+			return (window as any).leap
+				.getStyleCodesFromExcel(teamCode, documentPath)
+				.then((result: any) => {
+					const count = result?.styleCodes?.length ?? 0;
+					console.log(
+						'[Separations] getStyleCodesFromExcel result – success:',
+						!!result?.success,
+						'| styleCodes count:',
+						count,
+						result?.error ? '| error: ' + result.error : ''
+					);
+					return result;
+				})
+				.catch((err: any) => {
+					throw err;
+				});
+		});
+	}
 
- getBatchRowVariableSource(teamCode: string, documentPath?: string): Promise<any> {
-  this.log('getBatchRowVariableSource called for team: ' + teamCode);
+	getBatchRowVariableSource(teamCode: string, documentPath?: string): Promise<any> {
+		this.log('getBatchRowVariableSource called for team: ' + teamCode);
 
-  return this.ensureSession().then(() => {
-   return (window as any).leap
-    .getBatchRowVariableSource(teamCode, documentPath)
-    .then((result: any) => result)
-    .catch((err: any) => {
-     throw err;
-    });
-  });
- }
+		return this.ensureSession().then(() => {
+			return (window as any).leap
+				.getBatchRowVariableSource(teamCode, documentPath)
+				.then((result: any) => result)
+				.catch((err: any) => {
+					throw err;
+				});
+		});
+	}
 
- getProfileNamesFromExcel(styleCodes: string[]): Promise<any> {
-  this.log('getProfileNamesFromExcel called with ' + styleCodes.length + ' style codes');
-  console.log(
-   '[Separations] getProfileNamesFromExcel – styleCodes count:',
-   styleCodes?.length ?? 0,
-   '| codes:',
-   styleCodes ?? []
-  );
+	getProfileNamesFromExcel(styleCodes: string[]): Promise<any> {
+		this.log('getProfileNamesFromExcel called with ' + styleCodes.length + ' style codes');
+		console.log(
+			'[Separations] getProfileNamesFromExcel – styleCodes count:',
+			styleCodes?.length ?? 0,
+			'| codes:',
+			styleCodes ?? []
+		);
 
-  return this.ensureSession().then(() => {
-   return (window as any).leap
-    .getProfileNamesFromExcel(styleCodes)
-    .then((result: any) => {
-     const mapKeys = result?.profileMap ? Object.keys(result.profileMap) : [];
-     const missing =
-      styleCodes?.filter(
-       (sc) => !result?.profileMap?.[sc] || result?.profileMap?.[sc] === 'Unknown Profile'
-      ) ?? [];
-     console.log(
-      '[Separations] getProfileNamesFromExcel result – success:',
-      !!result?.success,
-      '| profileMap entries:',
-      mapKeys.length,
-      missing.length ? '| style codes with no profile: ' + JSON.stringify(missing) : ''
-     );
-     return result;
-    })
-    .catch((err: any) => {
-     throw err;
-    });
-  });
- }
+		return this.ensureSession().then(() => {
+			return (window as any).leap
+				.getProfileNamesFromExcel(styleCodes)
+				.then((result: any) => {
+					const mapKeys = result?.profileMap ? Object.keys(result.profileMap) : [];
+					const missing =
+						styleCodes?.filter(
+							(sc) => !result?.profileMap?.[sc] || result?.profileMap?.[sc] === 'Unknown Profile'
+						) ?? [];
+					console.log(
+						'[Separations] getProfileNamesFromExcel result – success:',
+						!!result?.success,
+						'| profileMap entries:',
+						mapKeys.length,
+						missing.length ? '| style codes with no profile: ' + JSON.stringify(missing) : ''
+					);
+					return result;
+				})
+				.catch((err: any) => {
+					throw err;
+				});
+		});
+	}
 
- getStylesCatalogFromExcel(): Promise<any> {
-  this.log('getStylesCatalogFromExcel called');
-  return this.ensureSession().then(async () => {
-   const leapServerPath = await this.getLeapServerDataPath();
-   return (window as any).leap
-    .getStylesCatalogFromExcel(leapServerPath || '')
-    .then((result: any) => result)
-    .catch((err: any) => {
-     throw err;
-    });
-  });
- }
+	getStylesCatalogFromExcel(): Promise<any> {
+		this.log('getStylesCatalogFromExcel called');
+		return this.ensureSession().then(async () => {
+			const leapServerPath = await this.getLeapServerDataPath();
+			return (window as any).leap
+				.getStylesCatalogFromExcel(leapServerPath || '')
+				.then((result: any) => result)
+				.catch((err: any) => {
+					throw err;
+				});
+		});
+	}
 
- getGraphicPlacementOptions(teamCode?: string, documentPath?: string): Promise<any> {
-  this.log('getGraphicPlacementOptions called');
-  console.log(
-   '[Separations] getGraphicPlacementOptions – teamCode:',
-   teamCode ?? '(missing)',
-   '| documentPath:',
-   documentPath ?? '(missing)'
-  );
+	getGraphicPlacementOptions(teamCode?: string, documentPath?: string): Promise<any> {
+		this.log('getGraphicPlacementOptions called');
+		console.log(
+			'[Separations] getGraphicPlacementOptions – teamCode:',
+			teamCode ?? '(missing)',
+			'| documentPath:',
+			documentPath ?? '(missing)'
+		);
 
-  return this.ensureSession().then(() => {
-   return (window as any).leap
-    .getGraphicPlacementOptions(documentPath, teamCode)
-    .then((result: any) => {
-     return result;
-    })
-    .catch((err: any) => {
-     throw err;
-    });
-  });
- }
+		return this.ensureSession().then(() => {
+			return (window as any).leap
+				.getGraphicPlacementOptions(documentPath, teamCode)
+				.then((result: any) => {
+					return result;
+				})
+				.catch((err: any) => {
+					throw err;
+				});
+		});
+	}
 
- private graphicPositionLookup: Array<{ desc: string; abbv: string }> = [];
+	private graphicPositionLookup: Array<{ desc: string; abbv: string }> = [];
 
- getGraphicPositionOptionsFromJson(): Promise<{
-  success: boolean;
-  placements: string[];
-  /*
-   * Full DESC/ABBV entries parsed from graphic_positions.json. Consumers that
-   * need the abbreviations (e.g. the export settings "Positions" chips) read
-   * this instead of `placements`, which only carries the descriptions.
-   */
-  entries?: Array<{ desc: string; abbv: string }>;
-  error?: string;
- }> {
-  return this.getLeapServerDataPath().then((basePath) => {
-   const cep = (window as any).cep;
-   if (!cep || !cep.fs || !basePath) {
-    this.graphicPositionLookup = [];
-    return { success: false, placements: [], error: 'Server base path not configured' };
-   }
+	getGraphicPositionOptionsFromJson(): Promise<{
+		success: boolean;
+		placements: string[];
+		/*
+		 * Full DESC/ABBV entries parsed from graphic_positions.json. Consumers that
+		 * need the abbreviations (e.g. the export settings "Positions" chips) read
+		 * this instead of `placements`, which only carries the descriptions.
+		 */
+		entries?: Array<{ desc: string; abbv: string }>;
+		error?: string;
+	}> {
+		return this.getLeapServerDataPath().then((basePath) => {
+			const cep = (window as any).cep;
+			if (!cep || !cep.fs || !basePath) {
+				this.graphicPositionLookup = [];
+				return { success: false, placements: [], error: 'Server base path not configured' };
+			}
 
-   const path = (window as any).cep_node.require('path');
-   const normalizedBasePath = String(basePath).replace(/\/$/, '');
-   const lookupPath = path.join(normalizedBasePath, 'SETTINGS', 'graphic_positions.json');
-   const result = cep.fs.readFile(lookupPath);
-   if (result.err !== 0) {
-    this.graphicPositionLookup = [];
-    return { success: false, placements: [], error: 'graphic_positions.json not found' };
-   }
+			const path = (window as any).cep_node.require('path');
+			const normalizedBasePath = String(basePath).replace(/\/$/, '');
+			const lookupPath = path.join(normalizedBasePath, 'SETTINGS', 'graphic_positions.json');
+			const result = cep.fs.readFile(lookupPath);
+			if (result.err !== 0) {
+				this.graphicPositionLookup = [];
+				return { success: false, placements: [], error: 'graphic_positions.json not found' };
+			}
 
-   try {
-    const parsed = JSON.parse(result.data);
-    if (!Array.isArray(parsed)) {
-     this.graphicPositionLookup = [];
-     return { success: false, placements: [], error: 'Invalid graphic_positions.json format' };
-    }
+			try {
+				const parsed = JSON.parse(result.data);
+				if (!Array.isArray(parsed)) {
+					this.graphicPositionLookup = [];
+					return { success: false, placements: [], error: 'Invalid graphic_positions.json format' };
+				}
 
-    const entries: Array<{ desc: string; abbv: string }> = [];
-    parsed.forEach((entry: any) => {
-     if (!entry) return;
-     const desc = String(
-      entry.DESC != null ? entry.DESC : entry.desc != null ? entry.desc : ''
-     ).trim();
-     const abbv = String(
-      entry.ABBV != null ? entry.ABBV : entry.abbv != null ? entry.abbv : ''
-     ).trim();
-     if (desc) {
-      entries.push({ desc, abbv: abbv || desc });
-     }
-    });
+				const entries: Array<{ desc: string; abbv: string }> = [];
+				parsed.forEach((entry: any) => {
+					if (!entry) return;
+					const desc = String(
+						entry.DESC != null ? entry.DESC : entry.desc != null ? entry.desc : ''
+					).trim();
+					const abbv = String(
+						entry.ABBV != null ? entry.ABBV : entry.abbv != null ? entry.abbv : ''
+					).trim();
+					if (desc) {
+						entries.push({ desc, abbv: abbv || desc });
+					}
+				});
 
-    this.graphicPositionLookup = entries;
-    const placements = this.uniqueNonEmptyStrings(entries.map((entry) => entry.desc)).sort((a, b) =>
-     a.localeCompare(b, undefined, { sensitivity: 'base' })
-    );
+				this.graphicPositionLookup = entries;
+				const placements = this.uniqueNonEmptyStrings(entries.map((entry) => entry.desc)).sort((a, b) =>
+					a.localeCompare(b, undefined, { sensitivity: 'base' })
+				);
 
-    return { success: true, placements, entries };
-   } catch (error: any) {
-    this.graphicPositionLookup = [];
-    return {
-     success: false,
-     placements: [],
-     error: error?.message || 'Failed to parse graphic_positions.json'
-    };
-   }
-  });
- }
+				return { success: true, placements, entries };
+			} catch (error: any) {
+				this.graphicPositionLookup = [];
+				return {
+					success: false,
+					placements: [],
+					error: error?.message || 'Failed to parse graphic_positions.json'
+				};
+			}
+		});
+	}
 
- resolveGraphicPositionAbbreviation(positionDesc: string): string {
-  const original = String(positionDesc || '').trim();
-  if (!original) return '';
+	resolveGraphicPositionAbbreviation(positionDesc: string): string {
+		const original = String(positionDesc || '').trim();
+		if (!original) return '';
 
-  const target = original.toLowerCase();
-  for (const entry of this.graphicPositionLookup) {
-   if (entry.desc.toLowerCase() === target) {
-    return entry.abbv || entry.desc;
-   }
-  }
+		const target = original.toLowerCase();
+		for (const entry of this.graphicPositionLookup) {
+			if (entry.desc.toLowerCase() === target) {
+				return entry.abbv || entry.desc;
+			}
+		}
 
-  return original;
- }
+		return original;
+	}
 
- saveGraphicsData(
-  graphicsData: any[],
-  underbaseSwatches?: string | { underbase2Swatch?: string; underbase3Swatch?: string; underbase4Swatch?: string }
- ): Promise<any> {
-  this.log('saveGraphicsData called with ' + graphicsData.length + ' graphics');
+	saveGraphicsData(
+		graphicsData: any[],
+		underbaseSwatches?: string | { underbase2Swatch?: string; underbase3Swatch?: string; underbase4Swatch?: string }
+	): Promise<any> {
+		this.log('saveGraphicsData called with ' + graphicsData.length + ' graphics');
 
-  let ub2 = '';
-  let ub3 = '';
-  let ub4 = '';
-  if (typeof underbaseSwatches === 'string') {
-   ub2 = underbaseSwatches;
-   ub3 = underbaseSwatches;
-   ub4 = underbaseSwatches;
-  } else if (underbaseSwatches) {
-   ub2 = underbaseSwatches.underbase2Swatch || '';
-   ub3 = underbaseSwatches.underbase3Swatch || '';
-   ub4 = underbaseSwatches.underbase4Swatch || '';
-  }
+		let ub2 = '';
+		let ub3 = '';
+		let ub4 = '';
+		if (typeof underbaseSwatches === 'string') {
+			ub2 = underbaseSwatches;
+			ub3 = underbaseSwatches;
+			ub4 = underbaseSwatches;
+		} else if (underbaseSwatches) {
+			ub2 = underbaseSwatches.underbase2Swatch || '';
+			ub3 = underbaseSwatches.underbase3Swatch || '';
+			ub4 = underbaseSwatches.underbase4Swatch || '';
+		}
 
-  return this.ensureSession().then(() => {
-   const params = {
-    graphicsData: graphicsData,
-    underbase2Swatch: ub2,
-    underbase3Swatch: ub3,
-    underbase4Swatch: ub4
-   };
-   return (window as any).leap
-    .scriptLoader()
-    .evalScript('handleSaveGraphicsData', params)
-    .then((res: string) => {
-     const result = JSON.parse(res);
+		return this.ensureSession().then(() => {
+			const params = {
+				graphicsData: graphicsData,
+				underbase2Swatch: ub2,
+				underbase3Swatch: ub3,
+				underbase4Swatch: ub4
+			};
+			return (window as any).leap
+				.scriptLoader()
+				.evalScript('handleSaveGraphicsData', params)
+				.then((res: string) => {
+					const result = JSON.parse(res);
 
-     return result;
-    })
-    .catch((err: any) => {
-     throw err;
-    });
-  });
- }
+					return result;
+				})
+				.catch((err: any) => {
+					throw err;
+				});
+		});
+	}
 
- loadGraphicsData(): Promise<any> {
-  this.log('loadGraphicsData called');
+	loadGraphicsData(): Promise<any> {
+		this.log('loadGraphicsData called');
 
-  return this.ensureSession().then(() => {
-   return (window as any).leap
-    .scriptLoader()
-    .evalScript('handleLoadGraphicsData', {})
-    .then((res: string) => {
-     const result = JSON.parse(res);
+		return this.ensureSession().then(() => {
+			return (window as any).leap
+				.scriptLoader()
+				.evalScript('handleLoadGraphicsData', {})
+				.then((res: string) => {
+					const result = JSON.parse(res);
 
-     return result;
-    })
-    .catch((err: any) => {
-     throw err;
-    });
-  });
- }
+					return result;
+				})
+				.catch((err: any) => {
+					throw err;
+				});
+		});
+	}
 
- loadSeparationPaths(): Promise<any> {
-  this.log('loadSeparationPaths called');
+	loadSeparationPaths(): Promise<any> {
+		this.log('loadSeparationPaths called');
 
-  return this.ensureSession().then(() => {
-   return (window as any).leap
-    .scriptLoader()
-    .evalScript('handleLoadSeparationPaths', {})
-    .then((res: string) => {
-     const result = JSON.parse(res);
+		return this.ensureSession().then(() => {
+			return (window as any).leap
+				.scriptLoader()
+				.evalScript('handleLoadSeparationPaths', {})
+				.then((res: string) => {
+					const result = JSON.parse(res);
 
-     return result;
-    })
-    .catch((err: any) => {
-     throw err;
-    });
-  });
- }
+					return result;
+				})
+				.catch((err: any) => {
+					throw err;
+				});
+		});
+	}
 
- deleteSeparationFile(params: {
-  graphicName: string;
-  profileName: string;
-  filePath?: string;
- }): Promise<any> {
-  this.log('deleteSeparationFile called');
+	deleteSeparationFile(params: {
+		graphicName: string;
+		profileName: string;
+		filePath?: string;
+	}): Promise<any> {
+		this.log('deleteSeparationFile called');
 
-  return this.ensureSession().then(() => {
-   return (window as any).leap
-    .scriptLoader()
-    .evalScript('handleDeleteSeparationFile', params)
-    .then((res: string) => {
-     return JSON.parse(res);
-    })
-    .catch((err: any) => {
-     throw err;
-    });
-  });
- }
+		return this.ensureSession().then(() => {
+			return (window as any).leap
+				.scriptLoader()
+				.evalScript('handleDeleteSeparationFile', params)
+				.then((res: string) => {
+					return JSON.parse(res);
+				})
+				.catch((err: any) => {
+					throw err;
+				});
+		});
+	}
 
- updateSeparationProfileDataEntry(params: {
-  graphicName: string;
-  matchProfileName: string;
-  profileName: string;
-  styleCodes: string[];
-  profileCode?: string | null;
-  duplicateAiFile?: boolean;
-  scaleEnabled?: boolean;
-  scalePercent?: number | null;
- }): Promise<any> {
-  this.log('updateSeparationProfileDataEntry called');
+	updateSeparationProfileDataEntry(params: {
+		graphicName: string;
+		matchProfileName: string;
+		profileName: string;
+		styleCodes: string[];
+		profileCode?: string | null;
+		duplicateAiFile?: boolean;
+		scaleEnabled?: boolean;
+		scalePercent?: number | null;
+	}): Promise<any> {
+		this.log('updateSeparationProfileDataEntry called');
 
-  return this.ensureSession().then(() => {
-   return (window as any).leap
-    .scriptLoader()
-    .evalScript('handleUpdateSeparationProfileDataEntry', params)
-    .then((res: string) => {
-     return JSON.parse(res);
-    })
-    .catch((err: any) => {
-     throw err;
-    });
-  });
- }
+		return this.ensureSession().then(() => {
+			return (window as any).leap
+				.scriptLoader()
+				.evalScript('handleUpdateSeparationProfileDataEntry', params)
+				.then((res: string) => {
+					return JSON.parse(res);
+				})
+				.catch((err: any) => {
+					throw err;
+				});
+		});
+	}
 
- addSeparationProfileDataEntry(params: {
-  graphicName: string;
-  profileName: string;
-  styleCodes: string[];
-  profileCode?: string | null;
- }): Promise<any> {
-  this.log('addSeparationProfileDataEntry called');
+	addSeparationProfileDataEntry(params: {
+		graphicName: string;
+		profileName: string;
+		styleCodes: string[];
+		profileCode?: string | null;
+	}): Promise<any> {
+		this.log('addSeparationProfileDataEntry called');
 
-  return this.ensureSession().then(() => {
-   return (window as any).leap
-    .scriptLoader()
-    .evalScript('handleAddSeparationProfileDataEntry', params)
-    .then((res: string) => JSON.parse(res))
-    .catch((err: any) => {
-     throw err;
-    });
-  });
- }
+		return this.ensureSession().then(() => {
+			return (window as any).leap
+				.scriptLoader()
+				.evalScript('handleAddSeparationProfileDataEntry', params)
+				.then((res: string) => JSON.parse(res))
+				.catch((err: any) => {
+					throw err;
+				});
+		});
+	}
 
- checkGraphicFolderExists(graphicName: string): Promise<any> {
-  this.log('checkGraphicFolderExists called for: ' + graphicName);
+	checkGraphicFolderExists(graphicName: string): Promise<any> {
+		this.log('checkGraphicFolderExists called for: ' + graphicName);
 
-  return this.ensureSession().then(() => {
-   const params = { graphicName: graphicName };
-   return (window as any).leap
-    .scriptLoader()
-    .evalScript('handleCheckGraphicFolderExists', params)
-    .then((res: string) => {
-     const result = JSON.parse(res);
+		return this.ensureSession().then(() => {
+			const params = { graphicName: graphicName };
+			return (window as any).leap
+				.scriptLoader()
+				.evalScript('handleCheckGraphicFolderExists', params)
+				.then((res: string) => {
+					const result = JSON.parse(res);
 
-     return result;
-    })
-    .catch((err: any) => {
-     throw err;
-    });
-  });
- }
+					return result;
+				})
+				.catch((err: any) => {
+					throw err;
+				});
+		});
+	}
 
- getProfileCodeFromName(
-  profileName: string,
-  options?: { distress?: boolean | string }
- ): Promise<any> {
-  this.log('getProfileCodeFromName called for: ' + profileName);
+	getProfileCodeFromName(
+		profileName: string,
+		options?: { distress?: boolean | string }
+	): Promise<any> {
+		this.log('getProfileCodeFromName called for: ' + profileName);
 
-  return this.ensureSession().then(() => {
-   const params: { profileName: string; distress?: boolean | string } = { profileName };
-   if (options && options.distress !== undefined && options.distress !== null) {
-    params.distress = options.distress;
-   }
-   return (window as any).leap
-    .scriptLoader()
-    .evalScript('handleGetProfileCodeFromName', params)
-    .then((res: string) => {
-     const result = JSON.parse(res);
+		return this.ensureSession().then(() => {
+			const params: { profileName: string; distress?: boolean | string } = { profileName };
+			if (options && options.distress !== undefined && options.distress !== null) {
+				params.distress = options.distress;
+			}
+			return (window as any).leap
+				.scriptLoader()
+				.evalScript('handleGetProfileCodeFromName', params)
+				.then((res: string) => {
+					const result = JSON.parse(res);
 
-     return result;
-    })
-    .catch((err: any) => {
-     throw err;
-    });
-  });
- }
+					return result;
+				})
+				.catch((err: any) => {
+					throw err;
+				});
+		});
+	}
 
- switchToVersionDocument(): Promise<any> {
-  this.log('switchToVersionDocument called');
+	switchToVersionDocument(): Promise<any> {
+		this.log('switchToVersionDocument called');
 
-  return this.ensureSession().then(() => {
-   return (window as any).leap
-    .scriptLoader()
-    .evalScript('handleSwitchToVersionDocument', {})
-    .then((res: string) => {
-     const result = JSON.parse(res);
+		return this.ensureSession().then(() => {
+			return (window as any).leap
+				.scriptLoader()
+				.evalScript('handleSwitchToVersionDocument', {})
+				.then((res: string) => {
+					const result = JSON.parse(res);
 
-     return result;
-    })
-    .catch((err: any) => {
-     throw err;
-    });
-  });
- }
+					return result;
+				})
+				.catch((err: any) => {
+					throw err;
+				});
+		});
+	}
 
- deleteAllPlatesInSeparationDoc(): Promise<any> {
-  this.log('deleteAllPlatesInSeparationDoc called');
+	deleteAllPlatesInSeparationDoc(): Promise<any> {
+		this.log('deleteAllPlatesInSeparationDoc called');
 
-  return this.ensureSession().then(() => {
-   return (window as any).leap
-    .scriptLoader()
-    .evalScript('handleDeleteAllPlatesInSeparationDocument', {})
-    .then((res: string) => {
-     const result = JSON.parse(res);
-     return result;
-    })
-    .catch((err: any) => {
-     throw err;
-    });
-  });
- }
+		return this.ensureSession().then(() => {
+			return (window as any).leap
+				.scriptLoader()
+				.evalScript('handleDeleteAllPlatesInSeparationDocument', {})
+				.then((res: string) => {
+					const result = JSON.parse(res);
+					return result;
+				})
+				.catch((err: any) => {
+					throw err;
+				});
+		});
+	}
 
- deleteUbChokeBlockerArtInSeparationDoc(): Promise<any> {
-  this.log('deleteUbChokeBlockerArtInSeparationDoc called');
+	deleteUbChokeBlockerArtInSeparationDoc(): Promise<any> {
+		this.log('deleteUbChokeBlockerArtInSeparationDoc called');
 
-  return this.ensureSession().then(() => {
-   return (window as any).leap
-    .scriptLoader()
-    .evalScript('handleDeleteUbChokeBlockerArtInSeparationDocument', {})
-    .then((res: string) => JSON.parse(res))
-    .catch((err: any) => {
-     throw err;
-    });
-  });
- }
+		return this.ensureSession().then(() => {
+			return (window as any).leap
+				.scriptLoader()
+				.evalScript('handleDeleteUbChokeBlockerArtInSeparationDocument', {})
+				.then((res: string) => JSON.parse(res))
+				.catch((err: any) => {
+					throw err;
+				});
+		});
+	}
 
- /*
-  * Record a standalone (non-LEAP) job on the SOURCE document's XMP, so the document itself carries
-  * the fact that a standalone separation exists for it — the same way a LEAP version document carries
-  * LEAPSeparationProfileData. Uses its own XMP field and never touches any LEAP field.
-  * Best-effort by the caller: a failure here must not fail the export.
-  */
- writeStandaloneJobToXmp(job: any, documentPath?: string): Promise<any> {
-  this.log('writeStandaloneJobToXmp called');
-  return this.ensureSession().then(() => {
-   const params = { job: job, documentPath: documentPath || '' };
-   return (window as any).leap
-    .scriptLoader()
-    .evalScript('handleWriteStandaloneJobToXmp', params)
-    .then((res: string) => JSON.parse(res));
-  });
- }
+	/*
+	 * Record a standalone (non-LEAP) job on the SOURCE document's XMP, so the document itself carries
+	 * the fact that a standalone separation exists for it — the same way a LEAP version document carries
+	 * LEAPSeparationProfileData. Uses its own XMP field and never touches any LEAP field.
+	 * Best-effort by the caller: a failure here must not fail the export.
+	 */
+	writeStandaloneJobToXmp(job: any, documentPath?: string): Promise<any> {
+		this.log('writeStandaloneJobToXmp called');
+		return this.ensureSession().then(() => {
+			const params = { job: job, documentPath: documentPath || '' };
+			return (window as any).leap
+				.scriptLoader()
+				.evalScript('handleWriteStandaloneJobToXmp', params)
+				.then((res: string) => JSON.parse(res));
+		});
+	}
 
- /*
-  * Is the active document saved to disk? Needed because getActiveDocumentPath() returns a NOTIONAL
-  * path for an unsaved document, so a non-empty path does not mean the file exists.
-  */
- isActiveDocumentSaved(): Promise<{ success: boolean; saved: boolean; documentPath?: string; error?: string }> {
-  return this.ensureSession().then(() => {
-   return (window as any).leap
-    .scriptLoader()
-    .evalScript('handleIsActiveDocumentSaved', {})
-    .then((res: string) => JSON.parse(res));
-  });
- }
+	/*
+	 * Is the active document saved to disk? Needed because getActiveDocumentPath() returns a NOTIONAL
+	 * path for an unsaved document, so a non-empty path does not mean the file exists.
+	 */
+	isActiveDocumentSaved(): Promise<{ success: boolean; saved: boolean; documentPath?: string; error?: string }> {
+		return this.ensureSession().then(() => {
+			return (window as any).leap
+				.scriptLoader()
+				.evalScript('handleIsActiveDocumentSaved', {})
+				.then((res: string) => JSON.parse(res));
+		});
+	}
 
- /* Standalone jobs recorded on a document; empty array for any document that has none. */
- readStandaloneJobsFromXmp(documentPath?: string): Promise<any> {
-  this.log('readStandaloneJobsFromXmp called');
-  return this.ensureSession().then(() => {
-   const params = { documentPath: documentPath || '' };
-   return (window as any).leap
-    .scriptLoader()
-    .evalScript('handleReadStandaloneJobsFromXmp', params)
-    .then((res: string) => JSON.parse(res));
-  });
- }
+	/* Standalone jobs recorded on a document; empty array for any document that has none. */
+	readStandaloneJobsFromXmp(documentPath?: string): Promise<any> {
+		this.log('readStandaloneJobsFromXmp called');
+		return this.ensureSession().then(() => {
+			const params = { documentPath: documentPath || '' };
+			return (window as any).leap
+				.scriptLoader()
+				.evalScript('handleReadStandaloneJobsFromXmp', params)
+				.then((res: string) => JSON.parse(res));
+		});
+	}
 
- openSeparationDocument(filePath: string): Promise<any> {
-  this.log('openSeparationDocument called for: ' + filePath);
+	openSeparationDocument(filePath: string): Promise<any> {
+		this.log('openSeparationDocument called for: ' + filePath);
 
-  return this.ensureSession().then(() => {
-   const params = { filePath: filePath };
-   return (window as any).leap
-    .scriptLoader()
-    .evalScript('handleOpenSeparationDocument', params)
-    .then((res: string) => {
-     const result = JSON.parse(res);
+		return this.ensureSession().then(() => {
+			const params = { filePath: filePath };
+			return (window as any).leap
+				.scriptLoader()
+				.evalScript('handleOpenSeparationDocument', params)
+				.then((res: string) => {
+					const result = JSON.parse(res);
 
-     return result;
-    })
-    .catch((err: any) => {
-     throw err;
-    });
-  });
- }
+					return result;
+				})
+				.catch((err: any) => {
+					throw err;
+				});
+		});
+	}
 
- private buildExportPathResolverScript(): string {
-  /*
-   * Values the user typed for tokens the document cannot supply (see setExportTokenOverrides).
-   * Injected into every export script so the path the Export window PREVIEWED is byte-for-byte the
-   * path the export writes to — same helpers, same overrides, same code.
-   */
-  const overridesLiteral = JSON.stringify(this.exportTokenOverrides || {});
-  return `
+	private buildExportPathResolverScript(): string {
+		/*
+		 * Values the user typed for tokens the document cannot supply (see setExportTokenOverrides).
+		 * Injected into every export script so the path the Export window PREVIEWED is byte-for-byte the
+		 * path the export writes to — same helpers, same overrides, same code.
+		 */
+		const overridesLiteral = JSON.stringify(this.exportTokenOverrides || {});
+		return `
 var EXPORT_TOKEN_OVERRIDES = ${overridesLiteral};
 /* Preview runs the real resolver but must not create folders on disk. */
 var EXPORT_PREVIEW_MODE = false;
@@ -2533,14 +2533,35 @@ function getExportJsonData(docFile) {
    );
    if (recordedJson) return recordedJson;
   }
-  var docPath = docFile.fsName || "";
-  if (docPath.indexOf("09 SEPARATIONS") === -1) return null;
-  var graphicFolder = docFile.parent;
-  var teamCodeFolder = graphicFolder.parent;
-  var leagueSepFolder = teamCodeFolder.parent;
-  var separationsFolder = leagueSepFolder.parent;
-  var rootFolder = separationsFolder.parent;
-  var leagueFolder = new Folder(rootFolder.fsName + "/01 TEAMOUTS/" + leagueSepFolder.name);
+  /*
+   * No sidecar: locate the job root as the PARENT of the "09 SEPARATIONS" ancestor (found by name,
+   * any depth) and the league from the document's own XMP batch row. The old fixed-depth walk
+   * mis-derived both for a separation written to a configured path.
+   */
+  var separationsAncestor = findSeparationsAncestor(docFile);
+  if (!separationsAncestor || !separationsAncestor.parent) return null;
+  var rootFolder = separationsAncestor.parent;
+  var leagueName = "";
+  try {
+   var metaForLeague = getExportXmpMetadata(app.activeDocument) || {};
+   var batchForLeague = normalizeExportBatchFields(metaForLeague.batchVariableSource || null);
+   leagueName = String(
+    findExportValueInObject(batchForLeague, "League_desc") ||
+    findExportValueInObject(batchForLeague, "League") || ""
+   );
+  } catch (eLeague) { }
+  if (!leagueName) {
+   /* Legacy layout only: …/09 SEPARATIONS/<league>/<team>/<graphic>/doc.ai -> league is the folder
+      directly under 09 SEPARATIONS on the document's path. */
+   try {
+    var probe = docFile.parent;
+    var below = null;
+    while (probe && probe.fsName !== separationsAncestor.fsName) { below = probe; probe = probe.parent; }
+    if (below) { leagueName = String(below.name || ""); try { leagueName = decodeURI(leagueName); } catch (eD) { } }
+   } catch (eProbe) { }
+  }
+  if (!leagueName) return null;
+  var leagueFolder = new Folder(rootFolder.fsName + "/01 TEAMOUTS/" + leagueName);
   if (!leagueFolder.exists) return null;
   return findAndReadJSONFile(getOriginalDocBaseName(docFile), leagueFolder);
  } catch (e) {
@@ -2605,9 +2626,9 @@ function getExportVariableContext(doc) {
   if (pathSidecar && (pathSidecar.teamCode || pathSidecar.league)) {
    if (pathSidecar.teamCode) teamCodeFromPath = String(pathSidecar.teamCode);
    if (pathSidecar.league) leagueFromPath = String(pathSidecar.league);
-  } else if ((docFile.fsName || "").indexOf("09 SEPARATIONS") !== -1) {
-   teamCodeFromPath = docFile.parent.parent.name;
-   leagueFromPath = docFile.parent.parent.parent.name;
+  } else {
+   /* No sidecar: the batch row (below) already carries League_desc / Lineup Org Code and is
+      appended to aliases with priority over these — so nothing is derived from folder names. */
   }
  } catch (e) {}
  setExportAlias(aliases, "Document Name", docName);
@@ -2767,27 +2788,46 @@ function readExportSeparationSidecar(docFile) {
  * The separation records separationsRoot in its sidecar, so fall back to that. Legacy documents still
  * inside the nested tree keep using the derived walk and are unaffected.
  */
+/*
+ * The "09 SEPARATIONS" folder a leading-slash export pattern is anchored to.
+ *
+ * Rule: a pattern starting with "/" ALWAYS lands inside 09 SEPARATIONS. So find that folder BY NAME
+ * on the document's own path — walk up until an ancestor is literally called "09 SEPARATIONS". No
+ * depth assumption at all: a separation at 09 SEPARATIONS/<league>/<team>/<graphic>/doc.ai and one at
+ * 09 SEPARATIONS/SEPS/doc.ai both resolve to the same anchor.
+ *
+ * The previous version counted four parents, which is only right for the legacy layout. For a
+ * separation written to a configured path it overshot to the folder ABOVE the job root and put
+ * PostScript / Print Guide / Distiller output outside the job entirely — while a document that
+ * happened to have a sidecar resolved correctly, so the same Export Settings produced two different
+ * locations on two machines.
+ *
+ * Order: sidecar (explicit record) -> named ancestor -> null. Never a fixed-depth walk.
+ */
+function findSeparationsAncestor(docFile) {
+ try {
+  var candidate = docFile ? docFile.parent : null;
+  var guard = 0;
+  while (candidate && guard < 24) {
+   guard++;
+   var name = String(candidate.name || "");
+   /* decodeURI: Folder.name is URI-encoded ("09%20SEPARATIONS"). */
+   try { name = decodeURI(name); } catch (eDecode) { }
+   if (name.toUpperCase() === "09 SEPARATIONS") return candidate;
+   candidate = candidate.parent;
+  }
+ } catch (e) { }
+ return null;
+}
+
 function getSeparationsFolderFromDocFile(docFile) {
  try {
-  /*
-   * RECORDED ROOT WINS. The walk below is not a "is it under 09 SEPARATIONS" test — it assumes an
-   * EXACT depth (09 SEPARATIONS/<league>/<team>/<graphic>/doc.ai) and blindly goes up four levels.
-   * A separation created at a configured path like "/SEPS/name.ai" is still inside 09 SEPARATIONS but
-   * only one level deep, so the walk overshoots and returns the folder ABOVE the job root — sending
-   * every root-relative export outside the job entirely. Checking the sidecar first avoids depending
-   * on depth at all.
-   */
   var sidecar = readExportSeparationSidecar(docFile);
   if (sidecar && sidecar.separationsRoot) {
    var recorded = new Folder(String(sidecar.separationsRoot));
    if (recorded.exists) return recorded;
   }
-  var docPath = docFile.fsName || "";
-  if (docPath.indexOf("09 SEPARATIONS") === -1) return null;
-  var graphicFolder = docFile.parent;
-  var teamCodeFolder = graphicFolder.parent;
-  var leagueSepFolder = teamCodeFolder.parent;
-  return leagueSepFolder.parent;
+  return findSeparationsAncestor(docFile);
  } catch (e) {
   return null;
  }
@@ -2827,14 +2867,21 @@ function buildExportDestinationFromResolvedPath(resolvedPath, defaultFile, exten
  }
 
  /*
-  * A leading "/" anchors at the 09 SEPARATIONS folder; anything else stays relative to the document's
-  * own folder, unchanged. getSeparationsFolderFromDocFile now resolves that anchor from the sidecar,
-  * so it is correct wherever the separation was created.
+  * A leading "/" means INSIDE 09 SEPARATIONS — always. The anchor is found by name on the document's
+  * path (sidecar first, then the ancestor literally called "09 SEPARATIONS"), never by counting
+  * folders. If the document is not inside a 09 SEPARATIONS tree at all, one is created next to it
+  * rather than silently dropping the export into the document's folder: the pattern promised
+  * 09 SEPARATIONS, so that is where the file goes, and the user can see it there.
+  * Anything without a leading "/" stays relative to the document's own folder, unchanged.
   */
  var basePath = defaultFile.parent.fsName;
  if (rootRelativeToSeparations) {
   var separationsFolder = getSeparationsFolderFromDocFile(defaultFile);
-  if (separationsFolder) basePath = separationsFolder.fsName;
+  if (separationsFolder) {
+   basePath = separationsFolder.fsName;
+  } else {
+   basePath = joinExportPath(defaultFile.parent.fsName, "09 SEPARATIONS");
+  }
  }
 
  var dirPath = dirParts.join("/");
@@ -2958,24 +3005,24 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
  return buildExportDestinationFromResolvedPath(resolvedPath, defaultFile, extension);
 }
 `;
- }
+	}
 
- /**
-  * Write the user-entered Control number and Version number into the active document before export,
-  * then SAVE. First export: the bracketed tokens [CONTROL] / [V#] are replaced in place. Repeat export:
-  * those tokens are already gone, so the dedicated text frames named CONTROL_NUMBER / VERSION_NUMBER
-  * are overwritten by name. Matching lowercases the frame name and loops every frame, so the names may
-  * be any case (CONTROL_NUMBER, Control_Number, …) and there may be more than one of each.
-  */
- updateControlAndVersionNumbers(controlNumber: string, versionNumber: string): Promise<any> {
-  this.log('updateControlAndVersionNumbers called');
-  const controlLiteral = JSON.stringify(String(controlNumber == null ? '' : controlNumber));
-  /* Auto-prefix "V" only when the entered version doesn't already start with V/v (e.g. "3" -> "V3", "V3" -> "V3"). */
-  const versionRaw = String(versionNumber == null ? '' : versionNumber).trim();
-  const versionValue = versionRaw !== '' && !/^v/i.test(versionRaw) ? 'V' + versionRaw : versionRaw;
-  const versionLiteral = JSON.stringify(versionValue);
-  return this.ensureSession().then(() => {
-   const script = `
+	/**
+	 * Write the user-entered Control number and Version number into the active document before export,
+	 * then SAVE. First export: the bracketed tokens [CONTROL] / [V#] are replaced in place. Repeat export:
+	 * those tokens are already gone, so the dedicated text frames named CONTROL_NUMBER / VERSION_NUMBER
+	 * are overwritten by name. Matching lowercases the frame name and loops every frame, so the names may
+	 * be any case (CONTROL_NUMBER, Control_Number, …) and there may be more than one of each.
+	 */
+	updateControlAndVersionNumbers(controlNumber: string, versionNumber: string): Promise<any> {
+		this.log('updateControlAndVersionNumbers called');
+		const controlLiteral = JSON.stringify(String(controlNumber == null ? '' : controlNumber));
+		/* Auto-prefix "V" only when the entered version doesn't already start with V/v (e.g. "3" -> "V3", "V3" -> "V3"). */
+		const versionRaw = String(versionNumber == null ? '' : versionNumber).trim();
+		const versionValue = versionRaw !== '' && !/^v/i.test(versionRaw) ? 'V' + versionRaw : versionRaw;
+		const versionLiteral = JSON.stringify(versionValue);
+		return this.ensureSession().then(() => {
+			const script = `
 (function() {
   try {
     if (!app.documents.length) {
@@ -3011,27 +3058,27 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
   }
 })();
 `;
-   return evalScript(script)
-    .then((res: any) => {
-     const str = typeof res === 'string' ? res : '';
-     try {
-      return str ? JSON.parse(str) : { success: false, error: 'Empty response from host' };
-     } catch (e) {
-      return { success: false, error: 'Invalid JSON response from host', raw: str };
-     }
-    });
-  });
- }
+			return evalScript(script)
+				.then((res: any) => {
+					const str = typeof res === 'string' ? res : '';
+					try {
+						return str ? JSON.parse(str) : { success: false, error: 'Empty response from host' };
+					} catch (e) {
+						return { success: false, error: 'Invalid JSON response from host', raw: str };
+					}
+				});
+		});
+	}
 
- /*
-  * Read the Control number and Version number back from the active document's text frames named
-  * CONTROL_NUMBER / VERSION_NUMBER (case-insensitive; also matches the spaced "CONTROL NUMBER").
-  * Used to pre-fill the Export modal on a repeat export. Returns { success, controlNumber, versionNumber }.
-  */
- getControlAndVersionNumbers(): Promise<any> {
-  this.log('getControlAndVersionNumbers called');
-  return this.ensureSession().then(() => {
-   const script = `
+	/*
+	 * Read the Control number and Version number back from the active document's text frames named
+	 * CONTROL_NUMBER / VERSION_NUMBER (case-insensitive; also matches the spaced "CONTROL NUMBER").
+	 * Used to pre-fill the Export modal on a repeat export. Returns { success, controlNumber, versionNumber }.
+	 */
+	getControlAndVersionNumbers(): Promise<any> {
+		this.log('getControlAndVersionNumbers called');
+		return this.ensureSession().then(() => {
+			const script = `
 (function() {
   try {
     if (!app.documents.length) {
@@ -3055,31 +3102,31 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
   }
 })();
 `;
-   return evalScript(script)
-    .then((res: any) => {
-     const str = typeof res === 'string' ? res : '';
-     try {
-      return str ? JSON.parse(str) : { success: false, error: 'Empty response from host' };
-     } catch (e) {
-      return { success: false, error: 'Invalid JSON response from host', raw: str };
-     }
-    });
-  });
- }
+			return evalScript(script)
+				.then((res: any) => {
+					const str = typeof res === 'string' ? res : '';
+					try {
+						return str ? JSON.parse(str) : { success: false, error: 'Empty response from host' };
+					} catch (e) {
+						return { success: false, error: 'Invalid JSON response from host', raw: str };
+					}
+				});
+		});
+	}
 
-/*
-  * Write the Plates-UI total color count into the sheet's [C#] tokens and any text frames named
-  * "TOTAL COLORS" (case-insensitive, one or more allowed). The count is supplied by the Plates UI
-  * (every non-removed plate: inks + White UB + Blocker) rather than derived from the raw
-  * SEPARATED_ART layers, and is pushed whenever the plates (re)load, regenerate, or a color is
-  * removed, so the number always matches what the user sees. First fill replaces the [C#] token;
-  * later updates overwrite the "TOTAL COLORS" frame(s) by name. Only saves when something changed.
-  */
- updateTotalColors(count: number): Promise<any> {
-  this.log('updateTotalColors called');
-  const countLiteral = JSON.stringify(String(count == null ? '' : count));
-  return this.ensureSession().then(() => {
-   const script = `
+	/*
+		* Write the Plates-UI total color count into the sheet's [C#] tokens and any text frames named
+		* "TOTAL COLORS" (case-insensitive, one or more allowed). The count is supplied by the Plates UI
+		* (every non-removed plate: inks + White UB + Blocker) rather than derived from the raw
+		* SEPARATED_ART layers, and is pushed whenever the plates (re)load, regenerate, or a color is
+		* removed, so the number always matches what the user sees. First fill replaces the [C#] token;
+		* later updates overwrite the "TOTAL COLORS" frame(s) by name. Only saves when something changed.
+		*/
+	updateTotalColors(count: number): Promise<any> {
+		this.log('updateTotalColors called');
+		const countLiteral = JSON.stringify(String(count == null ? '' : count));
+		return this.ensureSession().then(() => {
+			const script = `
 (function() {
   try {
     if (!app.documents.length) {
@@ -3112,66 +3159,66 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
   }
 })();
 `;
-   return evalScript(script)
-    .then((res: any) => {
-     const str = typeof res === 'string' ? res : '';
-     try {
-      return str ? JSON.parse(str) : { success: false, error: 'Empty response from host' };
-     } catch (e) {
-      return { success: false, error: 'Invalid JSON response from host', raw: str };
-     }
-    });
-  });
- }
+			return evalScript(script)
+				.then((res: any) => {
+					const str = typeof res === 'string' ? res : '';
+					try {
+						return str ? JSON.parse(str) : { success: false, error: 'Empty response from host' };
+					} catch (e) {
+						return { success: false, error: 'Invalid JSON response from host', raw: str };
+					}
+				});
+		});
+	}
 
-  /*
-   * Token values typed by the user in the Export window, for tokens no document source can supply.
-   * Held on the service (not threaded through every export signature) so buildExportPathResolverScript
-   * can inject them into EVERY export script — preview and real export resolve identically.
-   */
- private exportTokenOverrides: { [token: string]: string } = {};
+	/*
+	 * Token values typed by the user in the Export window, for tokens no document source can supply.
+	 * Held on the service (not threaded through every export signature) so buildExportPathResolverScript
+	 * can inject them into EVERY export script — preview and real export resolve identically.
+	 */
+	private exportTokenOverrides: { [token: string]: string } = {};
 
- setExportTokenOverrides(overrides: { [token: string]: string } | null | undefined): void {
-  const clean: { [token: string]: string } = {};
-  if (overrides) {
-   Object.keys(overrides).forEach((key) => {
-    const value = overrides[key] == null ? '' : String(overrides[key]).trim();
-    if (key && value !== '') clean[key] = value;
-   });
-  }
-  this.exportTokenOverrides = clean;
-  this.log('setExportTokenOverrides: ' + Object.keys(clean).length + ' override(s)');
- }
+	setExportTokenOverrides(overrides: { [token: string]: string } | null | undefined): void {
+		const clean: { [token: string]: string } = {};
+		if (overrides) {
+			Object.keys(overrides).forEach((key) => {
+				const value = overrides[key] == null ? '' : String(overrides[key]).trim();
+				if (key && value !== '') clean[key] = value;
+			});
+		}
+		this.exportTokenOverrides = clean;
+		this.log('setExportTokenOverrides: ' + Object.keys(clean).length + ' override(s)');
+	}
 
- clearExportTokenOverrides(): void {
-  this.exportTokenOverrides = {};
- }
+	clearExportTokenOverrides(): void {
+		this.exportTokenOverrides = {};
+	}
 
- /*
-  * Where each enabled export WOULD write, plus the tokens that resolve to nothing. Shown in the
-  * Export window so an unresolved [Token] is caught BEFORE it becomes a folder literally named
-  * "[League]" — the resolver keeps unresolved tokens as literal text (by design, so nothing is
-  * silently mis-filed), which is invisible until you go looking for the file.
-  */
- previewExportDestinations(): Promise<{
-  success: boolean;
-  items?: Array<{
-   key: string;
-   label: string;
-   template: string;
-   usesDefault: boolean;
-   path: string;
-   fileName: string;
-   unresolvedTokens: string[];
-   error?: string;
-  }>;
-  error?: string;
- }> {
-  this.log('previewExportDestinations called');
+	/*
+	 * Where each enabled export WOULD write, plus the tokens that resolve to nothing. Shown in the
+	 * Export window so an unresolved [Token] is caught BEFORE it becomes a folder literally named
+	 * "[League]" — the resolver keeps unresolved tokens as literal text (by design, so nothing is
+	 * silently mis-filed), which is invisible until you go looking for the file.
+	 */
+	previewExportDestinations(): Promise<{
+		success: boolean;
+		items?: Array<{
+			key: string;
+			label: string;
+			template: string;
+			usesDefault: boolean;
+			path: string;
+			fileName: string;
+			unresolvedTokens: string[];
+			error?: string;
+		}>;
+		error?: string;
+	}> {
+		this.log('previewExportDestinations called');
 
-  return this.ensureSession().then(() => {
-   const exportPathResolverCode = this.buildExportPathResolverScript();
-   const script = `
+		return this.ensureSession().then(() => {
+			const exportPathResolverCode = this.buildExportPathResolverScript();
+			const script = `
 (function() {
   ${exportPathResolverCode}
   try {
@@ -3203,27 +3250,27 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
   }
 })();`;
 
-   return evalScript(script)
-    .then((res: any) => {
-     try {
-      return JSON.parse(res);
-     } catch (parseErr) {
-      return { success: false, error: 'Could not read the export path preview.' };
-     }
-    })
-    .catch((err: any) => ({
-     success: false,
-     error: (err && err.message) || 'Could not read the export path preview.'
-    }));
-  });
- }
+			return evalScript(script)
+				.then((res: any) => {
+					try {
+						return JSON.parse(res);
+					} catch (parseErr) {
+						return { success: false, error: 'Could not read the export path preview.' };
+					}
+				})
+				.catch((err: any) => ({
+					success: false,
+					error: (err && err.message) || 'Could not read the export path preview.'
+				}));
+		});
+	}
 
-  exportPrintGuidePDF(): Promise<any> {
-  this.log('exportPrintGuidePDF called');
+	exportPrintGuidePDF(): Promise<any> {
+		this.log('exportPrintGuidePDF called');
 
-  return this.ensureSession().then(() => {
-   const exportPathResolverCode = this.buildExportPathResolverScript();
-   const script = `
+		return this.ensureSession().then(() => {
+			const exportPathResolverCode = this.buildExportPathResolverScript();
+			const script = `
 (function() {
   ${exportPathResolverCode}
   try {
@@ -3265,6 +3312,7 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
     var docName = docFile.name.replace(/\\.[^\\.]+$/, "");
     var defaultDestFile = new File(docFolder.fsName + "/" + docName + "_PrintGuide.pdf");
     var destFile = resolveExportFilePath("printGuideFilePath", defaultDestFile, doc, "pdf");
+    try { appendLeapSepLog("[EXPORT] Print Guide resolved -> " + destFile.fsName); } catch (ePgLog) { }
 
     var pdfOptions = new PDFSaveOptions();
     pdfOptions.artboardRange = (pgArtboardIndex + 1).toString(); // 1-based index as string
@@ -3291,78 +3339,78 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
 })();
 `;
 
-   return evalScript(script)
-    .then((res: any) => {
-     const str = typeof res === 'string' ? res : '';
-     try {
-      return str ? JSON.parse(str) : { success: false, error: 'Empty response from host' };
-     } catch (e) {
-      return { success: false, error: 'Invalid JSON response from host', raw: str };
-     }
-    })
-    .catch((err: any) => {
-     throw err;
-    });
-  });
- }
+			return evalScript(script)
+				.then((res: any) => {
+					const str = typeof res === 'string' ? res : '';
+					try {
+						return str ? JSON.parse(str) : { success: false, error: 'Empty response from host' };
+					} catch (e) {
+						return { success: false, error: 'Invalid JSON response from host', raw: str };
+					}
+				})
+				.catch((err: any) => {
+					throw err;
+				});
+		});
+	}
 
- /** Remove swatches not used in the given or active document (Illustrator action set). */
- removeUnusedSwatches(
-  documentPath?: string
- ): Promise<{ success: boolean; message?: string; error?: string }> {
-  this.log(
-   'removeUnusedSwatches called' + (documentPath ? ' doc=' + documentPath : '')
-  );
-  this.leapSepsLog.logProcess('removeUnusedSwatches start', {
-   doc: documentPath ? documentPath.split('/').pop() : '(active)'
-  });
+	/** Remove swatches not used in the given or active document (Illustrator action set). */
+	removeUnusedSwatches(
+		documentPath?: string
+	): Promise<{ success: boolean; message?: string; error?: string }> {
+		this.log(
+			'removeUnusedSwatches called' + (documentPath ? ' doc=' + documentPath : '')
+		);
+		this.leapSepsLog.logProcess('removeUnusedSwatches start', {
+			doc: documentPath ? documentPath.split('/').pop() : '(active)'
+		});
 
-  return this.ensureSession().then(() => {
-   const script = this.buildRemoveUnusedSwatchesScript(documentPath);
-   return evalScript(script)
-    .then((res: unknown) => {
-     const str = typeof res === 'string' ? res : '';
-     const result = str
-      ? JSON.parse(str)
-      : { success: false, error: 'No result from removeUnusedSwatches' };
+		return this.ensureSession().then(() => {
+			const script = this.buildRemoveUnusedSwatchesScript(documentPath);
+			return evalScript(script)
+				.then((res: unknown) => {
+					const str = typeof res === 'string' ? res : '';
+					const result = str
+						? JSON.parse(str)
+						: { success: false, error: 'No result from removeUnusedSwatches' };
 
-     if (result?.success) {
-      console.log('[removeUnusedSwatches]', result.message || 'Unused swatches removed');
-     } else {
-      console.warn('[removeUnusedSwatches]', result?.error || 'Failed');
-     }
-     return result;
-    })
-    .catch((err: any) => {
-     const message = err?.message || String(err);
-     console.error('[removeUnusedSwatches]', message);
-     return { success: false, error: message };
-    });
-  });
- }
+					if (result?.success) {
+						console.log('[removeUnusedSwatches]', result.message || 'Unused swatches removed');
+					} else {
+						console.warn('[removeUnusedSwatches]', result?.error || 'Failed');
+					}
+					return result;
+				})
+				.catch((err: any) => {
+					const message = err?.message || String(err);
+					console.error('[removeUnusedSwatches]', message);
+					return { success: false, error: message };
+				});
+		});
+	}
 
- /** Check print preset, PPD, and optional document prerequisites for PostScript export. */
- checkPostscriptReadiness(options?: { requireDocument?: boolean }): Promise<any> {
-  const requireDocument = options?.requireDocument === true;
-  return this.ensureSession().then(() => {
-   const script = this.buildCheckPostscriptReadinessScript(requireDocument);
-   return evalScript(script)
-     .then((res: unknown) => {
-      const str = typeof res === 'string' ? res : '';
-      return str ? JSON.parse(str) : { success: false, ready: false, issues: [] };
-     })
-     .catch((err: any) => ({
-      success: false,
-      ready: false,
-      issues: [],
-      error: err?.message || String(err)
-     }));
-  });
- }
+	/** Check print preset, PPD, and optional document prerequisites for PostScript export. */
+	checkPostscriptReadiness(options?: { requireDocument?: boolean }): Promise<any> {
+		const requireDocument = options?.requireDocument === true;
+		return this.ensureSession().then(() => {
+			const script = this.buildCheckPostscriptReadinessScript(requireDocument);
+			return evalScript(script)
+				.then((res: unknown) => {
+					const str = typeof res === 'string' ? res : '';
+					return str ? JSON.parse(str) : { success: false, ready: false, issues: [] };
+				})
+				.catch((err: any) => ({
+					success: false,
+					ready: false,
+					issues: [],
+					error: err?.message || String(err)
+				}));
+		});
+	}
 
- private buildCheckPostscriptReadinessScript(requireDocument: boolean): string {
-  const requireDocumentLiteral = requireDocument ? 'true' : 'false';
-  return `
+	private buildCheckPostscriptReadinessScript(requireDocument: boolean): string {
+		const requireDocumentLiteral = requireDocument ? 'true' : 'false';
+		return `
 (function() {
   var PRESET_NAME = 'LEAP_SEPS_POSTSCRIPT';
   var requireDocument = ${requireDocumentLiteral};
@@ -3455,24 +3503,24 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
   });
 })();
 `;
- }
+	}
 
- /** Export GRID artboard to PostScript (postscriptFilePath). Does not run Distiller. */
- exportPostscript(inks: string[]): Promise<any> {
-  return this.exportGridPostscript(
-   Array.isArray(inks) ? inks : [],
-   'postscriptFilePath',
-   '.ps',
-   'exportPostscript',
-   'PostScript exported successfully'
-  );
- }
+	/** Export GRID artboard to PostScript (postscriptFilePath). Does not run Distiller. */
+	exportPostscript(inks: string[]): Promise<any> {
+		return this.exportGridPostscript(
+			Array.isArray(inks) ? inks : [],
+			'postscriptFilePath',
+			'.ps',
+			'exportPostscript',
+			'PostScript exported successfully'
+		);
+	}
 
- /** Resolve postscriptFilePath for the active document (does not export). */
- resolvePostscriptExportPath(): Promise<{ success: boolean; filePath?: string; error?: string }> {
-  return this.ensureSession().then(() => {
-   const exportPathResolverCode = this.buildExportPathResolverScript();
-   const script = `
+	/** Resolve postscriptFilePath for the active document (does not export). */
+	resolvePostscriptExportPath(): Promise<{ success: boolean; filePath?: string; error?: string }> {
+		return this.ensureSession().then(() => {
+			const exportPathResolverCode = this.buildExportPathResolverScript();
+			const script = `
 (function() {
   ${exportPathResolverCode}
   try {
@@ -3498,55 +3546,55 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
   }
 })();
 `;
-   return evalScript(script).then((res: unknown) => {
-    const str = typeof res === 'string' ? res : '';
-    try {
-     return str ? JSON.parse(str) : { success: false, error: 'Empty response from host' };
-    } catch {
-     return { success: false, error: 'Invalid JSON response from host', raw: str };
-    }
-   });
-  });
- }
+			return evalScript(script).then((res: unknown) => {
+				const str = typeof res === 'string' ? res : '';
+				try {
+					return str ? JSON.parse(str) : { success: false, error: 'Empty response from host' };
+				} catch {
+					return { success: false, error: 'Invalid JSON response from host', raw: str };
+				}
+			});
+		});
+	}
 
- /** Check whether the resolved PostScript export file already exists on disk. */
- findExistingPostscriptExportFile(): Promise<{
-  exists: boolean;
-  filePath?: string;
-  error?: string;
- }> {
-  return this.resolvePostscriptExportPath().then((resolved) => {
-   if (!resolved?.success || !resolved.filePath) {
-    return {
-     exists: false,
-     error: resolved?.error || 'Could not resolve PostScript export path'
-    };
-   }
-   try {
-    const fs = (window as any).cep_node?.require?.('fs');
-    if (!fs) {
-     return { exists: false, filePath: resolved.filePath, error: 'CEP filesystem is unavailable' };
-    }
-    return { exists: fs.existsSync(resolved.filePath), filePath: resolved.filePath };
-   } catch (e: any) {
-    return {
-     exists: false,
-     filePath: resolved.filePath,
-     error: e?.message || String(e)
-    };
-   }
-  });
- }
+	/** Check whether the resolved PostScript export file already exists on disk. */
+	findExistingPostscriptExportFile(): Promise<{
+		exists: boolean;
+		filePath?: string;
+		error?: string;
+	}> {
+		return this.resolvePostscriptExportPath().then((resolved) => {
+			if (!resolved?.success || !resolved.filePath) {
+				return {
+					exists: false,
+					error: resolved?.error || 'Could not resolve PostScript export path'
+				};
+			}
+			try {
+				const fs = (window as any).cep_node?.require?.('fs');
+				if (!fs) {
+					return { exists: false, filePath: resolved.filePath, error: 'CEP filesystem is unavailable' };
+				}
+				return { exists: fs.existsSync(resolved.filePath), filePath: resolved.filePath };
+			} catch (e: any) {
+				return {
+					exists: false,
+					filePath: resolved.filePath,
+					error: e?.message || String(e)
+				};
+			}
+		});
+	}
 
- /** Resolve separationPreviewFilePath for the active document (PDF only; does not export). */
- resolveSeparationsPreviewExportPath(): Promise<{
-  success: boolean;
-  filePath?: string;
-  error?: string;
- }> {
-  return this.ensureSession().then(() => {
-   const exportPathResolverCode = this.buildExportPathResolverScript();
-   const script = `
+	/** Resolve separationPreviewFilePath for the active document (PDF only; does not export). */
+	resolveSeparationsPreviewExportPath(): Promise<{
+		success: boolean;
+		filePath?: string;
+		error?: string;
+	}> {
+		return this.ensureSession().then(() => {
+			const exportPathResolverCode = this.buildExportPathResolverScript();
+			const script = `
 (function() {
   ${exportPathResolverCode}
   try {
@@ -3569,335 +3617,335 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
   }
 })();
 `;
-   return evalScript(script).then((res: unknown) => {
-    const str = typeof res === 'string' ? res : '';
-    try {
-     return str ? JSON.parse(str) : { success: false, error: 'Empty response from host' };
-    } catch {
-     return { success: false, error: 'Invalid JSON response from host', raw: str };
-    }
-   });
-  });
- }
+			return evalScript(script).then((res: unknown) => {
+				const str = typeof res === 'string' ? res : '';
+				try {
+					return str ? JSON.parse(str) : { success: false, error: 'Empty response from host' };
+				} catch {
+					return { success: false, error: 'Invalid JSON response from host', raw: str };
+				}
+			});
+		});
+	}
 
- private companionPdfPathForPs(psPath: string): string {
-  if (/\.ps$/i.test(psPath)) {
-   return psPath.replace(/\.ps$/i, '.pdf');
-  }
-  return psPath + '.pdf';
- }
+	private companionPdfPathForPs(psPath: string): string {
+		if (/\.ps$/i.test(psPath)) {
+			return psPath.replace(/\.ps$/i, '.pdf');
+		}
+		return psPath + '.pdf';
+	}
 
- /** Find PDF Distiller wrote (checks Postscript folder and Separation Preview folder). */
- private findDistillerPdfPath(
-  sourcePsPath: string,
-  targetPdfPath: string,
-  distillerStartedAtMs: number
- ): string | null {
-  try {
-   const req = (window as any).cep_node?.require;
-   if (!req) return null;
-   const fs = req('fs');
-   const path = req('path');
-   const minMtime = distillerStartedAtMs - 3000;
-   const sourceDir = path.dirname(sourcePsPath);
-   const targetDir = path.dirname(targetPdfPath);
-   const baseName = path.basename(sourcePsPath, path.extname(sourcePsPath));
+	/** Find PDF Distiller wrote (checks Postscript folder and Separation Preview folder). */
+	private findDistillerPdfPath(
+		sourcePsPath: string,
+		targetPdfPath: string,
+		distillerStartedAtMs: number
+	): string | null {
+		try {
+			const req = (window as any).cep_node?.require;
+			if (!req) return null;
+			const fs = req('fs');
+			const path = req('path');
+			const minMtime = distillerStartedAtMs - 3000;
+			const sourceDir = path.dirname(sourcePsPath);
+			const targetDir = path.dirname(targetPdfPath);
+			const baseName = path.basename(sourcePsPath, path.extname(sourcePsPath));
 
-   const isFreshPdf = (filePath: string): boolean => {
-    try {
-     if (!fs.existsSync(filePath)) return false;
-     const stat = fs.statSync(filePath);
-     return stat.isFile() && stat.size > 0 && stat.mtimeMs >= minMtime;
-    } catch (_) {
-     return false;
-    }
-   };
+			const isFreshPdf = (filePath: string): boolean => {
+				try {
+					if (!fs.existsSync(filePath)) return false;
+					const stat = fs.statSync(filePath);
+					return stat.isFile() && stat.size > 0 && stat.mtimeMs >= minMtime;
+				} catch (_) {
+					return false;
+				}
+			};
 
-   const dirs: string[] = [];
-   const addDir = (dir: string) => {
-    if (!dir || dirs.indexOf(dir) !== -1) return;
-    dirs.push(dir);
-   };
-   addDir(sourceDir);
-   addDir(targetDir);
+			const dirs: string[] = [];
+			const addDir = (dir: string) => {
+				if (!dir || dirs.indexOf(dir) !== -1) return;
+				dirs.push(dir);
+			};
+			addDir(sourceDir);
+			addDir(targetDir);
 
-   const explicitCandidates: string[] = [
-    targetPdfPath,
-    this.companionPdfPathForPs(sourcePsPath)
-   ];
-   for (let d = 0; d < dirs.length; d++) {
-    explicitCandidates.push(path.join(dirs[d], baseName.replace(/_PS$/i, '') + '.pdf'));
-    explicitCandidates.push(path.join(dirs[d], baseName + '.pdf'));
-    explicitCandidates.push(path.join(dirs[d], path.basename(targetPdfPath)));
-   }
+			const explicitCandidates: string[] = [
+				targetPdfPath,
+				this.companionPdfPathForPs(sourcePsPath)
+			];
+			for (let d = 0; d < dirs.length; d++) {
+				explicitCandidates.push(path.join(dirs[d], baseName.replace(/_PS$/i, '') + '.pdf'));
+				explicitCandidates.push(path.join(dirs[d], baseName + '.pdf'));
+				explicitCandidates.push(path.join(dirs[d], path.basename(targetPdfPath)));
+			}
 
-   for (let i = 0; i < explicitCandidates.length; i++) {
-    if (isFreshPdf(explicitCandidates[i])) {
-     return explicitCandidates[i];
-    }
-   }
+			for (let i = 0; i < explicitCandidates.length; i++) {
+				if (isFreshPdf(explicitCandidates[i])) {
+					return explicitCandidates[i];
+				}
+			}
 
-   let newestPath: string | null = null;
-   let newestMtime = 0;
-   for (let d = 0; d < dirs.length; d++) {
-    let entries: string[] = [];
-    try {
-     entries = fs.readdirSync(dirs[d]);
-    } catch (_) {
-     continue;
-    }
-    for (let i = 0; i < entries.length; i++) {
-     const name = entries[i];
-     if (!/\.pdf$/i.test(name)) continue;
-     /*
-      * Only accept the Distiller output, which shares the source .ps base name (e.g. "..._Seps.pdf").
-      * A blind "newest PDF" scan could otherwise grab an UNRELATED fresh PDF in the same folder — e.g.
-      * the Print Guide "..._PGN.pdf" — and move/rename it to the seps-preview PDF, destroying the Print
-      * Guide. This is exactly why exporting into the same /SEPS/ folder made the Print Guide disappear.
-      */
-     const nameBase = path.basename(name, path.extname(name));
-     const expectedBaseNoPs = baseName.replace(/_PS$/i, '');
-     const targetBase = path.basename(targetPdfPath, path.extname(targetPdfPath));
-     if (nameBase !== baseName && nameBase !== expectedBaseNoPs && nameBase !== targetBase) continue;
-     const fullPath = path.join(dirs[d], name);
-     try {
-      const stat = fs.statSync(fullPath);
-      if (!stat.isFile() || stat.size <= 0 || stat.mtimeMs < minMtime) continue;
-      if (stat.mtimeMs > newestMtime) {
-       newestMtime = stat.mtimeMs;
-       newestPath = fullPath;
-      }
-     } catch (_) { }
-    }
-   }
-   return newestPath;
-  } catch (e: any) {
-   console.warn('[findDistillerPdfPath] Error:', e?.message || e);
-   return null;
-  }
- }
+			let newestPath: string | null = null;
+			let newestMtime = 0;
+			for (let d = 0; d < dirs.length; d++) {
+				let entries: string[] = [];
+				try {
+					entries = fs.readdirSync(dirs[d]);
+				} catch (_) {
+					continue;
+				}
+				for (let i = 0; i < entries.length; i++) {
+					const name = entries[i];
+					if (!/\.pdf$/i.test(name)) continue;
+					/*
+					 * Only accept the Distiller output, which shares the source .ps base name (e.g. "..._Seps.pdf").
+					 * A blind "newest PDF" scan could otherwise grab an UNRELATED fresh PDF in the same folder — e.g.
+					 * the Print Guide "..._PGN.pdf" — and move/rename it to the seps-preview PDF, destroying the Print
+					 * Guide. This is exactly why exporting into the same /SEPS/ folder made the Print Guide disappear.
+					 */
+					const nameBase = path.basename(name, path.extname(name));
+					const expectedBaseNoPs = baseName.replace(/_PS$/i, '');
+					const targetBase = path.basename(targetPdfPath, path.extname(targetPdfPath));
+					if (nameBase !== baseName && nameBase !== expectedBaseNoPs && nameBase !== targetBase) continue;
+					const fullPath = path.join(dirs[d], name);
+					try {
+						const stat = fs.statSync(fullPath);
+						if (!stat.isFile() || stat.size <= 0 || stat.mtimeMs < minMtime) continue;
+						if (stat.mtimeMs > newestMtime) {
+							newestMtime = stat.mtimeMs;
+							newestPath = fullPath;
+						}
+					} catch (_) { }
+				}
+			}
+			return newestPath;
+		} catch (e: any) {
+			console.warn('[findDistillerPdfPath] Error:', e?.message || e);
+			return null;
+		}
+	}
 
- private delayMs(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
- }
+	private delayMs(ms: number): Promise<void> {
+		return new Promise((resolve) => setTimeout(resolve, ms));
+	}
 
- /** Move a file (rename); falls back to copy + delete source if cross-volume. */
- private moveFileOnDisk(fs: any, pathModule: any, fromPath: string, toPath: string): void {
-  if (pathModule.resolve(fromPath) === pathModule.resolve(toPath)) return;
-  if (fs.existsSync(toPath)) {
-   fs.unlinkSync(toPath);
-  }
-  try {
-   fs.renameSync(fromPath, toPath);
-  } catch (_) {
-   fs.copyFileSync(fromPath, toPath);
-   fs.unlinkSync(fromPath);
-  }
- }
+	/** Move a file (rename); falls back to copy + delete source if cross-volume. */
+	private moveFileOnDisk(fs: any, pathModule: any, fromPath: string, toPath: string): void {
+		if (pathModule.resolve(fromPath) === pathModule.resolve(toPath)) return;
+		if (fs.existsSync(toPath)) {
+			fs.unlinkSync(toPath);
+		}
+		try {
+			fs.renameSync(fromPath, toPath);
+		} catch (_) {
+			fs.copyFileSync(fromPath, toPath);
+			fs.unlinkSync(fromPath);
+		}
+	}
 
- /**
-  * Distiller writes PDF beside the PostScript file; move it to separationPreviewFilePath (PDF only).
-  */
- private async placeDistillerPdfAtSeparationsPreviewPath(
-  sourcePsPath: string,
-  targetPdfPath: string,
-  distillerStartedAtMs: number,
-  timeoutMs = 300000,
-  intervalMs = 2000
- ): Promise<{ success: boolean; pdfPath?: string; distillerPdfPath?: string; error?: string }> {
-  try {
-   const req = (window as any).cep_node?.require;
-   if (!req) {
-    return { success: false, error: 'CEP node runtime is unavailable' };
-   }
-   const fs = req('fs');
-   const path = req('path');
+	/**
+	 * Distiller writes PDF beside the PostScript file; move it to separationPreviewFilePath (PDF only).
+	 */
+	private async placeDistillerPdfAtSeparationsPreviewPath(
+		sourcePsPath: string,
+		targetPdfPath: string,
+		distillerStartedAtMs: number,
+		timeoutMs = 300000,
+		intervalMs = 2000
+	): Promise<{ success: boolean; pdfPath?: string; distillerPdfPath?: string; error?: string }> {
+		try {
+			const req = (window as any).cep_node?.require;
+			if (!req) {
+				return { success: false, error: 'CEP node runtime is unavailable' };
+			}
+			const fs = req('fs');
+			const path = req('path');
 
-   console.log(
-    '[placeDistillerPdfAtSeparationsPreviewPath] Waiting for Distiller PDF in:',
-    path.dirname(sourcePsPath),
-    'or',
-    path.dirname(targetPdfPath),
-    '| target:',
-    targetPdfPath
-   );
+			console.log(
+				'[placeDistillerPdfAtSeparationsPreviewPath] Waiting for Distiller PDF in:',
+				path.dirname(sourcePsPath),
+				'or',
+				path.dirname(targetPdfPath),
+				'| target:',
+				targetPdfPath
+			);
 
-   let distillerPdfPath: string | null = null;
-   const deadline = distillerStartedAtMs + timeoutMs;
-   let pollCount = 0;
-   while (Date.now() < deadline) {
-    pollCount++;
-    distillerPdfPath = this.findDistillerPdfPath(sourcePsPath, targetPdfPath, distillerStartedAtMs);
-    if (distillerPdfPath) break;
-    if (pollCount === 1 || pollCount % 5 === 0) {
-     console.log(
-      '[placeDistillerPdfAtSeparationsPreviewPath] Still waiting for Distiller PDF (poll',
-      pollCount + ')...'
-     );
-    }
-    await this.delayMs(intervalMs);
-   }
+			let distillerPdfPath: string | null = null;
+			const deadline = distillerStartedAtMs + timeoutMs;
+			let pollCount = 0;
+			while (Date.now() < deadline) {
+				pollCount++;
+				distillerPdfPath = this.findDistillerPdfPath(sourcePsPath, targetPdfPath, distillerStartedAtMs);
+				if (distillerPdfPath) break;
+				if (pollCount === 1 || pollCount % 5 === 0) {
+					console.log(
+						'[placeDistillerPdfAtSeparationsPreviewPath] Still waiting for Distiller PDF (poll',
+						pollCount + ')...'
+					);
+				}
+				await this.delayMs(intervalMs);
+			}
 
-   if (!distillerPdfPath) {
-    return {
-     success: false,
-     error:
-      'Timed out waiting for Distiller PDF in folder: ' +
-      path.dirname(sourcePsPath) +
-      ' (expected a new .pdf after processing ' +
-      path.basename(sourcePsPath) +
-      ')'
-    };
-   }
+			if (!distillerPdfPath) {
+				return {
+					success: false,
+					error:
+						'Timed out waiting for Distiller PDF in folder: ' +
+						path.dirname(sourcePsPath) +
+						' (expected a new .pdf after processing ' +
+						path.basename(sourcePsPath) +
+						')'
+				};
+			}
 
-   const targetDir = path.dirname(targetPdfPath);
-   if (!fs.existsSync(targetDir)) {
-    fs.mkdirSync(targetDir, { recursive: true });
-   }
+			const targetDir = path.dirname(targetPdfPath);
+			if (!fs.existsSync(targetDir)) {
+				fs.mkdirSync(targetDir, { recursive: true });
+			}
 
-   if (path.resolve(distillerPdfPath) !== path.resolve(targetPdfPath)) {
-    this.moveFileOnDisk(fs, path, distillerPdfPath, targetPdfPath);
-    console.log(
-     '[placeDistillerPdfAtSeparationsPreviewPath] Moved PDF:',
-     distillerPdfPath,
-     '→',
-     targetPdfPath
-    );
-   } else {
-    console.log(
-     '[placeDistillerPdfAtSeparationsPreviewPath] PDF already at Separation Preview path:',
-     targetPdfPath
-    );
-   }
+			if (path.resolve(distillerPdfPath) !== path.resolve(targetPdfPath)) {
+				this.moveFileOnDisk(fs, path, distillerPdfPath, targetPdfPath);
+				console.log(
+					'[placeDistillerPdfAtSeparationsPreviewPath] Moved PDF:',
+					distillerPdfPath,
+					'→',
+					targetPdfPath
+				);
+			} else {
+				console.log(
+					'[placeDistillerPdfAtSeparationsPreviewPath] PDF already at Separation Preview path:',
+					targetPdfPath
+				);
+			}
 
-   // Remove duplicate PDF left in Postscript folder after move (Distiller output beside .ps)
-   const postscriptFolderPdf = this.companionPdfPathForPs(sourcePsPath);
-   if (
-    fs.existsSync(postscriptFolderPdf) &&
-    path.resolve(postscriptFolderPdf) !== path.resolve(targetPdfPath)
-   ) {
-    try {
-     fs.unlinkSync(postscriptFolderPdf);
-     console.log(
-      '[placeDistillerPdfAtSeparationsPreviewPath] Removed duplicate PDF from Postscript folder:',
-      postscriptFolderPdf
-     );
-    } catch (_) { }
-   }
+			// Remove duplicate PDF left in Postscript folder after move (Distiller output beside .ps)
+			const postscriptFolderPdf = this.companionPdfPathForPs(sourcePsPath);
+			if (
+				fs.existsSync(postscriptFolderPdf) &&
+				path.resolve(postscriptFolderPdf) !== path.resolve(targetPdfPath)
+			) {
+				try {
+					fs.unlinkSync(postscriptFolderPdf);
+					console.log(
+						'[placeDistillerPdfAtSeparationsPreviewPath] Removed duplicate PDF from Postscript folder:',
+						postscriptFolderPdf
+					);
+				} catch (_) { }
+			}
 
-   // Remove legacy .ps mistakenly placed at Separation Preview path by older builds
-   const legacyPsAtPreview = /\.pdf$/i.test(targetPdfPath)
-    ? targetPdfPath.replace(/\.pdf$/i, '.ps')
-    : targetPdfPath + '.ps';
-   if (
-    fs.existsSync(legacyPsAtPreview) &&
-    path.resolve(legacyPsAtPreview) !== path.resolve(sourcePsPath)
-   ) {
-    try {
-     fs.unlinkSync(legacyPsAtPreview);
-    } catch (_) { }
-   }
+			// Remove legacy .ps mistakenly placed at Separation Preview path by older builds
+			const legacyPsAtPreview = /\.pdf$/i.test(targetPdfPath)
+				? targetPdfPath.replace(/\.pdf$/i, '.ps')
+				: targetPdfPath + '.ps';
+			if (
+				fs.existsSync(legacyPsAtPreview) &&
+				path.resolve(legacyPsAtPreview) !== path.resolve(sourcePsPath)
+			) {
+				try {
+					fs.unlinkSync(legacyPsAtPreview);
+				} catch (_) { }
+			}
 
-   return { success: true, pdfPath: targetPdfPath, distillerPdfPath: targetPdfPath };
-  } catch (e: any) {
-   return { success: false, error: e?.message || String(e) };
-  }
- }
+			return { success: true, pdfPath: targetPdfPath, distillerPdfPath: targetPdfPath };
+		} catch (e: any) {
+			return { success: false, error: e?.message || String(e) };
+		}
+	}
 
- /**
-  * Distill the PostScript into a PDF that lives BESIDE the .ps in the Postscript
-  * folder (same base name, .pdf extension) — so the Postscript file path folder
-  * holds both the .ps and the .pdf. This is exactly where Distiller writes the
-  * PDF, so no move is required. (The "Separation file path" is used for the
-  * separation .ai copy instead — see copySeparationFile.)
-  */
- async distillSeparationsPreviewPDF(sourcePsPath: string): Promise<any> {
-  this.log('distillSeparationsPreviewPDF called for: ' + sourcePsPath);
-  if (!sourcePsPath) {
-   return {
-    success: false,
-    error: 'PostScript file path is required for Separations Preview PDF'
-   };
-  }
+	/**
+	 * Distill the PostScript into a PDF that lives BESIDE the .ps in the Postscript
+	 * folder (same base name, .pdf extension) — so the Postscript file path folder
+	 * holds both the .ps and the .pdf. This is exactly where Distiller writes the
+	 * PDF, so no move is required. (The "Separation file path" is used for the
+	 * separation .ai copy instead — see copySeparationFile.)
+	 */
+	async distillSeparationsPreviewPDF(sourcePsPath: string): Promise<any> {
+		this.log('distillSeparationsPreviewPDF called for: ' + sourcePsPath);
+		if (!sourcePsPath) {
+			return {
+				success: false,
+				error: 'PostScript file path is required for Separations Preview PDF'
+			};
+		}
 
-  /*
-   * Target the companion PDF path (the .ps path with a .pdf extension) so the
-   * distilled PDF stays in the Postscript folder next to the .ps.
-   */
-  const targetPdfPath = this.companionPdfPathForPs(sourcePsPath);
-  console.log('[distillSeparationsPreviewPDF] source PS:', sourcePsPath);
-  console.log('[distillSeparationsPreviewPDF] target PDF (Postscript folder):', targetPdfPath);
+		/*
+		 * Target the companion PDF path (the .ps path with a .pdf extension) so the
+		 * distilled PDF stays in the Postscript folder next to the .ps.
+		 */
+		const targetPdfPath = this.companionPdfPathForPs(sourcePsPath);
+		console.log('[distillSeparationsPreviewPDF] source PS:', sourcePsPath);
+		console.log('[distillSeparationsPreviewPDF] target PDF (Postscript folder):', targetPdfPath);
 
-  const distillerStartedAt = Date.now();
-  const distiller = await this.launchDistiller(sourcePsPath);
-  console.log('[distillSeparationsPreviewPDF] Distiller launch result:', distiller);
+		const distillerStartedAt = Date.now();
+		const distiller = await this.launchDistiller(sourcePsPath);
+		console.log('[distillSeparationsPreviewPDF] Distiller launch result:', distiller);
 
-  if (!distiller.success) {
-   return {
-    success: false,
-    filePath: targetPdfPath,
-    sourcePostscriptPath: sourcePsPath,
-    distiller,
-    error: distiller.error || 'Adobe Distiller could not be launched.'
-   };
-  }
+		if (!distiller.success) {
+			return {
+				success: false,
+				filePath: targetPdfPath,
+				sourcePostscriptPath: sourcePsPath,
+				distiller,
+				error: distiller.error || 'Adobe Distiller could not be launched.'
+			};
+		}
 
-  const placed = await this.placeDistillerPdfAtSeparationsPreviewPath(
-   sourcePsPath,
-   targetPdfPath,
-   distillerStartedAt
-  );
-  if (!placed.success) {
-   console.error('[distillSeparationsPreviewPDF] Failed to place PDF:', placed.error);
-   return {
-    success: false,
-    filePath: targetPdfPath,
-    sourcePostscriptPath: sourcePsPath,
-    distiller,
-    error:
-     placed.error ||
-     'Distiller was launched but the PDF could not be placed at the Separation Preview path.'
-   };
-  }
+		const placed = await this.placeDistillerPdfAtSeparationsPreviewPath(
+			sourcePsPath,
+			targetPdfPath,
+			distillerStartedAt
+		);
+		if (!placed.success) {
+			console.error('[distillSeparationsPreviewPDF] Failed to place PDF:', placed.error);
+			return {
+				success: false,
+				filePath: targetPdfPath,
+				sourcePostscriptPath: sourcePsPath,
+				distiller,
+				error:
+					placed.error ||
+					'Distiller was launched but the PDF could not be placed at the Separation Preview path.'
+			};
+		}
 
-  console.log(
-   '[distillSeparationsPreviewPDF] Success. Distiller PDF:',
-   placed.distillerPdfPath,
-   '| Separation Preview PDF:',
-   placed.pdfPath
-  );
+		console.log(
+			'[distillSeparationsPreviewPDF] Success. Distiller PDF:',
+			placed.distillerPdfPath,
+			'| Separation Preview PDF:',
+			placed.pdfPath
+		);
 
-  // PDF is fully generated and placed at its final path — auto-open it in the default
-  // PDF viewer. Best-effort: a failure to open does not fail the export.
-  const opened = this.openFileInDefaultApp(placed.pdfPath as string);
-  if (!opened.success) {
-   console.warn('[distillSeparationsPreviewPDF] Could not auto-open PDF:', opened.error);
-  }
+		// PDF is fully generated and placed at its final path — auto-open it in the default
+		// PDF viewer. Best-effort: a failure to open does not fail the export.
+		const opened = this.openFileInDefaultApp(placed.pdfPath as string);
+		if (!opened.success) {
+			console.warn('[distillSeparationsPreviewPDF] Could not auto-open PDF:', opened.error);
+		}
 
-  return {
-   success: true,
-   filePath: placed.pdfPath,
-   distillerPdfPath: placed.distillerPdfPath,
-   sourcePostscriptPath: sourcePsPath,
-   distiller,
-   opened: opened.success,
-   message: 'Separations Preview PDF created via Distiller.',
-   note: 'PDF written beside the .ps in the Postscript folder (Postscript file path holds both .ps and .pdf).'
-  };
- }
+		return {
+			success: true,
+			filePath: placed.pdfPath,
+			distillerPdfPath: placed.distillerPdfPath,
+			sourcePostscriptPath: sourcePsPath,
+			distiller,
+			opened: opened.success,
+			message: 'Separations Preview PDF created via Distiller.',
+			note: 'PDF written beside the .ps in the Postscript folder (Postscript file path holds both .ps and .pdf).'
+		};
+	}
 
- /**
-  * Copy the active separation .ai file to the resolved "Separation file path"
-  * (the separationPreviewFilePath export setting). The path template is token-aware
-  * (e.g. [POS], [Art Code], recursive folders) and the file is named accordingly
-  * with a .ai extension. Skips silently when the template is empty or when the
-  * resolved target is the source file itself. Returns { success, filePath, skipped }.
-  */
- copySeparationFile(): Promise<{ success: boolean; filePath?: string; skipped?: boolean; error?: string }> {
-  this.log('copySeparationFile called');
-  return this.ensureSession().then(() => {
-   const exportPathResolverCode = this.buildExportPathResolverScript();
-   const script = `
+	/**
+	 * Copy the active separation .ai file to the resolved "Separation file path"
+	 * (the separationPreviewFilePath export setting). The path template is token-aware
+	 * (e.g. [POS], [Art Code], recursive folders) and the file is named accordingly
+	 * with a .ai extension. Skips silently when the template is empty or when the
+	 * resolved target is the source file itself. Returns { success, filePath, skipped }.
+	 */
+	copySeparationFile(): Promise<{ success: boolean; filePath?: string; skipped?: boolean; error?: string }> {
+		this.log('copySeparationFile called');
+		return this.ensureSession().then(() => {
+			const exportPathResolverCode = this.buildExportPathResolverScript();
+			const script = `
 (function() {
   ${exportPathResolverCode}
   try {
@@ -3972,243 +4020,243 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
   }
 })();
 `;
-   return evalScript(script).then((res: unknown) => {
-    const str = typeof res === 'string' ? res : '';
-    try {
-     return str ? JSON.parse(str) : { success: false, error: 'Empty response from host' };
-    } catch {
-     return { success: false, error: 'Invalid JSON response from host', raw: str };
-    }
-   });
-  });
- }
+			return evalScript(script).then((res: unknown) => {
+				const str = typeof res === 'string' ? res : '';
+				try {
+					return str ? JSON.parse(str) : { success: false, error: 'Empty response from host' };
+				} catch {
+					return { success: false, error: 'Invalid JSON response from host', raw: str };
+				}
+			});
+		});
+	}
 
- private exportGridPostscript(
-  inks: string[],
-  settingsKey: 'postscriptFilePath',
-  defaultPsSuffix: string,
-  logPrefix: string,
-  successMessage: string
- ): Promise<any> {
-  this.log(logPrefix + ' called with ' + (inks?.length ?? 0) + ' inks');
+	private exportGridPostscript(
+		inks: string[],
+		settingsKey: 'postscriptFilePath',
+		defaultPsSuffix: string,
+		logPrefix: string,
+		successMessage: string
+	): Promise<any> {
+		this.log(logPrefix + ' called with ' + (inks?.length ?? 0) + ' inks');
 
-  return this.ensureSession().then(() => {
-   return this.loadGeneralSettings().then((settingsResult) => {
-    const resolvedPpdName =
-     settingsResult?.success && settingsResult?.data?.ppdName != null
-      ? String(settingsResult.data.ppdName).trim() || 'IBlock v2'
-      : 'IBlock v2';
-    const script = this.buildExportPostscriptScript(
-     inks,
-     resolvedPpdName,
-     settingsKey,
-     defaultPsSuffix
-    );
-    return evalScript(script)
-     .then((res: unknown) => {
-      const str = typeof res === 'string' ? res : '';
-      const result = str ? JSON.parse(str) : { success: false, error: 'No result' };
+		return this.ensureSession().then(() => {
+			return this.loadGeneralSettings().then((settingsResult) => {
+				const resolvedPpdName =
+					settingsResult?.success && settingsResult?.data?.ppdName != null
+						? String(settingsResult.data.ppdName).trim() || 'IBlock v2'
+						: 'IBlock v2';
+				const script = this.buildExportPostscriptScript(
+					inks,
+					resolvedPpdName,
+					settingsKey,
+					defaultPsSuffix
+				);
+				return evalScript(script)
+					.then((res: unknown) => {
+						const str = typeof res === 'string' ? res : '';
+						const result = str ? JSON.parse(str) : { success: false, error: 'No result' };
 
-      if (result?.success) {
-       const msg = result.message || successMessage;
-       console.log('[' + logPrefix + ']', msg, result.filePath ? `→ ${result.filePath}` : '');
-       if (result.inkDebug) {
-        console.log('[' + logPrefix + '] requested inks:', result.requestedInks);
-        console.table(result.inkDebug);
-       }
-       return { ...result, message: successMessage };
-      }
+						if (result?.success) {
+							const msg = result.message || successMessage;
+							console.log('[' + logPrefix + ']', msg, result.filePath ? `→ ${result.filePath}` : '');
+							if (result.inkDebug) {
+								console.log('[' + logPrefix + '] requested inks:', result.requestedInks);
+								console.table(result.inkDebug);
+							}
+							return { ...result, message: successMessage };
+						}
 
-      console.error('[' + logPrefix + ']', result?.error || 'Failed');
-      return result;
-     })
-     .catch((err: any) => {
-      throw err;
-     });
-   });
-  });
- }
+						console.error('[' + logPrefix + ']', result?.error || 'Failed');
+						return result;
+					})
+					.catch((err: any) => {
+						throw err;
+					});
+			});
+		});
+	}
 
- private launchDistiller(psPath: string): Promise<{ success: boolean; error?: string }> {
-  return new Promise((resolve) => {
-   try {
-    console.log('[launchDistiller] Requested with PS path:', psPath);
-    const win = window as any;
-    const req = win?.cep_node?.require;
-    if (!req) {
-     const msg = 'CEP node runtime is unavailable';
-     console.error('[launchDistiller] ' + msg);
-     resolve({ success: false, error: msg });
-     return;
-    }
+	private launchDistiller(psPath: string): Promise<{ success: boolean; error?: string }> {
+		return new Promise((resolve) => {
+			try {
+				console.log('[launchDistiller] Requested with PS path:', psPath);
+				const win = window as any;
+				const req = win?.cep_node?.require;
+				if (!req) {
+					const msg = 'CEP node runtime is unavailable';
+					console.error('[launchDistiller] ' + msg);
+					resolve({ success: false, error: msg });
+					return;
+				}
 
-    const cp = req('child_process');
-    const fs = req('fs');
-    const appCandidates = [
-     '/Applications/Adobe Acrobat DC/Acrobat Distiller.app'
-    ];
-    let foundAppPath = '';
-    for (let i = 0; i < appCandidates.length; i++) {
-     const p = appCandidates[i];
-     try {
-      if (fs.existsSync(p)) {
-       foundAppPath = p;
-       break;
-      }
-     } catch (_) { }
-    }
+				const cp = req('child_process');
+				const fs = req('fs');
+				const appCandidates = [
+					'/Applications/Adobe Acrobat DC/Acrobat Distiller.app'
+				];
+				let foundAppPath = '';
+				for (let i = 0; i < appCandidates.length; i++) {
+					const p = appCandidates[i];
+					try {
+						if (fs.existsSync(p)) {
+							foundAppPath = p;
+							break;
+						}
+					} catch (_) { }
+				}
 
-    const psExists = (() => {
-     try {
-      return !!(psPath && fs.existsSync(psPath));
-     } catch (_) {
-      return false;
-     }
-    })();
+				const psExists = (() => {
+					try {
+						return !!(psPath && fs.existsSync(psPath));
+					} catch (_) {
+						return false;
+					}
+				})();
 
-    if (!psExists) {
-     const msg = 'PostScript file not found: ' + psPath;
-     console.error('[launchDistiller] ' + msg);
-     resolve({ success: false, error: msg });
-     return;
-    }
+				if (!psExists) {
+					const msg = 'PostScript file not found: ' + psPath;
+					console.error('[launchDistiller] ' + msg);
+					resolve({ success: false, error: msg });
+					return;
+				}
 
-    console.log('[launchDistiller] PS exists:', psExists);
-    console.log('[launchDistiller] Distiller app found:', foundAppPath || 'not found in known paths');
+				console.log('[launchDistiller] PS exists:', psExists);
+				console.log('[launchDistiller] Distiller app found:', foundAppPath || 'not found in known paths');
 
-    const appNameOrPath = foundAppPath || 'Adobe Acrobat Distiller';
-    const openArgs = ['-a', appNameOrPath, psPath];
-    console.log('[launchDistiller] Running command: open ' + openArgs.join(' '));
+				const appNameOrPath = foundAppPath || 'Adobe Acrobat Distiller';
+				const openArgs = ['-a', appNameOrPath, psPath];
+				console.log('[launchDistiller] Running command: open ' + openArgs.join(' '));
 
-    // execFile('open', ...) often never calls back when Distiller opens a document — spawn detached instead.
-    let settled = false;
-    const finish = (result: { success: boolean; error?: string }) => {
-     if (settled) return;
-     settled = true;
-     resolve(result);
-    };
-    const child = cp.spawn('open', openArgs, { detached: true, stdio: 'ignore' });
-    child.on('error', (spawnErr: any) => {
-     const errMsg = spawnErr?.message || String(spawnErr);
-     console.error('[launchDistiller] Spawn failed:', errMsg);
-     finish({ success: false, error: errMsg });
-    });
-    if (!child.pid) {
-     finish({ success: false, error: 'Failed to start Distiller process' });
-     return;
-    }
-    child.unref();
-    console.log('[launchDistiller] Distiller launch spawned (non-blocking), pid:', child.pid);
-    finish({ success: true });
-   } catch (e: any) {
-    const msg = e?.message || String(e);
-    console.error('[launchDistiller] Exception:', msg);
-    resolve({ success: false, error: msg });
-   }
-  });
- }
+				// execFile('open', ...) often never calls back when Distiller opens a document — spawn detached instead.
+				let settled = false;
+				const finish = (result: { success: boolean; error?: string }) => {
+					if (settled) return;
+					settled = true;
+					resolve(result);
+				};
+				const child = cp.spawn('open', openArgs, { detached: true, stdio: 'ignore' });
+				child.on('error', (spawnErr: any) => {
+					const errMsg = spawnErr?.message || String(spawnErr);
+					console.error('[launchDistiller] Spawn failed:', errMsg);
+					finish({ success: false, error: errMsg });
+				});
+				if (!child.pid) {
+					finish({ success: false, error: 'Failed to start Distiller process' });
+					return;
+				}
+				child.unref();
+				console.log('[launchDistiller] Distiller launch spawned (non-blocking), pid:', child.pid);
+				finish({ success: true });
+			} catch (e: any) {
+				const msg = e?.message || String(e);
+				console.error('[launchDistiller] Exception:', msg);
+				resolve({ success: false, error: msg });
+			}
+		});
+	}
 
- /**
-  * Open a finished file in the OS default application (used to auto-open the Separations
-  * Preview PDF once Distiller has fully written it). Non-blocking / best-effort — never
-  * throws, so a failure to open does not fail the export.
-  */
- private openFileInDefaultApp(filePath: string): { success: boolean; error?: string } {
-  try {
-   if (!filePath) { return { success: false, error: 'No file path provided' }; }
-   const win = window as any;
-   const req = win?.cep_node?.require;
-   if (!req) { return { success: false, error: 'CEP node runtime is unavailable' }; }
-   const cp = req('child_process');
-   const fs = req('fs');
-   const process = win?.cep_node?.process || req('process');
+	/**
+	 * Open a finished file in the OS default application (used to auto-open the Separations
+	 * Preview PDF once Distiller has fully written it). Non-blocking / best-effort — never
+	 * throws, so a failure to open does not fail the export.
+	 */
+	private openFileInDefaultApp(filePath: string): { success: boolean; error?: string } {
+		try {
+			if (!filePath) { return { success: false, error: 'No file path provided' }; }
+			const win = window as any;
+			const req = win?.cep_node?.require;
+			if (!req) { return { success: false, error: 'CEP node runtime is unavailable' }; }
+			const cp = req('child_process');
+			const fs = req('fs');
+			const process = win?.cep_node?.process || req('process');
 
-   if (!fs.existsSync(filePath)) {
-    return { success: false, error: 'File not found: ' + filePath };
-   }
+			if (!fs.existsSync(filePath)) {
+				return { success: false, error: 'File not found: ' + filePath };
+			}
 
-   const platform = process?.platform || 'darwin';
-   let command: string;
-   let args: string[];
-   if (platform === 'win32') {
-    // "start" needs an empty title arg; run through cmd.
-    command = 'cmd';
-    args = ['/c', 'start', '', filePath];
-   } else if (platform === 'darwin') {
-    command = 'open';
-    args = [filePath];
-   } else {
-    command = 'xdg-open';
-    args = [filePath];
-   }
+			const platform = process?.platform || 'darwin';
+			let command: string;
+			let args: string[];
+			if (platform === 'win32') {
+				// "start" needs an empty title arg; run through cmd.
+				command = 'cmd';
+				args = ['/c', 'start', '', filePath];
+			} else if (platform === 'darwin') {
+				command = 'open';
+				args = [filePath];
+			} else {
+				command = 'xdg-open';
+				args = [filePath];
+			}
 
-   console.log('[openFileInDefaultApp] Opening:', command, args.join(' '));
-   const child = cp.spawn(command, args, { detached: true, stdio: 'ignore' });
-   child.on('error', (err: any) => {
-    console.error('[openFileInDefaultApp] Spawn failed:', err?.message || String(err));
-   });
-   if (child.pid) { child.unref(); }
-   return { success: true };
-  } catch (e: any) {
-   console.error('[openFileInDefaultApp] Exception:', e?.message || String(e));
-   return { success: false, error: e?.message || String(e) };
-  }
- }
+			console.log('[openFileInDefaultApp] Opening:', command, args.join(' '));
+			const child = cp.spawn(command, args, { detached: true, stdio: 'ignore' });
+			child.on('error', (err: any) => {
+				console.error('[openFileInDefaultApp] Spawn failed:', err?.message || String(err));
+			});
+			if (child.pid) { child.unref(); }
+			return { success: true };
+		} catch (e: any) {
+			console.error('[openFileInDefaultApp] Exception:', e?.message || String(e));
+			return { success: false, error: e?.message || String(e) };
+		}
+	}
 
- /**
-  * Reveal a file in the OS file browser with the file selected (macOS "Reveal in
-  * Finder", Windows Explorer /select, Linux opens the containing folder). Used by
-  * the export-results modal links. Best-effort; never throws.
-  */
- revealFileInFinder(filePath: string): { success: boolean; error?: string } {
-  try {
-   if (!filePath) { return { success: false, error: 'No file path provided' }; }
-   const win = window as any;
-   const req = win?.cep_node?.require;
-   if (!req) { return { success: false, error: 'CEP node runtime is unavailable' }; }
-   const cp = req('child_process');
-   const fs = req('fs');
-   const path = req('path');
-   const process = win?.cep_node?.process || req('process');
+	/**
+	 * Reveal a file in the OS file browser with the file selected (macOS "Reveal in
+	 * Finder", Windows Explorer /select, Linux opens the containing folder). Used by
+	 * the export-results modal links. Best-effort; never throws.
+	 */
+	revealFileInFinder(filePath: string): { success: boolean; error?: string } {
+		try {
+			if (!filePath) { return { success: false, error: 'No file path provided' }; }
+			const win = window as any;
+			const req = win?.cep_node?.require;
+			if (!req) { return { success: false, error: 'CEP node runtime is unavailable' }; }
+			const cp = req('child_process');
+			const fs = req('fs');
+			const path = req('path');
+			const process = win?.cep_node?.process || req('process');
 
-   if (!fs.existsSync(filePath)) {
-    return { success: false, error: 'File not found: ' + filePath };
-   }
+			if (!fs.existsSync(filePath)) {
+				return { success: false, error: 'File not found: ' + filePath };
+			}
 
-   const platform = process?.platform || 'darwin';
-   let command: string;
-   let args: string[];
-   if (platform === 'win32') {
-    /* Explorer selects the file when passed /select,<path> as a single token. */
-    command = 'explorer';
-    args = ['/select,' + filePath];
-   } else if (platform === 'darwin') {
-    /* -R reveals (selects) the file in Finder instead of opening it. */
-    command = 'open';
-    args = ['-R', filePath];
-   } else {
-    /* No universal "reveal" on Linux — open the containing folder instead. */
-    command = 'xdg-open';
-    args = [path.dirname(filePath)];
-   }
+			const platform = process?.platform || 'darwin';
+			let command: string;
+			let args: string[];
+			if (platform === 'win32') {
+				/* Explorer selects the file when passed /select,<path> as a single token. */
+				command = 'explorer';
+				args = ['/select,' + filePath];
+			} else if (platform === 'darwin') {
+				/* -R reveals (selects) the file in Finder instead of opening it. */
+				command = 'open';
+				args = ['-R', filePath];
+			} else {
+				/* No universal "reveal" on Linux — open the containing folder instead. */
+				command = 'xdg-open';
+				args = [path.dirname(filePath)];
+			}
 
-   console.log('[revealFileInFinder] Revealing:', command, args.join(' '));
-   const child = cp.spawn(command, args, { detached: true, stdio: 'ignore' });
-   child.on('error', (err: any) => {
-    console.error('[revealFileInFinder] Spawn failed:', err?.message || String(err));
-   });
-   if (child.pid) { child.unref(); }
-   return { success: true };
-  } catch (e: any) {
-   console.error('[revealFileInFinder] Exception:', e?.message || String(e));
-   return { success: false, error: e?.message || String(e) };
-  }
- }
+			console.log('[revealFileInFinder] Revealing:', command, args.join(' '));
+			const child = cp.spawn(command, args, { detached: true, stdio: 'ignore' });
+			child.on('error', (err: any) => {
+				console.error('[revealFileInFinder] Spawn failed:', err?.message || String(err));
+			});
+			if (child.pid) { child.unref(); }
+			return { success: true };
+		} catch (e: any) {
+			console.error('[revealFileInFinder] Exception:', e?.message || String(e));
+			return { success: false, error: e?.message || String(e) };
+		}
+	}
 
- /** ExtendScript: remove unused swatches via Illustrator action (LEAP Variables / colorVariable.jsx). */
- private buildRemoveUnusedSwatchesScript(documentPath?: string): string {
-  const docPathLiteral = JSON.stringify(documentPath || '');
-  return `
+	/** ExtendScript: remove unused swatches via Illustrator action (LEAP Variables / colorVariable.jsx). */
+	private buildRemoveUnusedSwatchesScript(documentPath?: string): string {
+		const docPathLiteral = JSON.stringify(documentPath || '');
+		return `
 (function() {
   try {
     if (!app.documents.length) {
@@ -4363,22 +4411,22 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
   }
 })();
 `;
- }
+	}
 
- /** ExtendScript body aligned with React exportPostscript.script.ts (LEAP Color Separator). */
- private buildExportPostscriptScript(
-  inks: string[],
-  ppdName: string,
-  settingsKey: string,
-  defaultPsSuffix: string
- ): string {
-  const safeInks = Array.isArray(inks) ? inks : [];
-  const inksLiteral = JSON.stringify(safeInks);
-  const ppdNameLiteral = JSON.stringify(ppdName || 'IBlock v2');
-  const settingsKeyLiteral = JSON.stringify(settingsKey);
-  const defaultPsSuffixLiteral = JSON.stringify(defaultPsSuffix);
-  const exportPathResolverCode = this.buildExportPathResolverScript();
-  return `
+	/** ExtendScript body aligned with React exportPostscript.script.ts (LEAP Color Separator). */
+	private buildExportPostscriptScript(
+		inks: string[],
+		ppdName: string,
+		settingsKey: string,
+		defaultPsSuffix: string
+	): string {
+		const safeInks = Array.isArray(inks) ? inks : [];
+		const inksLiteral = JSON.stringify(safeInks);
+		const ppdNameLiteral = JSON.stringify(ppdName || 'IBlock v2');
+		const settingsKeyLiteral = JSON.stringify(settingsKey);
+		const defaultPsSuffixLiteral = JSON.stringify(defaultPsSuffix);
+		const exportPathResolverCode = this.buildExportPathResolverScript();
+		return `
 (function() {
   ${exportPathResolverCode}
   try {
@@ -4662,777 +4710,782 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
   }
 })();
 `;
- }
+	}
 
- getInkInformationBatch(
-  inkNames: string[],
-  profileName?: string,
-  profileCode?: string
- ): Promise<any> {
-  this.log('getInkInformationBatch called with ' + inkNames.length + ' ink names');
+	getInkInformationBatch(
+		inkNames: string[],
+		profileName?: string,
+		profileCode?: string
+	): Promise<any> {
+		this.log('getInkInformationBatch called with ' + inkNames.length + ' ink names');
 
-  return this.ensureSession().then(() => {
-   return (window as any).leap
-    .getInkInformationBatch(inkNames, profileName, profileCode)
-    .then((result: any) => {
-     return result;
-    })
-    .catch((err: any) => {
-     throw err;
-    });
-  });
- }
+		return this.ensureSession().then(() => {
+			return (window as any).leap
+				.getInkInformationBatch(inkNames, profileName, profileCode)
+				.then((result: any) => {
+					return result;
+				})
+				.catch((err: any) => {
+					throw err;
+				});
+		});
+	}
 
- getProfileInformation(
-  profileCode: string,
-  options?: { distress?: boolean | string }
- ): Promise<any> {
-  this.log('getProfileInformation called for: ' + profileCode);
+	getProfileInformation(
+		profileCode: string,
+		options?: { distress?: boolean | string }
+	): Promise<any> {
+		this.log('getProfileInformation called for: ' + profileCode);
 
-  return this.ensureSession().then(() => {
-   return (window as any).leap
-    .getProfileInformation(profileCode, options || {})
-    .then((result: any) => {
-     return result;
-    })
-    .catch((err: any) => {
-     throw err;
-    });
-  });
- }
+		return this.ensureSession().then(() => {
+			return (window as any).leap
+				.getProfileInformation(profileCode, options || {})
+				.then((result: any) => {
+					return result;
+				})
+				.catch((err: any) => {
+					throw err;
+				});
+		});
+	}
 
- getBodyColor(): Promise<any> {
-  this.log('getBodyColor called');
+	getBodyColor(): Promise<any> {
+		this.log('getBodyColor called');
 
-  return this.ensureSession().then(() => {
-   return this.evalWithTeamJsonFallback('handleGetBodyColor', {}, (r: any) =>
-    ControllerService.TEAM_JSON_UNREADABLE.test(String(r?.error || ''))
-   ).catch((err: any) => {
-    throw err;
-   });
-  });
- }
+		return this.ensureSession().then(() => {
+			return this.evalWithTeamJsonFallback('handleGetBodyColor', {}, (r: any) =>
+				ControllerService.TEAM_JSON_UNREADABLE.test(String(r?.error || ''))
+			).catch((err: any) => {
+				throw err;
+			});
+		});
+	}
 
- getStyleInformation(
-  styleCodes: string[]
- ): Promise<{ success: boolean; styleInfoMap?: { [key: string]: any }; error?: string }> {
-  console.log('[Controller] getStyleInformation called, styleCodes:', styleCodes);
-  const win = window as any;
-  if (!win.leap) {
-   console.error('[Controller] getStyleInformation: window.leap is not defined');
-   return Promise.reject(new Error('leap not available'));
-  }
-  return this.ensureSession().then(() => {
-   return win.leap
-    .getStyleInformation(styleCodes)
-    .then((result: any) => {
-     console.log('[Controller] getStyleInformation result:', result);
-     return result;
-    })
-    .catch((err: any) => {
-     console.error('[Controller] getStyleInformation failed:', err);
-     throw err;
-    });
-  });
- }
+	getStyleInformation(
+		styleCodes: string[]
+	): Promise<{ success: boolean; styleInfoMap?: { [key: string]: any }; error?: string }> {
+		console.log('[Controller] getStyleInformation called, styleCodes:', styleCodes);
+		const win = window as any;
+		if (!win.leap) {
+			console.error('[Controller] getStyleInformation: window.leap is not defined');
+			return Promise.reject(new Error('leap not available'));
+		}
+		return this.ensureSession().then(() => {
+			return win.leap
+				.getStyleInformation(styleCodes)
+				.then((result: any) => {
+					console.log('[Controller] getStyleInformation result:', result);
+					return result;
+				})
+				.catch((err: any) => {
+					console.error('[Controller] getStyleInformation failed:', err);
+					throw err;
+				});
+		});
+	}
 
- /**
-  * Look up body color (Hex/CMYK/RGB) by code from COLOR_CODE_LOOKUP.xlsx (same folder as Styles.xlsx).
-  */
- /* basePath (optional): panel-resolved LEAP Data path override — the leap bundle's Node-side
-  * resolver fails persistently on some cloud/network drives (same workaround as getProfileInformation). */
- getColorByCodeFromLookup(colorCode: string, basePath?: string): Promise<{
-  success: boolean;
-  color?: {
-   hex: string;
-   colorName: string;
-   cmyk: { c: number; m: number; y: number; k: number };
-   rgb: { r: number; g: number; b: number };
-  };
-  error?: string;
- }> {
-  const win = window as any;
-  if (!win.leap) {
-   return Promise.reject(new Error('leap not available'));
-  }
-  return this.ensureSession().then(() => win.leap.getColorByCodeFromLookup(colorCode, basePath));
- }
+	/**
+	 * Look up body color (Hex/CMYK/RGB) by code from COLOR_CODE_LOOKUP.xlsx (same folder as Styles.xlsx).
+	 */
+	/* basePath (optional): panel-resolved LEAP Data path override — the leap bundle's Node-side
+	 * resolver fails persistently on some cloud/network drives (same workaround as getProfileInformation). */
+	getColorByCodeFromLookup(colorCode: string, basePath?: string): Promise<{
+		success: boolean;
+		color?: {
+			hex: string;
+			colorName: string;
+			cmyk: { c: number; m: number; y: number; k: number };
+			rgb: { r: number; g: number; b: number };
+		};
+		error?: string;
+	}> {
+		const win = window as any;
+		if (!win.leap) {
+			return Promise.reject(new Error('leap not available'));
+		}
+		return this.ensureSession().then(() => win.leap.getColorByCodeFromLookup(colorCode, basePath));
+	}
 
- /*
-  * Can the leap bundle resolve the LEAP server base path? Every Excel/JSON lookup that is not given
-  * an explicit path depends on it (Styles, Inks, Profiles, COLOR_CODE_LOOKUP), and when it fails
-  * they all fall back to DEFAULTS on a run that still reports success — so the panel surfaces it
-  * instead of letting the wrong output through quietly. Older bundles have no such method; treat
-  * that as "cannot tell" (success) rather than warning about a build that predates the check.
-  */
- getServerBasePathStatus(): Promise<{ success: boolean; basePath?: string; error?: string }> {
-  const win = window as any;
-  if (!win.leap || typeof win.leap.getServerBasePathStatus !== 'function') {
-   return Promise.resolve({ success: true });
-  }
-  return this.ensureSession()
-   .then(() => win.leap.getServerBasePathStatus())
-   .then((res: any) => res || { success: true })
-   .catch((err: any) => ({
-    success: false,
-    error: (err && err.message) || 'Could not check the LEAP server path.'
-   }))
-   .then((status: any) => {
-    /*
-     * Report centrally rather than at each call site: without the server path, colours, meshes and
-     * style info all fall back to DEFAULTS on a separation that still reports success.
-     */
-    if (status && status.success === false) {
-     this.dataIssues.report(
-      'server-path',
-      'LEAP server path could not be read — garment colours, meshes and style info will fall back to defaults. Check General Settings → Data Folder Path.',
-      status.error || ''
-     );
-    } else {
-     this.dataIssues.clear('server-path');
-    }
-    return status;
-   });
- }
+	/*
+	 * Can the leap bundle resolve the LEAP server base path? Every Excel/JSON lookup that is not given
+	 * an explicit path depends on it (Styles, Inks, Profiles, COLOR_CODE_LOOKUP), and when it fails
+	 * they all fall back to DEFAULTS on a run that still reports success — so the panel surfaces it
+	 * instead of letting the wrong output through quietly. Older bundles have no such method; treat
+	 * that as "cannot tell" (success) rather than warning about a build that predates the check.
+	 */
+	getServerBasePathStatus(): Promise<{ success: boolean; basePath?: string; error?: string }> {
+		const win = window as any;
+		if (!win.leap || typeof win.leap.getServerBasePathStatus !== 'function') {
+			return Promise.resolve({ success: true });
+		}
+		return this.ensureSession()
+			.then(() => win.leap.getServerBasePathStatus())
+			.then((res: any) => res || { success: true })
+			.catch((err: any) => ({
+				success: false,
+				error: (err && err.message) || 'Could not check the LEAP server path.'
+			}))
+			.then((status: any) => {
+				/*
+				 * Report centrally rather than at each call site: without the server path, colours, meshes and
+				 * style info all fall back to DEFAULTS on a separation that still reports success.
+				 */
+				if (status && status.success === false) {
+					this.dataIssues.report(
+						'server-path',
+						'LEAP server path could not be read — garment colours, meshes and style info will fall back to defaults. Check General Settings → Data Folder Path.',
+						status.error || ''
+					);
+				} else {
+					this.dataIssues.clear('server-path');
+				}
+				return status;
+			});
+	}
 
- removeSeparationData(): Promise<any> {
-  this.log('removeSeparationData called');
+	removeSeparationData(): Promise<any> {
+		this.log('removeSeparationData called');
 
-  return this.ensureSession().then(() => {
-   return (window as any).leap
-    .scriptLoader()
-    .evalScript('handleRemoveSeparationData', {})
-    .then((res: string) => {
-     try {
-      return JSON.parse(res);
-     } catch (parseErr) {
-      console.error('removeSeparationData: failed to parse response', res, parseErr);
-      return { success: false, error: 'Invalid response from host', raw: res };
-     }
-    })
-    .catch((err: any) => {
-     console.error('removeSeparationData: host call failed', err);
-     const message = err?.message || err?.toString?.() || 'Unknown error';
-     return { success: false, error: message, rawError: err };
-    });
-  });
- }
+		return this.ensureSession().then(() => {
+			return (window as any).leap
+				.scriptLoader()
+				.evalScript('handleRemoveSeparationData', {})
+				.then((res: string) => {
+					try {
+						return JSON.parse(res);
+					} catch (parseErr) {
+						console.error('removeSeparationData: failed to parse response', res, parseErr);
+						return { success: false, error: 'Invalid response from host', raw: res };
+					}
+				})
+				.catch((err: any) => {
+					console.error('removeSeparationData: host call failed', err);
+					const message = err?.message || err?.toString?.() || 'Unknown error';
+					return { success: false, error: message, rawError: err };
+				});
+		});
+	}
 
- performSeparation(
-  graphicName: string,
-  styleCodes: string[] = [],
-  profileMetadata: any = null,
-  options?: { recreateInActiveDoc?: boolean; sepsTemplateFileName?: string }
- ): Promise<any> {
-  this.log(
-   'performSeparation called for: ' +
-   graphicName +
-   (options?.recreateInActiveDoc ? ' (recreate in active doc)' : '')
-  );
-  this.leapSepsLog.logProcess('performSeparation start', {
-   graphicName,
-   styleCodes,
-   profileCode: profileMetadata?.profileCode,
-   profileName: profileMetadata?.profileName
-  });
+	performSeparation(
+		graphicName: string,
+		styleCodes: string[] = [],
+		profileMetadata: any = null,
+		options?: { recreateInActiveDoc?: boolean; sepsTemplateFileName?: string }
+	): Promise<any> {
+		this.log(
+			'performSeparation called for: ' +
+			graphicName +
+			(options?.recreateInActiveDoc ? ' (recreate in active doc)' : '')
+		);
+		this.leapSepsLog.logProcess('performSeparation start', {
+			graphicName,
+			styleCodes,
+			profileCode: profileMetadata?.profileCode,
+			profileName: profileMetadata?.profileName
+		});
 
-  return this.ensureSession().then(() => {
-   const params: any = {
-    graphicName: graphicName,
-    styleCodes: styleCodes,
-    profileMetadata: profileMetadata
-   };
-   if (options?.recreateInActiveDoc === true) {
-    params.recreateInActiveDoc = true;
-   }
-   if (options?.sepsTemplateFileName) {
-    params.sepsTemplateFileName = String(options.sepsTemplateFileName);
-   }
+		return this.ensureSession().then(() => {
+			const params: any = {
+				graphicName: graphicName,
+				styleCodes: styleCodes,
+				profileMetadata: profileMetadata
+			};
+			if (options?.recreateInActiveDoc === true) {
+				params.recreateInActiveDoc = true;
+			}
+			if (options?.sepsTemplateFileName) {
+				params.sepsTemplateFileName = String(options.sepsTemplateFileName);
+			}
 
-   return this.evalWithTeamJsonFallback('handlePerformSeparation', params, (r: any) =>
-    ControllerService.TEAM_JSON_UNREADABLE.test(String(r?.error || ''))
-   )
-    .then((result: any) => {
-     console.log('[Controller] performSeparation result:', result);
-     if (!result?.success) {
-      /*
-       * The step trace goes out as its OWN log line, as the MESSAGE rather than the detail: the
-       * detail object is stringified and truncated ("[1 items]", trailing "…"), which would cut off
-       * exactly the tail that says where splitColors stopped. On machines where the JSX-side file
-       * write never lands, this line is the only record of it.
-       */
-      if (result?.splitColorsSteps) {
-       this.leapSepsLog.logError('performSeparation splitColors', String(result.splitColorsSteps));
-      }
-      this.leapSepsLog.logError('performSeparation', result?.error || 'Failed', result);
-      return result;
-     }
-     this.leapSepsLog.logProcess('performSeparation JSX success', {
-      plates: result.layerNames?.length,
-      sepFile: result.separatedDocumentPath
-        ? String(result.separatedDocumentPath).split('/').pop()
-        : undefined
-     });
-     return result;
-    })
-    .catch((err: any) => {
-     this.leapSepsLog.logError('performSeparation', err);
-     throw err;
-    });
-  });
- }
+			return this.evalWithTeamJsonFallback('handlePerformSeparation', params, (r: any) =>
+				ControllerService.TEAM_JSON_UNREADABLE.test(String(r?.error || ''))
+			)
+				.then((result: any) => {
+					console.log('[Controller] performSeparation result:', result);
+					if (!result?.success) {
+						/*
+						 * The step trace goes out as its OWN log line, as the MESSAGE rather than the detail: the
+						 * detail object is stringified and truncated ("[1 items]", trailing "…"), which would cut off
+						 * exactly the tail that says where splitColors stopped. On machines where the JSX-side file
+						 * write never lands, this line is the only record of it.
+						 */
+						if (result?.splitColorsSteps) {
+							this.leapSepsLog.logError('performSeparation splitColors', String(result.splitColorsSteps));
+						}
+						this.leapSepsLog.logError('performSeparation', result?.error || 'Failed', result);
+						return result;
+					}
+					this.leapSepsLog.logProcess('performSeparation JSX success', {
+						plates: result.layerNames?.length,
+						sepFile: result.separatedDocumentPath
+							? String(result.separatedDocumentPath).split('/').pop()
+							: undefined
+					});
+					/* Trace as the MESSAGE (details get truncated) — success runs need it too: a "successful"
+						 separation with only Choke + White UB was only explainable by this line. */
+					if (result?.splitColorsSteps) {
+						this.leapSepsLog.logInfo('performSeparation splitColors', String(result.splitColorsSteps));
+					}
+					return result;
+				})
+				.catch((err: any) => {
+					this.leapSepsLog.logError('performSeparation', err);
+					throw err;
+				});
+		});
+	}
 
- /**
-  * Recreate plates in the active (separated) document.
-  * Call after deleteAllPlatesInSeparationDoc when the user clicks "Recreate All Plates".
-  */
- recreatePlatesInActiveDocument(
-  graphicName: string,
-  cleanup?: { deleteUnpaintedPaths: boolean; deleteLeftoverPaths: boolean }
- ): Promise<any> {
-  return this.ensureSession().then(() => {
-   const params: Record<string, unknown> = { graphicName };
-   if (cleanup) {
-    params['deleteUnpaintedPaths'] = cleanup.deleteUnpaintedPaths === true;
-    params['deleteLeftoverPaths'] = cleanup.deleteLeftoverPaths === true;
-   }
-   return (window as any).leap
-    .scriptLoader()
-    .evalScript('handleRecreatePlatesInActiveDocument', params)
-    .then((res: string) => {
-     const result = JSON.parse(res);
-     if (!result?.success) {
-      return result;
-     }
-     return this.removeUnusedSwatches().then((swResult) => ({
-      ...result,
-      removeUnusedSwatches: swResult
-     }));
-    })
-    .catch((err: any) => {
-     throw err;
-    });
-  });
- }
+	/**
+	 * Recreate plates in the active (separated) document.
+	 * Call after deleteAllPlatesInSeparationDoc when the user clicks "Recreate All Plates".
+	 */
+	recreatePlatesInActiveDocument(
+		graphicName: string,
+		cleanup?: { deleteUnpaintedPaths: boolean; deleteLeftoverPaths: boolean }
+	): Promise<any> {
+		return this.ensureSession().then(() => {
+			const params: Record<string, unknown> = { graphicName };
+			if (cleanup) {
+				params['deleteUnpaintedPaths'] = cleanup.deleteUnpaintedPaths === true;
+				params['deleteLeftoverPaths'] = cleanup.deleteLeftoverPaths === true;
+			}
+			return (window as any).leap
+				.scriptLoader()
+				.evalScript('handleRecreatePlatesInActiveDocument', params)
+				.then((res: string) => {
+					const result = JSON.parse(res);
+					if (!result?.success) {
+						return result;
+					}
+					return this.removeUnusedSwatches().then((swResult) => ({
+						...result,
+						removeUnusedSwatches: swResult
+					}));
+				})
+				.catch((err: any) => {
+					throw err;
+				});
+		});
+	}
 
- /**
-  * Regenerate choke and underbase from existing ink plates in SEPARATED_ART (ink plates unchanged).
-  */
- regenerateUnderbaseFromExistingInks(
-  cleanup?: { deleteUnpaintedPaths: boolean; deleteLeftoverPaths: boolean }
- ): Promise<any> {
-  return this.ensureSession().then(() => {
-   const params: Record<string, unknown> = {};
-   if (cleanup) {
-    params['deleteUnpaintedPaths'] = cleanup.deleteUnpaintedPaths === true;
-    params['deleteLeftoverPaths'] = cleanup.deleteLeftoverPaths === true;
-   }
-   return (window as any).leap
-    .scriptLoader()
-    .evalScript('handleRegenerateUnderbaseFromExistingInks', params)
-    .then((res: string) => {
-     const result = JSON.parse(res);
-     if (!result?.success) {
-      this.leapSepsLog.logError('regenerateUnderbaseFromExistingInks', result?.error || 'Failed', result);
-      return result;
-     }
-     this.leapSepsLog.logProcess('regenerateUnderbaseFromExistingInks complete', result);
-     return result;
-    })
-    .catch((err: any) => {
-     this.leapSepsLog.logError('regenerateUnderbaseFromExistingInks', err);
-     throw err;
-    });
-  });
- }
+	/**
+	 * Regenerate choke and underbase from existing ink plates in SEPARATED_ART (ink plates unchanged).
+	 */
+	regenerateUnderbaseFromExistingInks(
+		cleanup?: { deleteUnpaintedPaths: boolean; deleteLeftoverPaths: boolean }
+	): Promise<any> {
+		return this.ensureSession().then(() => {
+			const params: Record<string, unknown> = {};
+			if (cleanup) {
+				params['deleteUnpaintedPaths'] = cleanup.deleteUnpaintedPaths === true;
+				params['deleteLeftoverPaths'] = cleanup.deleteLeftoverPaths === true;
+			}
+			return (window as any).leap
+				.scriptLoader()
+				.evalScript('handleRegenerateUnderbaseFromExistingInks', params)
+				.then((res: string) => {
+					const result = JSON.parse(res);
+					if (!result?.success) {
+						this.leapSepsLog.logError('regenerateUnderbaseFromExistingInks', result?.error || 'Failed', result);
+						return result;
+					}
+					this.leapSepsLog.logProcess('regenerateUnderbaseFromExistingInks complete', result);
+					return result;
+				})
+				.catch((err: any) => {
+					this.leapSepsLog.logError('regenerateUnderbaseFromExistingInks', err);
+					throw err;
+				});
+		});
+	}
 
- selectAndSaveLeapSettings(): Promise<any> {
-  this.log('selectAndSaveLeapSettings called');
+	selectAndSaveLeapSettings(): Promise<any> {
+		this.log('selectAndSaveLeapSettings called');
 
-  return new Promise((resolve) => {
-   const cep = (window as any).cep;
-   if (!cep || !cep.fs) {
-    resolve({ success: false, error: 'CEP FS not available' });
-    return;
-   }
+		return new Promise((resolve) => {
+			const cep = (window as any).cep;
+			if (!cep || !cep.fs) {
+				resolve({ success: false, error: 'CEP FS not available' });
+				return;
+			}
 
-   const result = cep.fs.showOpenDialog(false, true, 'Select LEAP Server Data Folder', null);
-   if (result.err !== 0) {
-    resolve({ success: false, error: 'Error opening dialog: ' + result.err });
-    return;
-   }
+			const result = cep.fs.showOpenDialog(false, true, 'Select LEAP Server Data Folder', null);
+			if (result.err !== 0) {
+				resolve({ success: false, error: 'Error opening dialog: ' + result.err });
+				return;
+			}
 
-   if (result.data && result.data.length > 0) {
-    let selectedPath = result.data[0];
+			if (result.data && result.data.length > 0) {
+				let selectedPath = result.data[0];
 
-    // Sanitize path as requested (remove file:// prefix and decode)
-    if (selectedPath.startsWith('file://')) {
-     selectedPath = selectedPath.replace(/^file:\/\//, '');
-    }
-    selectedPath = decodeURI(selectedPath);
-    const os = (window as any).cep_node.require('os');
-    const path = (window as any).cep_node.require('path');
-    const homeDir = os.homedir();
-    const settingsFolder = path.join(homeDir, 'Documents', 'LEAP Settings');
-    const settingsFile = path.join(settingsFolder, 'logobaseDataPathSettings.json');
+				// Sanitize path as requested (remove file:// prefix and decode)
+				if (selectedPath.startsWith('file://')) {
+					selectedPath = selectedPath.replace(/^file:\/\//, '');
+				}
+				selectedPath = decodeURI(selectedPath);
+				const os = (window as any).cep_node.require('os');
+				const path = (window as any).cep_node.require('path');
+				const homeDir = os.homedir();
+				const settingsFolder = path.join(homeDir, 'Documents', 'LEAP Settings');
+				const settingsFile = path.join(settingsFolder, 'logobaseDataPathSettings.json');
 
-    // Try to create directory if it doesn't exist
-    const mkdirResult = cep.fs.makedir(settingsFolder);
-    if (mkdirResult.err !== 0 && mkdirResult.err !== 17) {
-     console.warn(
-      'Failed to create settings directory, trying to write anyway...',
-      mkdirResult.err
-     );
-    }
+				// Try to create directory if it doesn't exist
+				const mkdirResult = cep.fs.makedir(settingsFolder);
+				if (mkdirResult.err !== 0 && mkdirResult.err !== 17) {
+					console.warn(
+						'Failed to create settings directory, trying to write anyway...',
+						mkdirResult.err
+					);
+				}
 
-    const data = {
-     basePath: selectedPath
-    };
+				const data = {
+					basePath: selectedPath
+				};
 
-    const writeResult = cep.fs.writeFile(settingsFile, JSON.stringify(data, null, 4));
-    if (writeResult.err === 0) {
-     resolve({ success: true, path: selectedPath, pathChanged: true });
-    } else {
-     resolve({ success: false, error: 'Error writing settings file: ' + writeResult.err });
-    }
-   } else {
-    resolve({ success: false, cancelled: true });
-   }
-  });
- }
+				const writeResult = cep.fs.writeFile(settingsFile, JSON.stringify(data, null, 4));
+				if (writeResult.err === 0) {
+					resolve({ success: true, path: selectedPath, pathChanged: true });
+				} else {
+					resolve({ success: false, error: 'Error writing settings file: ' + writeResult.err });
+				}
+			} else {
+				resolve({ success: false, cancelled: true });
+			}
+		});
+	}
 
- getLeapServerDataPath(): Promise<string> {
-  return new Promise((resolve) => {
-   const cep = (window as any).cep;
-   if (!cep || !cep.fs) {
-    resolve('');
-    return;
-   }
+	getLeapServerDataPath(): Promise<string> {
+		return new Promise((resolve) => {
+			const cep = (window as any).cep;
+			if (!cep || !cep.fs) {
+				resolve('');
+				return;
+			}
 
-   const os = (window as any).cep_node.require('os');
-   const path = (window as any).cep_node.require('path');
-   const homeDir = os.homedir();
-   const settingsFile = path.join(
-    homeDir,
-    'Documents',
-    'LEAP Settings',
-    'logobaseDataPathSettings.json'
-   );
+			const os = (window as any).cep_node.require('os');
+			const path = (window as any).cep_node.require('path');
+			const homeDir = os.homedir();
+			const settingsFile = path.join(
+				homeDir,
+				'Documents',
+				'LEAP Settings',
+				'logobaseDataPathSettings.json'
+			);
 
-   const result = cep.fs.readFile(settingsFile);
-   if (result.err === 0) {
-    try {
-     const data = JSON.parse(result.data);
-     resolve(data.basePath || '');
-    } catch (e) {
-     console.error('Error parsing settings file', e);
-     resolve('');
-    }
-   } else {
-    // File doesn't exist or error reading
-    resolve('');
-   }
-  });
- }
+			const result = cep.fs.readFile(settingsFile);
+			if (result.err === 0) {
+				try {
+					const data = JSON.parse(result.data);
+					resolve(data.basePath || '');
+				} catch (e) {
+					console.error('Error parsing settings file', e);
+					resolve('');
+				}
+			} else {
+				// File doesn't exist or error reading
+				resolve('');
+			}
+		});
+	}
 
- loadGeneralSettings(): Promise<{ success: boolean; data?: any; error?: string }> {
-  return new Promise((resolve) => {
-   const cep = (window as any).cep;
-   if (!cep || !cep.fs) {
-    resolve({
-     success: true,
-     data: {
-      defaultMesh: '110',
-      addUnderbase: true,
-      artistName: '',
-      artistInitials: '',
-      ppdName: 'IBlock v2',
-      chokeStrokeColorSwatch: '',
-      koDarkColorNames: 'Black, PANTONE PROCESS BLACK C',
-      meshValues: '',
-      sepsTemplateFileName: 'SEP-GRID-TEMPLATE.ai'
-     }
-    });
-    return;
-   }
+	loadGeneralSettings(): Promise<{ success: boolean; data?: any; error?: string }> {
+		return new Promise((resolve) => {
+			const cep = (window as any).cep;
+			if (!cep || !cep.fs) {
+				resolve({
+					success: true,
+					data: {
+						defaultMesh: '110',
+						addUnderbase: true,
+						artistName: '',
+						artistInitials: '',
+						ppdName: 'IBlock v2',
+						chokeStrokeColorSwatch: '',
+						koDarkColorNames: 'Black, PANTONE PROCESS BLACK C',
+						meshValues: '',
+						sepsTemplateFileName: 'SEP-GRID-TEMPLATE.ai'
+					}
+				});
+				return;
+			}
 
-   const os = (window as any).cep_node.require('os');
-   const path = (window as any).cep_node.require('path');
-   const homeDir = os.homedir();
-   const settingsFolder = path.join(homeDir, 'Documents', 'LEAP Settings', 'LEAP_Seps');
-   const settingsFile = path.join(settingsFolder, 'general_settings.json');
+			const os = (window as any).cep_node.require('os');
+			const path = (window as any).cep_node.require('path');
+			const homeDir = os.homedir();
+			const settingsFolder = path.join(homeDir, 'Documents', 'LEAP Settings', 'LEAP_Seps');
+			const settingsFile = path.join(settingsFolder, 'general_settings.json');
 
-   const result = cep.fs.readFile(settingsFile);
-   if (result.err === 0) {
-    try {
-     const data = JSON.parse(result.data);
-     resolve({ success: true, data: data || {} });
-    } catch (e) {
-     console.error('Error parsing general settings file', e);
-     resolve({
-      success: true,
-      data: {
-       defaultMesh: '110',
-       addUnderbase: true,
-       artistName: '',
-       artistInitials: '',
-       ppdName: 'IBlock v2',
-       chokeStrokeColorSwatch: '',
-       koDarkColorNames: 'Black, PANTONE PROCESS BLACK C',
-       meshValues: '',
-       sepsTemplateFileName: 'SEP-GRID-TEMPLATE.ai'
-      }
-     });
-    }
-   } else {
-    resolve({
-     success: true,
-     data: {
-      defaultMesh: '110',
-      addUnderbase: true,
-      artistName: '',
-      artistInitials: '',
-      ppdName: 'IBlock v2',
-      chokeStrokeColorSwatch: '',
-      koDarkColorNames: 'Black, PANTONE PROCESS BLACK C',
-      meshValues: '',
-      sepsTemplateFileName: 'SEP-GRID-TEMPLATE.ai'
-     }
-    });
-   }
-  });
- }
+			const result = cep.fs.readFile(settingsFile);
+			if (result.err === 0) {
+				try {
+					const data = JSON.parse(result.data);
+					resolve({ success: true, data: data || {} });
+				} catch (e) {
+					console.error('Error parsing general settings file', e);
+					resolve({
+						success: true,
+						data: {
+							defaultMesh: '110',
+							addUnderbase: true,
+							artistName: '',
+							artistInitials: '',
+							ppdName: 'IBlock v2',
+							chokeStrokeColorSwatch: '',
+							koDarkColorNames: 'Black, PANTONE PROCESS BLACK C',
+							meshValues: '',
+							sepsTemplateFileName: 'SEP-GRID-TEMPLATE.ai'
+						}
+					});
+				}
+			} else {
+				resolve({
+					success: true,
+					data: {
+						defaultMesh: '110',
+						addUnderbase: true,
+						artistName: '',
+						artistInitials: '',
+						ppdName: 'IBlock v2',
+						chokeStrokeColorSwatch: '',
+						koDarkColorNames: 'Black, PANTONE PROCESS BLACK C',
+						meshValues: '',
+						sepsTemplateFileName: 'SEP-GRID-TEMPLATE.ai'
+					}
+				});
+			}
+		});
+	}
 
- saveGeneralSettings(settings: {
-  defaultMesh?: string;
-  addUnderbase?: boolean;
-  artistName?: string;
-  artistInitials?: string;
-  ppdName?: string;
-  chokeStrokeColorSwatch?: string;
-  koDarkColorNames?: string;
-  meshValues?: string;
-  sepsTemplateFileName?: string;
- }): Promise<{ success: boolean; error?: string }> {
-  return new Promise((resolve) => {
-   const cep = (window as any).cep;
-   if (!cep || !cep.fs) {
-    resolve({ success: true });
-    return;
-   }
+	saveGeneralSettings(settings: {
+		defaultMesh?: string;
+		addUnderbase?: boolean;
+		artistName?: string;
+		artistInitials?: string;
+		ppdName?: string;
+		chokeStrokeColorSwatch?: string;
+		koDarkColorNames?: string;
+		meshValues?: string;
+		sepsTemplateFileName?: string;
+	}): Promise<{ success: boolean; error?: string }> {
+		return new Promise((resolve) => {
+			const cep = (window as any).cep;
+			if (!cep || !cep.fs) {
+				resolve({ success: true });
+				return;
+			}
 
-   const os = (window as any).cep_node.require('os');
-   const path = (window as any).cep_node.require('path');
-   const homeDir = os.homedir();
-   const settingsFolder = path.join(homeDir, 'Documents', 'LEAP Settings', 'LEAP_Seps');
-   const settingsFile = path.join(settingsFolder, 'general_settings.json');
+			const os = (window as any).cep_node.require('os');
+			const path = (window as any).cep_node.require('path');
+			const homeDir = os.homedir();
+			const settingsFolder = path.join(homeDir, 'Documents', 'LEAP Settings', 'LEAP_Seps');
+			const settingsFile = path.join(settingsFolder, 'general_settings.json');
 
-   const mkdirResult = cep.fs.makedir(settingsFolder);
-   if (mkdirResult.err !== 0 && mkdirResult.err !== 17) {
-    resolve({ success: false, error: 'Failed to create settings directory' });
-    return;
-   }
+			const mkdirResult = cep.fs.makedir(settingsFolder);
+			if (mkdirResult.err !== 0 && mkdirResult.err !== 17) {
+				resolve({ success: false, error: 'Failed to create settings directory' });
+				return;
+			}
 
-   const writeResult = cep.fs.writeFile(settingsFile, JSON.stringify(settings, null, 2));
-   if (writeResult.err === 0) {
-    resolve({ success: true });
-   } else {
-    resolve({ success: false, error: 'Error writing settings file: ' + writeResult.err });
-   }
-  });
- }
+			const writeResult = cep.fs.writeFile(settingsFile, JSON.stringify(settings, null, 2));
+			if (writeResult.err === 0) {
+				resolve({ success: true });
+			} else {
+				resolve({ success: false, error: 'Error writing settings file: ' + writeResult.err });
+			}
+		});
+	}
 
- loadExportSettings(): Promise<{ success: boolean; data?: any; error?: string }> {
-  return new Promise((resolve) => {
-   const defaultSettings = {
-    printGuideFilePath: '',
-    separationPreviewFilePath: '',
-    postscriptFilePath: ''
-   };
-   const cep = (window as any).cep;
-   if (!cep || !cep.fs) {
-    resolve({ success: true, data: defaultSettings });
-    return;
-   }
+	loadExportSettings(): Promise<{ success: boolean; data?: any; error?: string }> {
+		return new Promise((resolve) => {
+			const defaultSettings = {
+				printGuideFilePath: '',
+				separationPreviewFilePath: '',
+				postscriptFilePath: ''
+			};
+			const cep = (window as any).cep;
+			if (!cep || !cep.fs) {
+				resolve({ success: true, data: defaultSettings });
+				return;
+			}
 
-   const os = (window as any).cep_node.require('os');
-   const path = (window as any).cep_node.require('path');
-   const homeDir = os.homedir();
-   const settingsFolder = path.join(homeDir, 'Documents', 'LEAP Settings', 'LEAP_Seps');
-   const settingsFile = path.join(settingsFolder, 'export_settings.json');
+			const os = (window as any).cep_node.require('os');
+			const path = (window as any).cep_node.require('path');
+			const homeDir = os.homedir();
+			const settingsFolder = path.join(homeDir, 'Documents', 'LEAP Settings', 'LEAP_Seps');
+			const settingsFile = path.join(settingsFolder, 'export_settings.json');
 
-   const result = cep.fs.readFile(settingsFile);
-   if (result.err === 0) {
-    try {
-     const data = JSON.parse(result.data);
-     resolve({ success: true, data: { ...defaultSettings, ...(data || {}) } });
-    } catch (e) {
-     resolve({ success: true, data: defaultSettings });
-    }
-   } else {
-    resolve({ success: true, data: defaultSettings });
-   }
-  });
- }
+			const result = cep.fs.readFile(settingsFile);
+			if (result.err === 0) {
+				try {
+					const data = JSON.parse(result.data);
+					resolve({ success: true, data: { ...defaultSettings, ...(data || {}) } });
+				} catch (e) {
+					resolve({ success: true, data: defaultSettings });
+				}
+			} else {
+				resolve({ success: true, data: defaultSettings });
+			}
+		});
+	}
 
- saveExportSettings(settings: {
-  printGuideFilePath?: string;
-  separationPreviewFilePath?: string;
-  postscriptFilePath?: string;
- }): Promise<{ success: boolean; error?: string }> {
-  return new Promise((resolve) => {
-   const cep = (window as any).cep;
-   if (!cep || !cep.fs) {
-    resolve({ success: true });
-    return;
-   }
+	saveExportSettings(settings: {
+		printGuideFilePath?: string;
+		separationPreviewFilePath?: string;
+		postscriptFilePath?: string;
+	}): Promise<{ success: boolean; error?: string }> {
+		return new Promise((resolve) => {
+			const cep = (window as any).cep;
+			if (!cep || !cep.fs) {
+				resolve({ success: true });
+				return;
+			}
 
-   const os = (window as any).cep_node.require('os');
-   const path = (window as any).cep_node.require('path');
-   const homeDir = os.homedir();
-   const settingsFolder = path.join(homeDir, 'Documents', 'LEAP Settings', 'LEAP_Seps');
-   const settingsFile = path.join(settingsFolder, 'export_settings.json');
+			const os = (window as any).cep_node.require('os');
+			const path = (window as any).cep_node.require('path');
+			const homeDir = os.homedir();
+			const settingsFolder = path.join(homeDir, 'Documents', 'LEAP Settings', 'LEAP_Seps');
+			const settingsFile = path.join(settingsFolder, 'export_settings.json');
 
-   const mkdirResult = cep.fs.makedir(settingsFolder);
-   if (mkdirResult.err !== 0 && mkdirResult.err !== 17) {
-    resolve({ success: false, error: 'Failed to create settings directory' });
-    return;
-   }
+			const mkdirResult = cep.fs.makedir(settingsFolder);
+			if (mkdirResult.err !== 0 && mkdirResult.err !== 17) {
+				resolve({ success: false, error: 'Failed to create settings directory' });
+				return;
+			}
 
-   const normalizedSettings = {
-    printGuideFilePath: settings?.printGuideFilePath || '',
-    separationPreviewFilePath: settings?.separationPreviewFilePath || '',
-    postscriptFilePath: settings?.postscriptFilePath || ''
-   };
-   const writeResult = cep.fs.writeFile(settingsFile, JSON.stringify(normalizedSettings, null, 2));
-   if (writeResult.err === 0) {
-    resolve({ success: true });
-   } else {
-    resolve({ success: false, error: 'Error writing export settings file: ' + writeResult.err });
-   }
-  });
- }
+			const normalizedSettings = {
+				printGuideFilePath: settings?.printGuideFilePath || '',
+				separationPreviewFilePath: settings?.separationPreviewFilePath || '',
+				postscriptFilePath: settings?.postscriptFilePath || ''
+			};
+			const writeResult = cep.fs.writeFile(settingsFile, JSON.stringify(normalizedSettings, null, 2));
+			if (writeResult.err === 0) {
+				resolve({ success: true });
+			} else {
+				resolve({ success: false, error: 'Error writing export settings file: ' + writeResult.err });
+			}
+		});
+	}
 
- async getExportSettingsTokenData(): Promise<{
-  success: boolean;
-  excelColumns: string[];
-  graphicPositions: string[];
-  error?: string;
- }> {
-  try {
-   const documentPath = await this.getActiveDocumentPathForClient();
-   let excelColumns = await this.getBatchExcelColumnNamesFromLeap(documentPath);
-   if (excelColumns.length === 0) {
-    excelColumns = this.getBatchExcelColumnNames(documentPath);
-   }
-   let graphicPositions: string[] = [];
-   try {
-    const positionsResult = await this.getGraphicPlacementOptions(undefined, documentPath);
-    if (positionsResult?.success && Array.isArray(positionsResult.placements)) {
-     graphicPositions = positionsResult.placements;
-    } else if (Array.isArray(positionsResult)) {
-     graphicPositions = positionsResult;
-    }
-   } catch (_) {
-    graphicPositions = [];
-   }
-   return {
-    success: true,
-    excelColumns,
-    graphicPositions: this.uniqueNonEmptyStrings(graphicPositions)
-   };
-  } catch (error: any) {
-   return {
-    success: false,
-    excelColumns: [],
-    graphicPositions: [],
-    error: error?.message || String(error)
-   };
-  }
- }
+	async getExportSettingsTokenData(): Promise<{
+		success: boolean;
+		excelColumns: string[];
+		graphicPositions: string[];
+		error?: string;
+	}> {
+		try {
+			const documentPath = await this.getActiveDocumentPathForClient();
+			let excelColumns = await this.getBatchExcelColumnNamesFromLeap(documentPath);
+			if (excelColumns.length === 0) {
+				excelColumns = this.getBatchExcelColumnNames(documentPath);
+			}
+			let graphicPositions: string[] = [];
+			try {
+				const positionsResult = await this.getGraphicPlacementOptions(undefined, documentPath);
+				if (positionsResult?.success && Array.isArray(positionsResult.placements)) {
+					graphicPositions = positionsResult.placements;
+				} else if (Array.isArray(positionsResult)) {
+					graphicPositions = positionsResult;
+				}
+			} catch (_) {
+				graphicPositions = [];
+			}
+			return {
+				success: true,
+				excelColumns,
+				graphicPositions: this.uniqueNonEmptyStrings(graphicPositions)
+			};
+		} catch (error: any) {
+			return {
+				success: false,
+				excelColumns: [],
+				graphicPositions: [],
+				error: error?.message || String(error)
+			};
+		}
+	}
 
- private async getBatchExcelColumnNamesFromLeap(documentPath: string): Promise<string[]> {
-  try {
-   const result = await (window as any).leap.getBatchExcelColumnNames(documentPath);
-   return this.uniqueNonEmptyStrings(result?.success && Array.isArray(result.columns) ? result.columns : []);
-  } catch (_) {
-   return [];
-  }
- }
+	private async getBatchExcelColumnNamesFromLeap(documentPath: string): Promise<string[]> {
+		try {
+			const result = await (window as any).leap.getBatchExcelColumnNames(documentPath);
+			return this.uniqueNonEmptyStrings(result?.success && Array.isArray(result.columns) ? result.columns : []);
+		} catch (_) {
+			return [];
+		}
+	}
 
- private async getActiveDocumentPathForClient(): Promise<string> {
-  try {
-   const res = await (window as any).leap.scriptLoader().evalScript('handleGetActiveDocumentPath', {});
-   const data = JSON.parse(res);
-   return data?.success && data?.documentPath ? String(data.documentPath) : '';
-  } catch (_) {
-   return '';
-  }
- }
+	private async getActiveDocumentPathForClient(): Promise<string> {
+		try {
+			const res = await (window as any).leap.scriptLoader().evalScript('handleGetActiveDocumentPath', {});
+			const data = JSON.parse(res);
+			return data?.success && data?.documentPath ? String(data.documentPath) : '';
+		} catch (_) {
+			return '';
+		}
+	}
 
- /*
-  * Public: the active document's on-disk path ('' when none / on error). The Standalone tab uses
-  * this to detect a REAL document switch (vs. an unrelated refresh) so it re-prefills from the new
-  * document instead of showing the previous document's values.
-  */
- getActiveDocumentPath(): Promise<string> {
-  return this.getActiveDocumentPathForClient();
- }
+	/*
+	 * Public: the active document's on-disk path ('' when none / on error). The Standalone tab uses
+	 * this to detect a REAL document switch (vs. an unrelated refresh) so it re-prefills from the new
+	 * document instead of showing the previous document's values.
+	 */
+	getActiveDocumentPath(): Promise<string> {
+		return this.getActiveDocumentPathForClient();
+	}
 
- private getBatchExcelColumnNames(documentPath: string): string[] {
-  try {
-   const req = (window as any)?.cep_node?.require;
-   if (!req || !documentPath) return [];
-   const fs = req('fs');
-   const path = req('path');
-   const XLSX = req('xlsx');
-   const excelFilePath = this.findBatchExcelFile(documentPath, fs, path);
-   if (!excelFilePath) return [];
-   let workbook;
-   try {
-    const fileBuffer = fs.readFileSync(excelFilePath);
-    workbook = XLSX.read(fileBuffer, { type: 'buffer' });
-   } catch (_) {
-    workbook = XLSX.readFile(excelFilePath);
-   }
-   const sheetName = workbook?.SheetNames?.[0];
-   const worksheet = sheetName ? workbook.Sheets[sheetName] : null;
-   if (!worksheet) return [];
-   const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-   const headerRow = Array.isArray(rows) && rows.length > 0 ? rows[0] : [];
-   return this.uniqueNonEmptyStrings(Array.isArray(headerRow) ? headerRow.map((value: any) => String(value || '')) : []);
-  } catch (_) {
-   return [];
-  }
- }
+	private getBatchExcelColumnNames(documentPath: string): string[] {
+		try {
+			const req = (window as any)?.cep_node?.require;
+			if (!req || !documentPath) return [];
+			const fs = req('fs');
+			const path = req('path');
+			const XLSX = req('xlsx');
+			const excelFilePath = this.findBatchExcelFile(documentPath, fs, path);
+			if (!excelFilePath) return [];
+			let workbook;
+			try {
+				const fileBuffer = fs.readFileSync(excelFilePath);
+				workbook = XLSX.read(fileBuffer, { type: 'buffer' });
+			} catch (_) {
+				workbook = XLSX.readFile(excelFilePath);
+			}
+			const sheetName = workbook?.SheetNames?.[0];
+			const worksheet = sheetName ? workbook.Sheets[sheetName] : null;
+			if (!worksheet) return [];
+			const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+			const headerRow = Array.isArray(rows) && rows.length > 0 ? rows[0] : [];
+			return this.uniqueNonEmptyStrings(Array.isArray(headerRow) ? headerRow.map((value: any) => String(value || '')) : []);
+		} catch (_) {
+			return [];
+		}
+	}
 
- private findBatchExcelFile(documentPath: string, fs: any, path: any): string {
-  try {
-   if (!documentPath || !fs.existsSync(documentPath)) return '';
-   const firstExcelFromBatchFolder = (batchFolderPath: string): string => {
-    if (!batchFolderPath || !fs.existsSync(batchFolderPath)) return '';
-    const files = fs
-     .readdirSync(batchFolderPath)
-     .filter((file: string) => {
-      const filePath = path.join(batchFolderPath, file);
-      return fs.statSync(filePath).isFile() && /\.xlsx$/i.test(file);
-     })
-     .sort((a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
-    return files.length > 0 ? path.join(batchFolderPath, files[0]) : '';
-   };
+	private findBatchExcelFile(documentPath: string, fs: any, path: any): string {
+		try {
+			if (!documentPath || !fs.existsSync(documentPath)) return '';
+			const firstExcelFromBatchFolder = (batchFolderPath: string): string => {
+				if (!batchFolderPath || !fs.existsSync(batchFolderPath)) return '';
+				const files = fs
+					.readdirSync(batchFolderPath)
+					.filter((file: string) => {
+						const filePath = path.join(batchFolderPath, file);
+						return fs.statSync(filePath).isFile() && /\.xlsx$/i.test(file);
+					})
+					.sort((a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+				return files.length > 0 ? path.join(batchFolderPath, files[0]) : '';
+			};
 
-   let walkDir = path.dirname(documentPath);
-   while (walkDir) {
-    const entries = fs.existsSync(walkDir) ? fs.readdirSync(walkDir) : [];
-    const batchFolderName = entries.find((entry: string) => {
-     const entryPath = path.join(walkDir, entry);
-     return fs.statSync(entryPath).isDirectory() && entry.toUpperCase() === 'BATCH';
-    });
-    if (batchFolderName) {
-     const excelPath = firstExcelFromBatchFolder(path.join(walkDir, batchFolderName));
-     if (excelPath) return excelPath;
-    }
-    const parentWalkDir = path.dirname(walkDir);
-    if (!parentWalkDir || parentWalkDir === walkDir) break;
-    walkDir = parentWalkDir;
-   }
+			let walkDir = path.dirname(documentPath);
+			while (walkDir) {
+				const entries = fs.existsSync(walkDir) ? fs.readdirSync(walkDir) : [];
+				const batchFolderName = entries.find((entry: string) => {
+					const entryPath = path.join(walkDir, entry);
+					return fs.statSync(entryPath).isDirectory() && entry.toUpperCase() === 'BATCH';
+				});
+				if (batchFolderName) {
+					const excelPath = firstExcelFromBatchFolder(path.join(walkDir, batchFolderName));
+					if (excelPath) return excelPath;
+				}
+				const parentWalkDir = path.dirname(walkDir);
+				if (!parentWalkDir || parentWalkDir === walkDir) break;
+				walkDir = parentWalkDir;
+			}
 
-   let currentDir = path.dirname(documentPath);
-   let teamoutsFolder = '';
-   while (currentDir) {
-    const folderName = path.basename(currentDir);
-    if (folderName.toUpperCase().includes('TEAMOUTS') || folderName.toUpperCase().includes('01')) {
-     teamoutsFolder = currentDir;
-     break;
-    }
-    const parentDir = path.dirname(currentDir);
-    if (!parentDir || parentDir === currentDir) break;
-    currentDir = parentDir;
-   }
-   if (!teamoutsFolder) return '';
-   const batchParentDir = path.dirname(path.dirname(teamoutsFolder));
-   const batchFolderPath = path.join(batchParentDir, 'BATCH');
-   if (!fs.existsSync(batchFolderPath) || !fs.statSync(batchFolderPath).isDirectory()) return '';
-   const files = fs
-    .readdirSync(batchFolderPath)
-    .filter((file: string) => {
-     const filePath = path.join(batchFolderPath, file);
-     return fs.statSync(filePath).isFile() && /\.xlsx$/i.test(file);
-    })
-    .sort((a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
-   return files.length > 0 ? path.join(batchFolderPath, files[0]) : '';
-  } catch (_) {
-   return '';
-  }
- }
+			let currentDir = path.dirname(documentPath);
+			let teamoutsFolder = '';
+			while (currentDir) {
+				const folderName = path.basename(currentDir);
+				if (folderName.toUpperCase().includes('TEAMOUTS') || folderName.toUpperCase().includes('01')) {
+					teamoutsFolder = currentDir;
+					break;
+				}
+				const parentDir = path.dirname(currentDir);
+				if (!parentDir || parentDir === currentDir) break;
+				currentDir = parentDir;
+			}
+			if (!teamoutsFolder) return '';
+			const batchParentDir = path.dirname(path.dirname(teamoutsFolder));
+			const batchFolderPath = path.join(batchParentDir, 'BATCH');
+			if (!fs.existsSync(batchFolderPath) || !fs.statSync(batchFolderPath).isDirectory()) return '';
+			const files = fs
+				.readdirSync(batchFolderPath)
+				.filter((file: string) => {
+					const filePath = path.join(batchFolderPath, file);
+					return fs.statSync(filePath).isFile() && /\.xlsx$/i.test(file);
+				})
+				.sort((a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+			return files.length > 0 ? path.join(batchFolderPath, files[0]) : '';
+		} catch (_) {
+			return '';
+		}
+	}
 
- private uniqueNonEmptyStrings(values: any[]): string[] {
-  const seen = new Set<string>();
-  return (Array.isArray(values) ? values : [])
-   .map((value) => String(value || '').trim())
-   .filter((value) => {
-    if (!value || seen.has(value)) return false;
-    seen.add(value);
-    return true;
-   });
- }
+	private uniqueNonEmptyStrings(values: any[]): string[] {
+		const seen = new Set<string>();
+		return (Array.isArray(values) ? values : [])
+			.map((value) => String(value || '').trim())
+			.filter((value) => {
+				if (!value || seen.has(value)) return false;
+				seen.add(value);
+				return true;
+			});
+	}
 
- getSepsTemplateFiles(): Promise<{ success: boolean; files: string[]; error?: string }> {
-  return this.getLeapServerDataPath()
-   .then((basePath) => {
-    const normalizedBasePath = String(basePath || '').trim().replace(/[\/\\]+$/, '');
-    if (!normalizedBasePath) {
-     return { success: false, files: [], error: 'LEAP server path is not configured' };
-    }
+	getSepsTemplateFiles(): Promise<{ success: boolean; files: string[]; error?: string }> {
+		return this.getLeapServerDataPath()
+			.then((basePath) => {
+				const normalizedBasePath = String(basePath || '').trim().replace(/[\/\\]+$/, '');
+				if (!normalizedBasePath) {
+					return { success: false, files: [], error: 'LEAP server path is not configured' };
+				}
 
-    const req = (window as any)?.cep_node?.require;
-    if (!req) {
-     return { success: false, files: [], error: 'CEP node runtime is unavailable' };
-    }
+				const req = (window as any)?.cep_node?.require;
+				if (!req) {
+					return { success: false, files: [], error: 'CEP node runtime is unavailable' };
+				}
 
-    const fs = req('fs');
-    const path = req('path');
-    const templatesDir = path.join(normalizedBasePath, 'SETTINGS', 'LEAP_SEPS', 'Templates');
-    if (!fs.existsSync(templatesDir)) {
-     return { success: false, files: [], error: 'Templates folder not found: ' + templatesDir };
-    }
+				const fs = req('fs');
+				const path = req('path');
+				const templatesDir = path.join(normalizedBasePath, 'SETTINGS', 'LEAP_SEPS', 'Templates');
+				if (!fs.existsSync(templatesDir)) {
+					return { success: false, files: [], error: 'Templates folder not found: ' + templatesDir };
+				}
 
-    const aiFiles = (fs.readdirSync(templatesDir) as string[])
-     .filter((name: string) => /\.ai$/i.test(name))
-     .sort((a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
-    return { success: true, files: aiFiles };
-   })
-   .catch((err: any) => ({
-    success: false,
-    files: [],
-    error: err?.message || String(err)
-   }));
- }
+				const aiFiles = (fs.readdirSync(templatesDir) as string[])
+					.filter((name: string) => /\.ai$/i.test(name))
+					.sort((a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+				return { success: true, files: aiFiles };
+			})
+			.catch((err: any) => ({
+				success: false,
+				files: [],
+				error: err?.message || String(err)
+			}));
+	}
 
- hasSession(): boolean {
-  return (window as any).leap !== undefined;
- }
+	hasSession(): boolean {
+		return (window as any).leap !== undefined;
+	}
 
- private ensureSession(maxRetries: number = 50, delayMs: number = 100): Promise<void> {
-  if (this.hasSession()) {
-   return Promise.resolve();
-  }
+	private ensureSession(maxRetries: number = 50, delayMs: number = 100): Promise<void> {
+		if (this.hasSession()) {
+			return Promise.resolve();
+		}
 
-  return this.waitForSession(maxRetries, delayMs).catch(() => {
-   return Promise.reject('No leap');
-  });
- }
+		return this.waitForSession(maxRetries, delayMs).catch(() => {
+			return Promise.reject('No leap');
+		});
+	}
 
- private log(val: string): void {
-  this.leapSepsLog.logInfo('Controller', val);
- }
+	private log(val: string): void {
+		this.leapSepsLog.logInfo('Controller', val);
+	}
 
- private get name(): string {
-  return 'Client Controller:: ';
- }
+	private get name(): string {
+		return 'Client Controller:: ';
+	}
 
- async getSpotColorSwatches(): Promise<string[]> {
-  const script = `
+	async getSpotColorSwatches(): Promise<string[]> {
+		const script = `
     function getSpotSwatchNames() {
       if (app.documents.length === 0) return "";
 
@@ -5452,23 +5505,23 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
     getSpotSwatchNames();
   `;
 
-  try {
-   const result = (await evalScript(script)) as string;
+		try {
+			const result = (await evalScript(script)) as string;
 
-   console.log('[RESULT: ', result);
+			console.log('[RESULT: ', result);
 
-   if (!result || result === 'undefined') return [];
+			if (!result || result === 'undefined') return [];
 
-   return result.split('|||'); // ✅ string[]
-  } catch (err) {
-   console.error('Failed to get spot swatches:', err);
-   return [];
-  }
- }
+			return result.split('|||'); // ✅ string[]
+		} catch (err) {
+			console.error('Failed to get spot swatches:', err);
+			return [];
+		}
+	}
 
- async generateCompoundPlate(subLayerNames: string[], newLayerName: string, fillColorName: string) {
-  const strifySublayerNames = JSON.stringify(subLayerNames);
-  const script = `
+	async generateCompoundPlate(subLayerNames: string[], newLayerName: string, fillColorName: string) {
+		const strifySublayerNames = JSON.stringify(subLayerNames);
+		const script = `
 function createCompoundPlate(subLayerNames, newLayerName, fillColorName) {
  if (!app.documents.length) {
   throw new Error('No document open');
@@ -5597,11 +5650,11 @@ function createCompoundPlate(subLayerNames, newLayerName, fillColorName) {
 createCompoundPlate(${strifySublayerNames}, "${newLayerName}", "${fillColorName}");
   `;
 
-  try {
-   await evalScript(script);
-  } catch (err) {
-   console.error('Failed to get spot swatches:', err);
-   //  return null;
-  }
- }
+		try {
+			await evalScript(script);
+		} catch (err) {
+			console.error('Failed to get spot swatches:', err);
+			//  return null;
+		}
+	}
 }

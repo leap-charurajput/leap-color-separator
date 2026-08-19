@@ -65,10 +65,12 @@ function splitColors(_graphicName, cleanupOpts) {
 		app.executeMenuCommand('group');
 		_step("after group sel=" + _selCount());
 		/* Remember the grouped art: Divide is what loses the selection on some machines, and this
-		   reference is the only way back to the same art afterwards. */
+			 reference is the only way back to the same art afterwards. */
 		var _groupItem = null;
+		var _groupParent = null;
 		try {
 			_groupItem = app.selection && app.selection.length > 0 ? app.selection[0] : null;
+			_groupParent = _groupItem ? _groupItem.parent : null;
 		} catch (eGroupRef) { }
 
 		/*
@@ -98,10 +100,48 @@ function splitColors(_graphicName, cleanupOpts) {
 		if (!_processItem && _groupItem) {
 			try {
 				var _probeType = _groupItem.typename;
-				_processItem = _groupItem;
-				_step("selection empty after divide; recovered pre-divide group (" + _probeType + ")");
+				var _groupChildren = -1;
+				try { _groupChildren = _groupItem.pageItems ? _groupItem.pageItems.length : -1; } catch (eKids) { }
+				/*
+				 * On the machine that surfaced this, BOTH the action and the menu command divide leave
+				 * app.selection empty (trace: "after divide sel=0 … fallback sel=0"), so selection cannot
+				 * be trusted at all here. If the pre-divide group is a live object with children, re-divide
+				 * it via the menu; either way, re-acquire the RESULT from document structure below.
+				 */
+				if (_groupChildren > 0) {
+					app.selection = null;
+					_groupItem.selected = true;
+					app.redraw();
+					app.executeMenuCommand('Live Pathfinder Divide');
+					app.executeMenuCommand('expandStyle');
+					app.redraw();
+					_processItem = app.selection && app.selection.length > 0 ? app.selection[0] : null;
+				}
+				_step("action divide lost selection; group (" + _probeType + ", children=" + _groupChildren + ") menu fallback sel=" + _selCount());
 			} catch (eStale) {
-				_step("selection empty after divide; pre-divide group reference is stale");
+				_step("selection empty after divide; pre-divide group unusable: " + (eStale.message || eStale));
+			}
+
+			/*
+			 * Selection-free re-acquire: pasteInPlace put our copy at the TOP of its container, and both
+			 * Divide paths replace the object IN PLACE — so the divided result is the container's topmost
+			 * page item, selected or not. This is the branch that actually recovers on machines where
+			 * every pathfinder operation deselects.
+			 */
+			if (!_processItem && _groupParent) {
+				try {
+					if (_groupParent.pageItems && _groupParent.pageItems.length > 0) {
+						var _topmost = _groupParent.pageItems[0];
+						var _topChildren = -1;
+						try { _topChildren = _topmost.pageItems ? _topmost.pageItems.length : -1; } catch (eTopKids) { }
+						_step("re-acquired topmost of parent: " + _topmost.typename + " children=" + _topChildren);
+						_processItem = _topmost;
+					} else {
+						_step("parent has no page items — divided art not found in container");
+					}
+				} catch (eParent) {
+					_step("could not re-acquire from parent: " + (eParent.message || eParent));
+				}
 			}
 		}
 
@@ -126,6 +166,20 @@ function splitColors(_graphicName, cleanupOpts) {
 			if (colorGroups.hasOwnProperty(_cg)) { _groupNames.push(_cg); }
 		}
 		_step("colors found (" + _groupNames.length + "): " + (_groupNames.length ? _groupNames.join(", ") : "NONE"));
+
+		/*
+		 * Zero colour groups must FAIL, not succeed. Proceeding used to build only Choke + White UB and
+		 * report "Separation performed successfully" — a separation with no ink plates that looks done.
+		 * Reached two ways: art with no filled vector paths (embedded raster, outlined masks), or the
+		 * post-Divide recovery above grabbing a group Divide had already consumed.
+		 */
+		if (_groupNames.length === 0) {
+			throw new Error(
+				"No ink colors found in the processed art for \"" + _graphicName +
+				"\" — no plates can be made. The graphic may be an embedded image / masked art with no " +
+				"filled vector paths, or Pathfinder Divide did not run (check the \"LEAP Color Seps\" action set)."
+			);
+		}
 
 
 		for (var colorName in colorGroups) {
@@ -612,9 +666,9 @@ function resolveUnderbaseLayerAndSwatch(ubIndex, profileMetadata, doc) {
 	//   3) Else, fall back to the dedicated "White UB 2" swatch (unchanged behavior).
 	if (ubIndex === 1) {
 		/* Format-aware: when ink-name formatting is on, the white plate swatch may already be
-		   renamed (e.g. "PANTONE White C" -> "SL White") — as happens on "Generate underbase from
-		   existing inks", where inks are already formatted. resolveSharedWhitePlateSwatchName finds
-		   the formatted name too so UB2 still SHARES the real white plate instead of falling back. */
+			 renamed (e.g. "PANTONE White C" -> "SL White") — as happens on "Generate underbase from
+			 existing inks", where inks are already formatted. resolveSharedWhitePlateSwatchName finds
+			 the formatted name too so UB2 still SHARES the real white plate instead of falling back. */
 		var whiteSwatchName = resolveSharedWhitePlateSwatchName(doc, profileMetadata);
 		if (whiteSwatchName) {
 			return {
@@ -1327,7 +1381,7 @@ function reorderGeneratedUnderbaseLayers(separatedArtLayer, profileMetadata) {
 			else if (isUnderbaseStackLayerName(layer.name, profileMetadata, app.activeDocument)) whiteUbLayers.push(layer);
 		}
 
-		whiteUbLayers.sort(function(a, b) {
+		whiteUbLayers.sort(function (a, b) {
 			// Descending so the stack is UB4, UB3, UB2, UB1 (top -> bottom), including custom-named passes.
 			return underbasePassNumberForLayer(b.name, profileMetadata) - underbasePassNumberForLayer(a.name, profileMetadata);
 		});

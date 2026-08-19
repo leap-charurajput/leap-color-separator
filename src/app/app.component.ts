@@ -44,6 +44,11 @@ export class AppComponent implements OnInit, OnDestroy {
  ) { }
 
  ngOnInit(): void {
+  /* Panel version for the log-file session banner (logging only). Set before anything else logs. */
+  try {
+   (window as any).__LEAP_PANEL_VERSION__ = this.panelBuildStamp;
+   this.leapSepsLog.logInfo('Panel', 'LEAP Color Separator panel ' + this.panelBuildStamp + ' ready');
+  } catch (e) { /* ignore */ }
   document.body.classList.add('dark');
   this.leapSepsLog.logProcess('LEAP Color Separator panel opened', {
    version: this.panelVersion,

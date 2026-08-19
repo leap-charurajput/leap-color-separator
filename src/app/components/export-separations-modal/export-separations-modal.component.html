@@ -16,6 +16,8 @@
 						class="control-number-input"
 						[value]="controlNumber"
 						(input)="handleControlNumberChange($event)"
+						(blur)="handleControlVersionCommit()"
+						(keydown.enter)="handleControlVersionCommit()"
 						placeholder="Control"
 						autocomplete="off"
 					/>
@@ -29,6 +31,8 @@
 						class="control-number-input"
 						[value]="versionNumber"
 						(input)="handleVersionNumberChange($event)"
+						(blur)="handleControlVersionCommit()"
+						(keydown.enter)="handleControlVersionCommit()"
 						placeholder="Version"
 						autocomplete="off"
 					/>

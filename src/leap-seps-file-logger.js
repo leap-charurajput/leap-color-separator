@@ -1,5 +1,7 @@
 /**
- * LEAP Color Separator file logger → ~/Documents/LEAP Settings/Logs/leap_seps.log
+ * LEAP Color Separator file logger → ~/Documents/LEAP Settings/Logs/LEAP_Seps/<YYYY-MM-DD>.log
+ * One file per LOCAL day (the date is re-evaluated on every write, so the file rolls at midnight
+ * without a restart). Replaces the single ever-growing leap_seps.log.
  * API: window.leapSepsWrite(level, category, message, detail?)
  *       window.installLeapSepsFileLogger()
  */
@@ -12,8 +14,32 @@
  var installed = false;
  var installAttempts = 0;
  var MAX_INSTALL_ATTEMPTS = 100;
- var LOG_FILE_NAME = 'leap_seps.log';
+ var LOG_SUBFOLDER = 'LEAP_Seps';
  var pendingLines = [];
+
+ /* Local calendar date as YYYY-MM-DD — local, not UTC, so a file's name matches the day the user
+    actually worked (an evening session must not land in "tomorrow's" file). */
+ function padRight(text, width) {
+  var t = String(text == null ? '' : text);
+  while (t.length < width) t += ' ';
+  return t;
+ }
+
+ function localTimeStamp() {
+  var d = new Date();
+  var hh = String(d.getHours()), mi = String(d.getMinutes()), ss = String(d.getSeconds());
+  var ms = String(d.getMilliseconds());
+  while (ms.length < 3) ms = '0' + ms;
+  return (hh.length < 2 ? '0' + hh : hh) + ':' + (mi.length < 2 ? '0' + mi : mi) + ':' +
+   (ss.length < 2 ? '0' + ss : ss) + '.' + ms;
+ }
+
+ function localDateStamp() {
+  var d = new Date();
+  var mm = String(d.getMonth() + 1);
+  var dd = String(d.getDate());
+  return d.getFullYear() + '-' + (mm.length < 2 ? '0' + mm : mm) + '-' + (dd.length < 2 ? '0' + dd : dd);
+ }
  var MAX_PENDING = 500;
 
  function getFsPath() {
@@ -22,8 +48,8 @@
    var os = global.cep_node.require('os');
    var path = global.cep_node.require('path');
    var home = os.homedir();
-   var logDir = path.join(home, 'Documents', 'LEAP Settings', 'Logs');
-   var logPath = path.join(logDir, LOG_FILE_NAME);
+   var logDir = path.join(home, 'Documents', 'LEAP Settings', 'Logs', LOG_SUBFOLDER);
+   var logPath = path.join(logDir, localDateStamp() + '.log');
    return { fs: global.cep_node.require('fs'), path: path, logDir: logDir, logPath: logPath };
   } catch (e) {
    return null;
@@ -138,26 +164,65 @@
   }
  }
 
+ /*
+  * Repeat collapsing. A poller or a retry loop can emit the SAME line many times a second; instead
+  * of writing each one, identical consecutive lines are counted and flushed as one line with
+  * "(×N)" when a different line arrives (or after REPEAT_FLUSH_MS). Errors are never collapsed —
+  * every one is written. Content is unchanged; only the duplicate count is folded.
+  */
+ var REPEAT_FLUSH_MS = 5000;
+ var lastKey = '';
+ var lastLevel = '';
+ var lastRepeat = 0;
+ var lastFirstStamp = '';
+ var repeatTimer = null;
+
+ function flushRepeat(ctx) {
+  if (lastRepeat > 1 && ctx) {
+   try {
+    var note = lastFirstStamp + '  ' + padRight(lastLevel, 7) + ' ' + padRight('Logger', 16) +
+     '  \u2191 previous line repeated ' + lastRepeat + '\u00d7\n';
+    ctx.fs.appendFileSync(ctx.logPath, note, 'utf8');
+   } catch (eFlush) { }
+  }
+  lastKey = ''; lastRepeat = 0; lastLevel = ''; lastFirstStamp = '';
+  if (repeatTimer) { clearTimeout(repeatTimer); repeatTimer = null; }
+ }
+
  function writeLine(level, category, message, detail) {
   var ctx = getFsPath();
   if (!ctx) return false;
   try {
+   var lvl = String(level || 'LOG');
+   var repeatKey = lvl + '|' + (category || '') + '|' + (message || '') + '|' + formatDetail(detail);
+   if (lvl !== 'ERROR' && repeatKey === lastKey) {
+    lastRepeat++;
+    if (!repeatTimer) {
+     repeatTimer = setTimeout(function () { flushRepeat(getFsPath()); }, REPEAT_FLUSH_MS);
+    }
+    return true;
+   }
+   flushRepeat(ctx);
+   lastKey = repeatKey; lastLevel = lvl; lastRepeat = 1; lastFirstStamp = localTimeStamp();
    if (!ctx.fs.existsSync(ctx.logDir)) {
     ctx.fs.mkdirSync(ctx.logDir, { recursive: true });
    }
    var cat = category ? String(category) : 'App';
    var msg = message != null ? String(message) : '';
    var extra = formatDetail(detail);
+   /*
+    * Line shape (readability only — same information, same order, nothing consumed by code):
+    *   HH:MM:SS.mmm  LEVEL   Category        message  → detail
+    * Local wall-clock time instead of ISO-Z (the file is already per-day, and "18:07Z" read as
+    * evening to everyone looking at a 14:07 local session); fixed-width level and category so the
+    * message column lines up and the eye can scan straight down for ERROR / WARN / EXPORT.
+    */
    var line =
-    '[' +
-    new Date().toISOString() +
-    '] [' +
-    level +
-    '] [' +
-    cat +
-    '] ' +
+    localTimeStamp() + '  ' +
+    padRight(String(level || 'LOG'), 7) + ' ' +
+    padRight(cat, 16) + ' ' +
     msg +
-    (extra ? ' | ' + extra : '') +
+    (extra ? '  \u2192 ' + extra : '') +
     '\n';
    ctx.fs.appendFileSync(ctx.logPath, line, 'utf8');
    return true;
@@ -227,13 +292,24 @@
    if (ctx && !ctx.fs.existsSync(ctx.logDir)) {
     ctx.fs.mkdirSync(ctx.logDir, { recursive: true });
    }
+   var d = new Date();
+   var version = '';
+   try { version = String(global.__LEAP_PANEL_VERSION__ || ''); } catch (eV) { }
+   /* The banner is written when the logger installs, which can precede Angular setting the version;
+      when it does, the panel logs its own "panel <version>" line right after ngOnInit instead. */
+   var host = '';
+   try { host = global.cep_node.require('os').hostname(); } catch (eH) { }
+   var user = '';
+   try { user = global.cep_node.require('os').userInfo().username; } catch (eU) { }
    var banner =
-    '\n========== LEAP Color Separator session ' +
-    new Date().toISOString() +
-    ' ==========\n' +
-    'Log file: ' +
-    logPath +
-    '\n';
+    '\n' +
+    '================================================================================\n' +
+    '  LEAP Color Separator \u2014 session started ' + localDateStamp() + ' ' + localTimeStamp() +
+    (version ? '   (panel ' + version + ')' : '') + '\n' +
+    (user || host ? '  User: ' + (user || '?') + '   Machine: ' + (host || '?') + '\n' : '') +
+    '  Log:  ' + logPath + '\n' +
+    '  Columns: time  level  category  message  \u2192 detail\n' +
+    '================================================================================\n';
    if (ctx) {
     ctx.fs.appendFileSync(ctx.logPath, banner, 'utf8');
    }

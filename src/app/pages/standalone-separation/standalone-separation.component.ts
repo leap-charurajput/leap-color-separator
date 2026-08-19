@@ -866,10 +866,21 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
    }))
    .filter((f) => f.t.length > 0 && isFinite(f.x) && isFinite(f.y));
 
-  /* Drop header / footer / copyright / garment-swatch / PMS-swatch frames and size marks (e.g. 2"). */
+  /*
+   * Drop everything that is not a label:value row.
+   *  - header / footer / copyright / garment / PMS swatch frames, size marks (2")
+   *  - CHECKBOX GLYPHS: the BOM and garment-type blocks are columns of single symbol-font
+   *    characters (ZapfDingbats boxes) that come through as U+FFFD / a lone non-ASCII char. They
+   *    share one x exactly, so they formed the biggest x-cluster and were picked AS the info
+   *    column — which is how Style / Color / Team Name came out as "�".
+   */
   const SKIP = /(©|licensing|submission|garment|fanatics|developed|\bpms\b)/i;
   const isMeasurement = (t: string) => /^\d+(\.\d+)?\s*["”″′’']?$/.test(t);
-  const candidates = clean.filter((f) => !SKIP.test(f.t) && !isMeasurement(f.t));
+  const isGlyph = (t: string) =>
+   t.length <= 2 && !/[A-Za-z0-9]/.test(t); /* "�", "", "✓", "✗" — symbol-font checkbox art */
+  const candidates = clean.filter(
+   (f) => !SKIP.test(f.t) && !isMeasurement(f.t) && !isGlyph(f.t) && /[A-Za-z0-9]/.test(f.t)
+  );
   if (candidates.length === 0) {
    return out;
   }
@@ -881,36 +892,75 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
   }
 
   /* Sort top -> bottom: y is the frame's top, and a larger y is higher on the sheet. */
-  const rows = infoColumn.slice().sort((a, b) => b.y - a.y);
+  const allRows = infoColumn.slice().sort((a, b) => b.y - a.y);
+
+  /*
+   * Placement: a value with a parenthesised suffix, e.g. "FT (Print)" / "CF (High Solid …)".
+   * Pulled out BEFORE indexing: on two-column templates it sits in the middle of the descriptive
+   * block (row 3), which shifted every later index by one (product line became the artist's
+   * initials, team name became the product line). Indexing the remaining rows is layout-stable.
+   */
+  const isPlacement = (t: string) => /^[^()]+\([^)]*\)\s*$/.test(t);
+  const placementRow = allRows.find((r) => isPlacement(r.t));
+  out.placement = placementRow ? placementRow.t : '';
+  const rows = allRows.filter((r) => !isPlacement(r.t));
   const at = (i: number): string => (i >= 0 && i < rows.length ? rows[i].t : '');
 
+  /*
+   * The LEFT info column carries the descriptive rows in a stable order (placement removed):
+   *   0 design name, 1 concept, 2 player, 3 date, 4 artist, 5 product line, 6 team name
+   * (style / color / org / season may follow on one-column templates). Date and artist are not
+   * mapped — they come from settings / the run itself.
+   */
   out.designName = at(0);
   out.conceptCode = at(1);
   out.player = at(2);
-  /* Row 3 is the sheet's date and row 4 the artist — both come from settings / the run itself. */
   out.productLine = at(5);
   out.teamName = at(6);
-  out.style = at(7);
-  out.color = at(8);
-
-  /* Placement: a value with a parenthesised suffix, e.g. "FT (Print)" / "CF (High Solid …)". */
-  const placementRow = rows.find((r) => /^[^()]+\([^)]*\)\s*$/.test(r.t));
-  out.placement = placementRow ? placementRow.t : '';
 
   /*
-   * Org code (Team Code): in the lower block (index >= 9), the first short alphanumeric token with
-   * no space that is not a parenthetical (placement / art revisions) or a date. Handles "DNV"
-   * (below color) and "7G" (below the combined graphic/season row) alike.
+   * CODES BY CONTENT, not by row index. Newer templates put Style / Color / Org / Graphic in a
+   * SECOND value column (seen at x≈258 beside the x≈93 descriptive column), so "row 7 = style"
+   * silently mapped the team name into Style. Patterns are the same ones applyItemId() uses.
+   *
+   * Best source first: the sheet's own Item ID ("CM52-0103-7G-C33") — one token, all four codes,
+   * exactly what the form splits anyway. Search ALL candidates (not just the chosen column).
    */
-  for (let i = 9; i < rows.length; i++) {
-   const t = rows[i].t;
-   if (/\s/.test(t)) continue; /* multiword: graphic + season */
-   if (/[()]/.test(t)) continue; /* parenthetical: placement / art revisions */
-   if (/^\d{1,2}[.\/]\d/.test(t)) continue; /* date */
-   if (/^[0-9A-Za-z]{1,5}$/.test(t)) {
-    out.orgCode = t;
-    break;
-   }
+  const cands = candidates;
+  const itemIdFrame = cands.find((f) => /^[A-Za-z0-9]{2,6}-[A-Za-z0-9]{2,6}-[A-Za-z0-9]{1,5}-[A-Za-z0-9]{1,6}$/.test(f.t));
+  if (itemIdFrame) {
+   const seg = itemIdFrame.t.split('-');
+   out.itemId = itemIdFrame.t;
+   out.style = seg[0];
+   out.color = seg[1];
+   out.orgCode = seg[2];
+   out.graphicCode = seg[3];
+  } else {
+   /*
+    * No Item ID on the sheet: read the codes by pattern. Two layouts exist —
+    *  (a) two-column (newer): codes in a value column BESIDE the info column (x≈258 vs x≈93)
+    *  (b) one-column (older): codes BELOW the descriptive rows in the SAME column
+    *      (…, team name, N199, 10A, NK, FT (Print), D31)
+    * Search the adjacent column first; if it has nothing, fall back to the info column's own rows
+    * below the descriptive block (index ≥ 7). Same patterns applyItemId() uses. Descriptive rows
+    * (0–6) are never considered, so a team name like "Kansas City Chiefs" cannot become Style.
+    */
+   const colX = infoColumn[0] ? infoColumn[0].x : 0;
+   const adjacent = cands
+    .filter((f) => f.x > colX + 40 && f.x < colX + 400)
+    .sort((a, b) => b.y - a.y);
+   const sameColumnTail = rows.slice(7);
+   const codeCol = adjacent.length > 0 ? adjacent : sameColumnTail;
+   const firstMatch = (re: RegExp, skip: Set<string>): string => {
+    const hit = codeCol.find((f) => re.test(f.t) && !skip.has(f.t));
+    return hit ? hit.t : '';
+   };
+   const used = new Set<string>();
+   out.style = firstMatch(/^[A-Z]{1,2}\d{2,3}[A-Z]?$/, used); if (out.style) used.add(out.style);      /* CM52, N199, FM02 */
+   out.color = firstMatch(/^\d{2,4}[A-Z]?$/, used); if (out.color) used.add(out.color);             /* 0103, 127A, 0484, 10A */
+   out.orgCode = firstMatch(/^[A-Z0-9]{2,3}$/, used); if (out.orgCode) used.add(out.orgCode);        /* 7G, DNV, NK, 58 */
+   out.graphicCode = firstMatch(/^[A-Z]\d{2}$|^[A-Z]{3}$/, used);                                  /* C33, D31, KPN */
+   out.season = firstMatch(/^[FS]\d{2}$/, used);                                                    /* F26 */
   }
 
   return out;
@@ -926,17 +976,38 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
  ): Array<{ t: string; x: number; y: number }> {
   const sorted = cands.slice().sort((a, b) => a.x - b.x);
   const TOL = 12;
-  let best: Array<{ t: string; x: number; y: number }> = [];
+  const clusters: Array<Array<{ t: string; x: number; y: number }>> = [];
   let cur: Array<{ t: string; x: number; y: number }> = [];
   for (let i = 0; i < sorted.length; i++) {
    if (cur.length === 0 || Math.abs(sorted[i].x - cur[cur.length - 1].x) <= TOL) {
     cur.push(sorted[i]);
    } else {
-    if (cur.length > best.length) best = cur;
+    clusters.push(cur);
     cur = [sorted[i]];
    }
   }
-  if (cur.length > best.length) best = cur;
+  if (cur.length) clusters.push(cur);
+
+  /*
+   * Score clusters instead of taking the largest. The LICENSING info column is a tight vertical
+   * run of SHORT, DISTINCT values (design name, concept, placement, date, artist, team…). Repeated
+   * boilerplate ("FULL SIZE ARTWORK" ×12 across artboards) and tall wrapped paragraphs are not.
+   */
+  const score = (c: Array<{ t: string; x: number; y: number }>): number => {
+   const distinct = new Set(c.map((f) => f.t.toLowerCase())).size;
+   const shortRows = c.filter((f) => f.t.length <= 40).length;
+   const rowSpread = c.length > 1 ? Math.max(...c.map((f) => f.y)) - Math.min(...c.map((f) => f.y)) : 0;
+   /* Real info rows sit ~9-12pt apart; a column spanning thousands of points is boilerplate. */
+   const compact = rowSpread > 0 && rowSpread / c.length <= 40 ? 1 : 0;
+   return distinct * 2 + shortRows + compact * 5 - (c.length - distinct) * 2;
+  };
+  let best = clusters[0] || [];
+  let bestScore = -Infinity;
+  for (const c of clusters) {
+   const sc = score(c);
+   /* Tie -> leftmost, which the x-sort already gives us. */
+   if (sc > bestScore) { bestScore = sc; best = c; }
+  }
   return best;
  }
 
@@ -1050,10 +1121,16 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
   if (mappedPosition) this.position = mappedPosition;
 
   /*
-   * The LICENSING sheet has no Item ID row, but it carries the four codes the id is built from —
-   * show the composed id so the user sees (and can correct) the same value the [Item ID] token gets.
+   * Item ID: newer sheets print it verbatim ("CM52-0103-7G-C33") — use that as-is when present,
+   * since it is exactly what the form would otherwise compose. Older sheets carry only the four
+   * codes, so compose it from them.
    */
-  this.composeItemIdFromParts();
+  const sheetItemId = pick(raw.itemId);
+  if (sheetItemId) {
+   this.itemId = sheetItemId;
+  } else {
+   this.composeItemIdFromParts();
+  }
  }
 
  /*

@@ -1,586 +1,626 @@
 #include "./constants.jsx"
 
-/** Append one line to ~/Documents/LEAP Settings/Logs/leap_seps.log */
+/*
+ * Append one line to ~/Documents/LEAP Settings/Logs/LEAP_Seps/<YYYY-MM-DD>.log — the SAME per-day
+ * file the panel logger writes, so host and panel entries interleave in one place. Local date,
+ * re-evaluated per call, so the file rolls at midnight.
+ */
+function leapSepLogDateStamp() {
+	var d = new Date();
+	var mm = String(d.getMonth() + 1);
+	var dd = String(d.getDate());
+	return d.getFullYear() + "-" + (mm.length < 2 ? "0" + mm : mm) + "-" + (dd.length < 2 ? "0" + dd : dd);
+}
+
 function appendLeapSepLog(message) {
- try {
-  var logFolder = new Folder(Folder.myDocuments.fsName + "/LEAP Settings/Logs");
-  if (!logFolder.exists) {
-   logFolder.create();
-  }
-  var logFile = new File(logFolder.fsName + "/leap_seps.log");
-  logFile.encoding = "UTF-8";
-  if (logFile.open("a")) {
-   logFile.writeln("[" + new Date().toISOString() + "] [JSX] " + message);
-   logFile.close();
-  }
- } catch (e) {}
+	try {
+		var logsRoot = new Folder(Folder.myDocuments.fsName + "/LEAP Settings/Logs");
+		if (!logsRoot.exists) {
+			logsRoot.create();
+		}
+		var logFolder = new Folder(logsRoot.fsName + "/LEAP_Seps");
+		if (!logFolder.exists) {
+			logFolder.create();
+		}
+		var logFile = new File(logFolder.fsName + "/" + leapSepLogDateStamp() + ".log");
+		logFile.encoding = "UTF-8";
+		if (logFile.open("a")) {
+			/* Same column layout as the panel logger so host and panel lines align in the shared file:
+			   HH:MM:SS.mmm  LEVEL   Category        message */
+			var d = new Date();
+			var hh = String(d.getHours()), mi = String(d.getMinutes()), ss = String(d.getSeconds());
+			var ms = String(d.getMilliseconds());
+			while (ms.length < 3) ms = "0" + ms;
+			var stamp = (hh.length < 2 ? "0" + hh : hh) + ":" + (mi.length < 2 ? "0" + mi : mi) + ":" +
+				(ss.length < 2 ? "0" + ss : ss) + "." + ms;
+			var text = String(message == null ? "" : message);
+			/* Level from the message shape so errors stand out in the same column as panel errors. */
+			var level = /error|failed|exception/i.test(text) ? "ERROR  " : "HOST   ";
+			logFile.writeln(stamp + "  " + level + " " + "Illustrator      " + text);
+			logFile.close();
+		}
+	} catch (e) { }
 }
 
 function cmykToRgb(c, m, y, k) {
- c = c / 100;
- m = m / 100;
- y = y / 100;
- k = k / 100;
+	c = c / 100;
+	m = m / 100;
+	y = y / 100;
+	k = k / 100;
 
- var r = 255 * (1 - c) * (1 - k);
- var g = 255 * (1 - m) * (1 - k);
- var b = 255 * (1 - y) * (1 - k);
+	var r = 255 * (1 - c) * (1 - k);
+	var g = 255 * (1 - m) * (1 - k);
+	var b = 255 * (1 - y) * (1 - k);
 
- return {
-  r: Math.round(r),
-  g: Math.round(g),
-  b: Math.round(b)
- };
+	return {
+		r: Math.round(r),
+		g: Math.round(g),
+		b: Math.round(b)
+	};
 }
 
 function rgbToHex(r, g, b) {
- var toHex = function (n) {
-  var hex = Math.round(n).toString(16);
-  return hex.length === 1 ? "0" + hex : hex;
- };
- return "#" + toHex(r) + toHex(g) + toHex(b);
+	var toHex = function (n) {
+		var hex = Math.round(n).toString(16);
+		return hex.length === 1 ? "0" + hex : hex;
+	};
+	return "#" + toHex(r) + toHex(g) + toHex(b);
 }
 
 function getColorHex(color) {
- if (color.typename === CONSTANTS.COLOR_TYPES.SPOT) {
-  return getColorHex(color.spot.color);
- } else if (color.typename === CONSTANTS.COLOR_TYPES.CMYK) {
-  var rgb = cmykToRgb(color.cyan, color.magenta, color.yellow, color.black);
-  return rgbToHex(rgb.r, rgb.g, rgb.b);
- } else if (color.typename === CONSTANTS.COLOR_TYPES.RGB) {
-  return rgbToHex(color.red, color.green, color.blue);
- } else if (color.typename === CONSTANTS.COLOR_TYPES.GRAY) {
-  var gray = Math.round((100 - color.gray) * 2.55);
-  return rgbToHex(gray, gray, gray);
- }
- return "#808080";
+	if (color.typename === CONSTANTS.COLOR_TYPES.SPOT) {
+		return getColorHex(color.spot.color);
+	} else if (color.typename === CONSTANTS.COLOR_TYPES.CMYK) {
+		var rgb = cmykToRgb(color.cyan, color.magenta, color.yellow, color.black);
+		return rgbToHex(rgb.r, rgb.g, rgb.b);
+	} else if (color.typename === CONSTANTS.COLOR_TYPES.RGB) {
+		return rgbToHex(color.red, color.green, color.blue);
+	} else if (color.typename === CONSTANTS.COLOR_TYPES.GRAY) {
+		var gray = Math.round((100 - color.gray) * 2.55);
+		return rgbToHex(gray, gray, gray);
+	}
+	return "#808080";
 }
 
 function getColorName(color) {
- if (color.typename === CONSTANTS.COLOR_TYPES.SPOT) {
-  return color.spot.name;
- } else if (color.typename === CONSTANTS.COLOR_TYPES.CMYK) {
-  return CONSTANTS.COLOR_PREFIXES.CMYK +
-   Math.round(color.cyan) + "_" +
-   Math.round(color.magenta) + "_" +
-   Math.round(color.yellow) + "_" +
-   Math.round(color.black);
- } else if (color.typename === CONSTANTS.COLOR_TYPES.RGB) {
-  return CONSTANTS.COLOR_PREFIXES.RGB +
-   Math.round(color.red) + "_" +
-   Math.round(color.green) + "_" +
-   Math.round(color.blue);
- } else if (color.typename === CONSTANTS.COLOR_TYPES.GRAY) {
-  return CONSTANTS.COLOR_PREFIXES.GRAY + Math.round(color.gray);
- }
- return CONSTANTS.COLOR_PREFIXES.UNKNOWN;
+	if (color.typename === CONSTANTS.COLOR_TYPES.SPOT) {
+		return color.spot.name;
+	} else if (color.typename === CONSTANTS.COLOR_TYPES.CMYK) {
+		return CONSTANTS.COLOR_PREFIXES.CMYK +
+			Math.round(color.cyan) + "_" +
+			Math.round(color.magenta) + "_" +
+			Math.round(color.yellow) + "_" +
+			Math.round(color.black);
+	} else if (color.typename === CONSTANTS.COLOR_TYPES.RGB) {
+		return CONSTANTS.COLOR_PREFIXES.RGB +
+			Math.round(color.red) + "_" +
+			Math.round(color.green) + "_" +
+			Math.round(color.blue);
+	} else if (color.typename === CONSTANTS.COLOR_TYPES.GRAY) {
+		return CONSTANTS.COLOR_PREFIXES.GRAY + Math.round(color.gray);
+	}
+	return CONSTANTS.COLOR_PREFIXES.UNKNOWN;
 }
 
 function collectItemsByColor(item, colorGroups) {
- if (item.typename === "CompoundPathItem") {
-  if (item.pathItems && item.pathItems.length > 0 &&
-   item.pathItems[0].filled && item.pathItems[0].fillColor) {
-   var colorName = getColorName(item.pathItems[0].fillColor);
+	if (item.typename === "CompoundPathItem") {
+		if (item.pathItems && item.pathItems.length > 0 &&
+			item.pathItems[0].filled && item.pathItems[0].fillColor) {
+			var colorName = getColorName(item.pathItems[0].fillColor);
 
-   if (!colorGroups[colorName]) {
-    colorGroups[colorName] = [];
-   }
-   colorGroups[colorName].push(item);
-  }
-  return;
- }
+			if (!colorGroups[colorName]) {
+				colorGroups[colorName] = [];
+			}
+			colorGroups[colorName].push(item);
+		}
+		return;
+	}
 
- if (item.typename === "PathItem" && item.filled && item.fillColor) {
-  var colorName = getColorName(item.fillColor);
+	if (item.typename === "PathItem" && item.filled && item.fillColor) {
+		var colorName = getColorName(item.fillColor);
 
-  if (!colorGroups[colorName]) {
-   colorGroups[colorName] = [];
-  }
-  colorGroups[colorName].push(item);
-  return;
- }
+		if (!colorGroups[colorName]) {
+			colorGroups[colorName] = [];
+		}
+		colorGroups[colorName].push(item);
+		return;
+	}
 
- if (item.pageItems && item.pageItems.length > 0) {
-  for (var j = 0; j < item.pageItems.length; j++) {
-   collectItemsByColor(item.pageItems[j], colorGroups);
-  }
- }
+	if (item.pageItems && item.pageItems.length > 0) {
+		for (var j = 0; j < item.pageItems.length; j++) {
+			collectItemsByColor(item.pageItems[j], colorGroups);
+		}
+	}
 }
 
 function isWhiteUbSeparationPlateName(name) {
- return /^white\s*ub(\s+\d+)?$/i.test(String(name || ""));
+	return /^white\s*ub(\s+\d+)?$/i.test(String(name || ""));
 }
 
 function isWhiteInkSwatchName(name) {
- var n = String(name || "").replace(/^\s+|\s+$/g, "");
- if (!n || n.toLowerCase().indexOf("white") === -1) {
-  return false;
- }
- return !isWhiteUbSeparationPlateName(n);
+	var n = String(name || "").replace(/^\s+|\s+$/g, "");
+	if (!n || n.toLowerCase().indexOf("white") === -1) {
+		return false;
+	}
+	return !isWhiteUbSeparationPlateName(n);
 }
 
 function addSpotFillNameFromColor(color, nameLookup) {
- if (!color || !nameLookup) {
-  return;
- }
- if (color.typename === CONSTANTS.COLOR_TYPES.SPOT && color.spot && color.spot.name) {
-  var spotName = String(color.spot.name).replace(/^\s+|\s+$/g, "");
-  if (spotName && isWhiteInkSwatchName(spotName)) {
-   nameLookup[spotName.toUpperCase()] = spotName;
-  }
- }
+	if (!color || !nameLookup) {
+		return;
+	}
+	if (color.typename === CONSTANTS.COLOR_TYPES.SPOT && color.spot && color.spot.name) {
+		var spotName = String(color.spot.name).replace(/^\s+|\s+$/g, "");
+		if (spotName && isWhiteInkSwatchName(spotName)) {
+			nameLookup[spotName.toUpperCase()] = spotName;
+		}
+	}
 }
 
 function collectWhiteSpotNamesFromContainer(container, nameLookup) {
- if (!container || !nameLookup) {
-  return;
- }
- try {
-  if (container.typename === "PathItem" && container.filled && container.fillColor) {
-   addSpotFillNameFromColor(container.fillColor, nameLookup);
-   return;
-  }
-  if (container.typename === "CompoundPathItem" && container.pathItems && container.pathItems.length > 0) {
-   var firstPath = container.pathItems[0];
-   if (firstPath && firstPath.filled && firstPath.fillColor) {
-    addSpotFillNameFromColor(firstPath.fillColor, nameLookup);
-   }
-   return;
-  }
-  if (container.pageItems && container.pageItems.length > 0) {
-   for (var i = 0; i < container.pageItems.length; i++) {
-    collectWhiteSpotNamesFromContainer(container.pageItems[i], nameLookup);
-   }
-  }
-  if (container.layers && container.layers.length > 0) {
-   for (var l = 0; l < container.layers.length; l++) {
-    collectWhiteSpotNamesFromLayer(container.layers[l], nameLookup);
-   }
-  }
- } catch (e) { }
+	if (!container || !nameLookup) {
+		return;
+	}
+	try {
+		if (container.typename === "PathItem" && container.filled && container.fillColor) {
+			addSpotFillNameFromColor(container.fillColor, nameLookup);
+			return;
+		}
+		if (container.typename === "CompoundPathItem" && container.pathItems && container.pathItems.length > 0) {
+			var firstPath = container.pathItems[0];
+			if (firstPath && firstPath.filled && firstPath.fillColor) {
+				addSpotFillNameFromColor(firstPath.fillColor, nameLookup);
+			}
+			return;
+		}
+		if (container.pageItems && container.pageItems.length > 0) {
+			for (var i = 0; i < container.pageItems.length; i++) {
+				collectWhiteSpotNamesFromContainer(container.pageItems[i], nameLookup);
+			}
+		}
+		if (container.layers && container.layers.length > 0) {
+			for (var l = 0; l < container.layers.length; l++) {
+				collectWhiteSpotNamesFromLayer(container.layers[l], nameLookup);
+			}
+		}
+	} catch (e) { }
 }
 
 function collectWhiteSpotNamesFromLayer(layer, nameLookup) {
- if (!layer || !nameLookup) {
-  return;
- }
- try {
-  if (layer.pageItems && layer.pageItems.length > 0) {
-   for (var i = 0; i < layer.pageItems.length; i++) {
-    collectWhiteSpotNamesFromContainer(layer.pageItems[i], nameLookup);
-   }
-  }
-  if (layer.layers && layer.layers.length > 0) {
-   for (var l = 0; l < layer.layers.length; l++) {
-    collectWhiteSpotNamesFromLayer(layer.layers[l], nameLookup);
-   }
-  }
- } catch (e) { }
+	if (!layer || !nameLookup) {
+		return;
+	}
+	try {
+		if (layer.pageItems && layer.pageItems.length > 0) {
+			for (var i = 0; i < layer.pageItems.length; i++) {
+				collectWhiteSpotNamesFromContainer(layer.pageItems[i], nameLookup);
+			}
+		}
+		if (layer.layers && layer.layers.length > 0) {
+			for (var l = 0; l < layer.layers.length; l++) {
+				collectWhiteSpotNamesFromLayer(layer.layers[l], nameLookup);
+			}
+		}
+	} catch (e) { }
 }
 
 function scanLiveArtGraphicLayers(doc, nameLookup, graphicName) {
- try {
-  var liveArt = doc.layers.getByName(CONSTANTS.LAYER_NAMES.LIVE_ART);
-  if (!liveArt || !liveArt.layers) {
-   return;
-  }
-  var targetLayerName = graphicName
-   ? CONSTANTS.GRAPHIC.PREFIX + String(graphicName).replace(/^\s+|\s+$/g, "")
-   : "";
-  for (var i = 0; i < liveArt.layers.length; i++) {
-   var layer = liveArt.layers[i];
-   if (!layer || !layer.name) {
-    continue;
-   }
-   if (String(layer.name).indexOf(CONSTANTS.GRAPHIC.PREFIX) !== 0) {
-    continue;
-   }
-   if (targetLayerName && String(layer.name) !== targetLayerName) {
-    continue;
-   }
-   collectWhiteSpotNamesFromLayer(layer, nameLookup);
-  }
- } catch (e) { }
+	try {
+		var liveArt = doc.layers.getByName(CONSTANTS.LAYER_NAMES.LIVE_ART);
+		if (!liveArt || !liveArt.layers) {
+			return;
+		}
+		var targetLayerName = graphicName
+			? CONSTANTS.GRAPHIC.PREFIX + String(graphicName).replace(/^\s+|\s+$/g, "")
+			: "";
+		for (var i = 0; i < liveArt.layers.length; i++) {
+			var layer = liveArt.layers[i];
+			if (!layer || !layer.name) {
+				continue;
+			}
+			if (String(layer.name).indexOf(CONSTANTS.GRAPHIC.PREFIX) !== 0) {
+				continue;
+			}
+			if (targetLayerName && String(layer.name) !== targetLayerName) {
+				continue;
+			}
+			collectWhiteSpotNamesFromLayer(layer, nameLookup);
+		}
+	} catch (e) { }
 }
 
 function scanSizedGraphicsLayer(doc, nameLookup, graphicName) {
- try {
-  var sizedArt = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_ART);
-  if (!sizedArt) {
-   return;
-  }
-  var sizedGraphics = sizedArt.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_GRAPHICS);
-  if (!sizedGraphics) {
-   return;
-  }
-  if (graphicName) {
-   var trimmedName = String(graphicName).replace(/^\s+|\s+$/g, "");
-   if (trimmedName) {
-    try {
-     var graphicItem = sizedGraphics.pageItems.getByName(trimmedName);
-     if (graphicItem) {
-      collectWhiteSpotNamesFromContainer(graphicItem, nameLookup);
-     }
-    } catch (itemErr) { }
-   }
-   return;
-  }
-  collectWhiteSpotNamesFromLayer(sizedGraphics, nameLookup);
- } catch (e) { }
+	try {
+		var sizedArt = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_ART);
+		if (!sizedArt) {
+			return;
+		}
+		var sizedGraphics = sizedArt.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_GRAPHICS);
+		if (!sizedGraphics) {
+			return;
+		}
+		if (graphicName) {
+			var trimmedName = String(graphicName).replace(/^\s+|\s+$/g, "");
+			if (trimmedName) {
+				try {
+					var graphicItem = sizedGraphics.pageItems.getByName(trimmedName);
+					if (graphicItem) {
+						collectWhiteSpotNamesFromContainer(graphicItem, nameLookup);
+					}
+				} catch (itemErr) { }
+			}
+			return;
+		}
+		collectWhiteSpotNamesFromLayer(sizedGraphics, nameLookup);
+	} catch (e) { }
 }
 
 /** White spot swatch names used as fills inside LIVE_ART GRAPHIC:* layers and SIZED_GRAPHICS art. */
 function getWhiteSpotNamesFromGraphicsArt(doc, graphicName) {
- var nameLookup = {};
- if (!doc) {
-  return [];
- }
- var filterName = graphicName != null ? String(graphicName).replace(/^\s+|\s+$/g, "") : "";
- scanLiveArtGraphicLayers(doc, nameLookup, filterName || null);
- scanSizedGraphicsLayer(doc, nameLookup, filterName || null);
- var names = [];
- for (var key in nameLookup) {
-  if (nameLookup.hasOwnProperty(key)) {
-   names.push(nameLookup[key]);
-  }
- }
- names.sort(function (a, b) {
-  return String(a).replace(/^\s+|\s+$/g, "").toUpperCase().localeCompare(
-   String(b).replace(/^\s+|\s+$/g, "").toUpperCase()
-  );
- });
- return names;
+	var nameLookup = {};
+	if (!doc) {
+		return [];
+	}
+	var filterName = graphicName != null ? String(graphicName).replace(/^\s+|\s+$/g, "") : "";
+	scanLiveArtGraphicLayers(doc, nameLookup, filterName || null);
+	scanSizedGraphicsLayer(doc, nameLookup, filterName || null);
+	var names = [];
+	for (var key in nameLookup) {
+		if (nameLookup.hasOwnProperty(key)) {
+			names.push(nameLookup[key]);
+		}
+	}
+	names.sort(function (a, b) {
+		return String(a).replace(/^\s+|\s+$/g, "").toUpperCase().localeCompare(
+			String(b).replace(/^\s+|\s+$/g, "").toUpperCase()
+		);
+	});
+	return names;
 }
 
 function duplicateItemToLayer(item, targetLayer, copiedItems) {
- var newItem = item.duplicate(targetLayer, ElementPlacement.PLACEATBEGINNING);
- if (copiedItems) {
-  copiedItems.push(newItem);
- }
- return newItem;
+	var newItem = item.duplicate(targetLayer, ElementPlacement.PLACEATBEGINNING);
+	if (copiedItems) {
+		copiedItems.push(newItem);
+	}
+	return newItem;
 }
 
 /** Show SIZED_ART / SIZED_GRAPHICS and unlock so graphic art can be selected for splitColors / underbase. */
 function showSizedLayersForProcessing(doc) {
- if (!doc) return;
- try {
-  var sizedArt = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_ART);
-  var layerStack = [sizedArt];
-  var layerCount = 0;
-  var maxLayers = 64;
-  while (layerStack.length > 0 && layerCount < maxLayers) {
-   var lyr = layerStack.pop();
-   layerCount++;
-   try {
-    lyr.visible = true;
-    lyr.locked = false;
-   } catch (e0) { }
-   try {
-    if (lyr.layers && lyr.layers.length > 0) {
-     for (var i = 0; i < lyr.layers.length; i++) {
-      layerStack.push(lyr.layers[i]);
-     }
-    }
-   } catch (e1) { }
-  }
- } catch (e) { }
+	if (!doc) return;
+	try {
+		var sizedArt = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_ART);
+		var layerStack = [sizedArt];
+		var layerCount = 0;
+		var maxLayers = 64;
+		while (layerStack.length > 0 && layerCount < maxLayers) {
+			var lyr = layerStack.pop();
+			layerCount++;
+			try {
+				lyr.visible = true;
+				lyr.locked = false;
+			} catch (e0) { }
+			try {
+				if (lyr.layers && lyr.layers.length > 0) {
+					for (var i = 0; i < lyr.layers.length; i++) {
+						layerStack.push(lyr.layers[i]);
+					}
+				}
+			} catch (e1) { }
+		}
+	} catch (e) { }
 }
 
 /** Unlock item + ancestor groups/layers only. */
 function unlockPageItemForProcessing(item) {
- if (!item) return;
- var maxDepth = 64;
- var depth = 0;
- var current = item;
- while (current && depth < maxDepth) {
-  try {
-   if (current.locked) current.locked = false;
-   if (current.hidden) current.hidden = false;
-  } catch (e0) { }
-  try {
-   if (current.parent && current.parent.typename === "GroupItem") {
-    current = current.parent;
-    depth++;
-   } else {
-    break;
-   }
-  } catch (e1) {
-   break;
-  }
- }
- try {
-  if (item.layer) {
-   var layer = item.layer;
-   depth = 0;
-   while (layer && depth < maxDepth) {
-    layer.locked = false;
-    layer.visible = true;
-    if (layer.parent && layer.parent.typename === "Layer") {
-     layer = layer.parent;
-     depth++;
-    } else {
-     break;
-    }
-   }
-  }
- } catch (e2) { }
+	if (!item) return;
+	var maxDepth = 64;
+	var depth = 0;
+	var current = item;
+	while (current && depth < maxDepth) {
+		try {
+			if (current.locked) current.locked = false;
+			if (current.hidden) current.hidden = false;
+		} catch (e0) { }
+		try {
+			if (current.parent && current.parent.typename === "GroupItem") {
+				current = current.parent;
+				depth++;
+			} else {
+				break;
+			}
+		} catch (e1) {
+			break;
+		}
+	}
+	try {
+		if (item.layer) {
+			var layer = item.layer;
+			depth = 0;
+			while (layer && depth < maxDepth) {
+				layer.locked = false;
+				layer.visible = true;
+				if (layer.parent && layer.parent.typename === "Layer") {
+					layer = layer.parent;
+					depth++;
+				} else {
+					break;
+				}
+			}
+		}
+	} catch (e2) { }
 }
 
 /** Iterative (stack) unlock of item + all descendants — required before group.selected = true. */
 function unlockPageItemTreeForProcessing(rootItem) {
- if (!rootItem) return;
- var stack = [rootItem];
- var count = 0;
- var maxItems = 100000;
- while (stack.length > 0 && count < maxItems) {
-  var node = stack.pop();
-  count++;
-  try {
-   if (node.locked) node.locked = false;
-   if (node.hidden) node.hidden = false;
-  } catch (e0) { }
-  try {
-   if (node.typename === "GroupItem" && node.pageItems && node.pageItems.length > 0) {
-    for (var i = node.pageItems.length - 1; i >= 0; i--) {
-     stack.push(node.pageItems[i]);
-    }
-   }
-  } catch (e1) { }
-  try {
-   if (node.typename === "CompoundPathItem" && node.pathItems && node.pathItems.length > 0) {
-    for (var p = node.pathItems.length - 1; p >= 0; p--) {
-     stack.push(node.pathItems[p]);
-    }
-   }
-  } catch (e2) { }
- }
+	if (!rootItem) return;
+	var stack = [rootItem];
+	var count = 0;
+	var maxItems = 100000;
+	while (stack.length > 0 && count < maxItems) {
+		var node = stack.pop();
+		count++;
+		try {
+			if (node.locked) node.locked = false;
+			if (node.hidden) node.hidden = false;
+		} catch (e0) { }
+		try {
+			if (node.typename === "GroupItem" && node.pageItems && node.pageItems.length > 0) {
+				for (var i = node.pageItems.length - 1; i >= 0; i--) {
+					stack.push(node.pageItems[i]);
+				}
+			}
+		} catch (e1) { }
+		try {
+			if (node.typename === "CompoundPathItem" && node.pathItems && node.pathItems.length > 0) {
+				for (var p = node.pathItems.length - 1; p >= 0; p--) {
+					stack.push(node.pathItems[p]);
+				}
+			}
+		} catch (e2) { }
+	}
 }
 
 function unlockLayerContentsForSelection(layer) {
- if (!layer) return;
- var maxDepth = 64;
- var depth = 0;
- var current = layer;
- while (current && depth < maxDepth) {
-  try {
-   current.locked = false;
-   current.visible = true;
-  } catch (e0) { }
-  try {
-   if (current.parent && current.parent.typename === "Layer") {
-    current = current.parent;
-    depth++;
-   } else {
-    break;
-   }
-  } catch (e1) {
-   break;
-  }
- }
- try {
-  if (layer.pageItems && layer.pageItems.length > 0) {
-   for (var i = 0; i < layer.pageItems.length; i++) {
-    unlockPageItemTreeForProcessing(layer.pageItems[i]);
-   }
-  }
- } catch (e2) { }
+	if (!layer) return;
+	var maxDepth = 64;
+	var depth = 0;
+	var current = layer;
+	while (current && depth < maxDepth) {
+		try {
+			current.locked = false;
+			current.visible = true;
+		} catch (e0) { }
+		try {
+			if (current.parent && current.parent.typename === "Layer") {
+				current = current.parent;
+				depth++;
+			} else {
+				break;
+			}
+		} catch (e1) {
+			break;
+		}
+	}
+	try {
+		if (layer.pageItems && layer.pageItems.length > 0) {
+			for (var i = 0; i < layer.pageItems.length; i++) {
+				unlockPageItemTreeForProcessing(layer.pageItems[i]);
+			}
+		}
+	} catch (e2) { }
 }
 
 function unlockAllLayersInDocument(doc) {
- if (!doc || !doc.layers) return;
- var layerStack = [];
- try {
-  for (var i = 0; i < doc.layers.length; i++) {
-   layerStack.push(doc.layers[i]);
-  }
- } catch (e0) { }
- var layerCount = 0;
- var maxLayers = 500;
- while (layerStack.length > 0 && layerCount < maxLayers) {
-  var lyr = layerStack.pop();
-  layerCount++;
-  try {
-   lyr.visible = true;
-   lyr.locked = false;
-  } catch (e1) { }
-  try {
-   if (lyr.layers && lyr.layers.length > 0) {
-    for (var j = 0; j < lyr.layers.length; j++) {
-     layerStack.push(lyr.layers[j]);
-    }
-   }
-  } catch (e2) { }
- }
+	if (!doc || !doc.layers) return;
+	var layerStack = [];
+	try {
+		for (var i = 0; i < doc.layers.length; i++) {
+			layerStack.push(doc.layers[i]);
+		}
+	} catch (e0) { }
+	var layerCount = 0;
+	var maxLayers = 500;
+	while (layerStack.length > 0 && layerCount < maxLayers) {
+		var lyr = layerStack.pop();
+		layerCount++;
+		try {
+			lyr.visible = true;
+			lyr.locked = false;
+		} catch (e1) { }
+		try {
+			if (lyr.layers && lyr.layers.length > 0) {
+				for (var j = 0; j < lyr.layers.length; j++) {
+					layerStack.push(lyr.layers[j]);
+				}
+			}
+		} catch (e2) { }
+	}
 }
 
 /** Show/unlock SIZED_ART subtree and every page item inside SIZED_GRAPHICS. */
 function unlockSizedGraphicsContents(doc) {
- showSizedLayersForProcessing(doc);
- if (!doc) return;
- try {
-  var sizedArt = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_ART);
-  var sizedGraphics = sizedArt.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_GRAPHICS);
-  if (sizedGraphics.pageItems && sizedGraphics.pageItems.length > 0) {
-   for (var i = 0; i < sizedGraphics.pageItems.length; i++) {
-    unlockPageItemTreeForProcessing(sizedGraphics.pageItems[i]);
-   }
-  }
- } catch (e) { }
+	showSizedLayersForProcessing(doc);
+	if (!doc) return;
+	try {
+		var sizedArt = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_ART);
+		var sizedGraphics = sizedArt.layers.getByName(CONSTANTS.LAYER_NAMES.SIZED_GRAPHICS);
+		if (sizedGraphics.pageItems && sizedGraphics.pageItems.length > 0) {
+			for (var i = 0; i < sizedGraphics.pageItems.length; i++) {
+				unlockPageItemTreeForProcessing(sizedGraphics.pageItems[i]);
+			}
+		}
+	} catch (e) { }
 }
 
 function prepareSizedArtGraphicForProcessing(doc, graphicItem) {
- unlockSizedGraphicsContents(doc);
- if (graphicItem) {
-  unlockPageItemForProcessing(graphicItem);
-  unlockPageItemTreeForProcessing(graphicItem);
- }
+	unlockSizedGraphicsContents(doc);
+	if (graphicItem) {
+		unlockPageItemForProcessing(graphicItem);
+		unlockPageItemTreeForProcessing(graphicItem);
+	}
 }
 
 /** Choke / Blocker are not PG ink rows — exclude from [C#] ink count. */
 function isNonInkSeparationLayerName(layerName) {
- if (!layerName) return true;
- var n = String(layerName).replace(/^\s+|\s+$/g, "");
- var up = n.toUpperCase();
- if (up === String(CONSTANTS.LAYER_NAMES.CHOKE).toUpperCase()) return true;
- if (up === String(CONSTANTS.LAYER_NAMES.BLOCKER).toUpperCase()) return true;
- if (/^BLOCKER(\s+\d+)?$/i.test(n)) return true;
- return false;
+	if (!layerName) return true;
+	var n = String(layerName).replace(/^\s+|\s+$/g, "");
+	var up = n.toUpperCase();
+	if (up === String(CONSTANTS.LAYER_NAMES.CHOKE).toUpperCase()) return true;
+	if (up === String(CONSTANTS.LAYER_NAMES.BLOCKER).toUpperCase()) return true;
+	if (/^BLOCKER(\s+\d+)?$/i.test(n)) return true;
+	return false;
 }
 
 /** Count PG ink rows (matches SEP TABLE row count, not raw SEPARATED_ART sublayer count). */
 function countPgInkColorsFromLayerNames(layerNames) {
- if (!layerNames || !layerNames.length) return 0;
- var count = 0;
- for (var i = 0; i < layerNames.length; i++) {
-  if (!isNonInkSeparationLayerName(layerNames[i])) {
-   count++;
-  }
- }
- return count;
+	if (!layerNames || !layerNames.length) return 0;
+	var count = 0;
+	for (var i = 0; i < layerNames.length; i++) {
+		if (!isNonInkSeparationLayerName(layerNames[i])) {
+			count++;
+		}
+	}
+	return count;
 }
 
 function expandObject() {
- try {
-  app.executeMenuCommand('outline');
-  app.executeMenuCommand('Live Outline Object');
-  app.executeMenuCommand('Live Outline Stroke');
-  app.executeMenuCommand('expandStyle');
+	try {
+		app.executeMenuCommand('outline');
+		app.executeMenuCommand('Live Outline Object');
+		app.executeMenuCommand('Live Outline Stroke');
+		app.executeMenuCommand('expandStyle');
 
-  var actionFile = File(File($.fileName).parent + "/actions/" + CONSTANTS.ACTIONS.FILE_NAME);
-  app.loadAction(actionFile);
-  app.doScript(CONSTANTS.ACTIONS.EXPAND_NAME, CONSTANTS.ACTIONS.SET_NAME);
-  app.unloadAction(CONSTANTS.ACTIONS.SET_NAME, '');
-  pathFinderTrim();
- } catch (e) {
- }
+		var actionFile = File(File($.fileName).parent + "/actions/" + CONSTANTS.ACTIONS.FILE_NAME);
+		app.loadAction(actionFile);
+		app.doScript(CONSTANTS.ACTIONS.EXPAND_NAME, CONSTANTS.ACTIONS.SET_NAME);
+		app.unloadAction(CONSTANTS.ACTIONS.SET_NAME, '');
+		pathFinderTrim();
+	} catch (e) {
+	}
 }
 
 function pathFinderTrim() {
- app.executeMenuCommand("group");
- app.executeMenuCommand("Live Pathfinder Trim");
- app.executeMenuCommand("expandStyle");
- app.executeMenuCommand("ungroup");
+	app.executeMenuCommand("group");
+	app.executeMenuCommand("Live Pathfinder Trim");
+	app.executeMenuCommand("expandStyle");
+	app.executeMenuCommand("ungroup");
 }
 
 function loadLEAPColorSepsActions() {
- var _actionFile = File(File($.fileName).parent + "/actions/PathFinderAdd.aia");
- app.loadAction(_actionFile);
+	/*
+	 * Drain leftover copies BEFORE loading. loadAction() adds a NEW "LEAP Color Seps" set every time,
+	 * and unload only runs at the END of a separation — so every crashed run leaked one copy into the
+	 * Actions panel (persisted by Illustrator across restarts). With duplicates, doScript resolves the
+	 * set name to an arbitrary copy; on the machine that surfaced this, Pathfinder_Divide then played
+	 * without leaving a selection. Unload until the name is gone, then load exactly one fresh copy.
+	 */
+	for (var drain = 0; drain < 10; drain++) {
+		try {
+			app.unloadAction("LEAP Color Seps", "");
+		} catch (eDrained) {
+			break;
+		}
+	}
+	var _actionFile = File(File($.fileName).parent + "/actions/PathFinderAdd.aia");
+	app.loadAction(_actionFile);
 }
 
 function unloadLEAPColorSepsActions() {
- try {
-  app.unloadAction("LEAP Color Seps", "");
- } catch (e) { }
+	try {
+		app.unloadAction("LEAP Color Seps", "");
+	} catch (e) { }
 }
 
 function pathFinderMerge() {
- app.doScript("Pathfinder_Merge", "LEAP Color Seps");
+	app.doScript("Pathfinder_Merge", "LEAP Color Seps");
 }
 
 function pathFinderAdd() {
- app.doScript("Pathfinder_Add", "LEAP Color Seps");
+	app.doScript("Pathfinder_Add", "LEAP Color Seps");
 }
 
 function pathFinderDivide() {
- app.doScript("Pathfinder_Divide", "LEAP Color Seps");
+	app.doScript("Pathfinder_Divide", "LEAP Color Seps");
 }
 
 function findLayerByName(layers, layerName) {
- for (var i = 0; i < layers.length; i++) {
-  var layer = layers[i];
+	for (var i = 0; i < layers.length; i++) {
+		var layer = layers[i];
 
-  if (layer.name === layerName) {
-   return layer;
-  }
+		if (layer.name === layerName) {
+			return layer;
+		}
 
-  if (layer.layers && layer.layers.length > 0) {
-   var found = findLayerByName(layer.layers, layerName);
-   if (found) {
-    return found;
-   }
-  }
- }
+		if (layer.layers && layer.layers.length > 0) {
+			var found = findLayerByName(layer.layers, layerName);
+			if (found) {
+				return found;
+			}
+		}
+	}
 
- return null;
+	return null;
 }
 
 function getOrCreateLayer(doc, layerName, parentLayer) {
- var layer;
- var layerCollection = parentLayer ? parentLayer.layers : doc.layers;
+	var layer;
+	var layerCollection = parentLayer ? parentLayer.layers : doc.layers;
 
- try {
-  layer = layerCollection.getByName(layerName);
- } catch (e) {
-  layer = layerCollection.add();
-  layer.name = layerName;
- }
- app.redraw();
- return layer;
+	try {
+		layer = layerCollection.getByName(layerName);
+	} catch (e) {
+		layer = layerCollection.add();
+		layer.name = layerName;
+	}
+	app.redraw();
+	return layer;
 }
 
 function getSwatchByName(doc, swatchName) {
- try {
-  return doc.swatches.getByName(swatchName);
- } catch (e) {
-  return null;
- }
+	try {
+		return doc.swatches.getByName(swatchName);
+	} catch (e) {
+		return null;
+	}
 }
 
 function swatchNameHasTrailingNumber(name) {
- return /\s+\d+$/.test(String(name || ""));
+	return /\s+\d+$/.test(String(name || ""));
 }
 
 function getSwatchCmykComponentsFromColor(color) {
- if (!color) {
-  return null;
- }
- var base = color;
- if (color.typename === CONSTANTS.COLOR_TYPES.SPOT && color.spot && color.spot.color) {
-  base = color.spot.color;
- }
- if (base.typename === CONSTANTS.COLOR_TYPES.CMYK) {
-  return {
-   c: Number(base.cyan) || 0,
-   m: Number(base.magenta) || 0,
-   y: Number(base.yellow) || 0,
-   k: Number(base.black) || 0
-  };
- }
- if (base.typename === CONSTANTS.COLOR_TYPES.GRAY) {
-  return { c: 0, m: 0, y: 0, k: Number(base.gray) || 0 };
- }
- return null;
+	if (!color) {
+		return null;
+	}
+	var base = color;
+	if (color.typename === CONSTANTS.COLOR_TYPES.SPOT && color.spot && color.spot.color) {
+		base = color.spot.color;
+	}
+	if (base.typename === CONSTANTS.COLOR_TYPES.CMYK) {
+		return {
+			c: Number(base.cyan) || 0,
+			m: Number(base.magenta) || 0,
+			y: Number(base.yellow) || 0,
+			k: Number(base.black) || 0
+		};
+	}
+	if (base.typename === CONSTANTS.COLOR_TYPES.GRAY) {
+		return { c: 0, m: 0, y: 0, k: Number(base.gray) || 0 };
+	}
+	return null;
 }
 
 function getSwatchCmykSum(doc, swatch) {
- if (!doc || !swatch || !swatch.color) {
-  return null;
- }
- var cmyk = getSwatchCmykComponentsFromColor(swatch.color);
- if (!cmyk) {
-  return null;
- }
- return cmyk.c + cmyk.m + cmyk.y + cmyk.k;
+	if (!doc || !swatch || !swatch.color) {
+		return null;
+	}
+	var cmyk = getSwatchCmykComponentsFromColor(swatch.color);
+	if (!cmyk) {
+		return null;
+	}
+	return cmyk.c + cmyk.m + cmyk.y + cmyk.k;
 }
 
 /**
@@ -590,264 +630,264 @@ function getSwatchCmykSum(doc, swatch) {
  * 3) If none match, use the swatch with the lowest C+M+Y+K total.
  */
 function isWhiteUbLayerName(name) {
- return /^white\s*ub(\s+\d+)?$/i.test(String(name || ""));
+	return /^white\s*ub(\s+\d+)?$/i.test(String(name || ""));
 }
 
 function getWhiteUbLayerNumber(name) {
- var match = String(name || "").match(/^white\s*ub(?:\s+(\d+))?$/i);
- if (!match) {
-  return -1;
- }
- return match[1] ? parseInt(match[1], 10) : 1;
+	var match = String(name || "").match(/^white\s*ub(?:\s+(\d+))?$/i);
+	if (!match) {
+		return -1;
+	}
+	return match[1] ? parseInt(match[1], 10) : 1;
 }
 
 function getUnderbaseSwatchFieldFromXmp(doc, fieldName) {
- try {
-  if (!doc) return "";
-  var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
-  if (xmp.isXmpCreated && xmp.doesStructFieldExist(fieldName)) {
-   var val = xmp.getStructField(fieldName, false);
-   if (val != null) return String(val).replace(/^\s+|\s+$/g, "");
-  }
- } catch (e) { }
- return "";
+	try {
+		if (!doc) return "";
+		var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
+		if (xmp.isXmpCreated && xmp.doesStructFieldExist(fieldName)) {
+			var val = xmp.getStructField(fieldName, false);
+			if (val != null) return String(val).replace(/^\s+|\s+$/g, "");
+		}
+	} catch (e) { }
+	return "";
 }
 
 function getGraphicsOrganizationDataFromDoc(doc) {
- try {
-  if (!doc) return [];
-  var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
-  if (xmp.isXmpCreated && xmp.doesStructFieldExist("GraphicsOrganizationData")) {
-   var data = xmp.getStructField("GraphicsOrganizationData", true);
-   if (data && data instanceof Array) {
-    return data;
-   }
-  }
- } catch (e) { }
- return [];
+	try {
+		if (!doc) return [];
+		var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
+		if (xmp.isXmpCreated && xmp.doesStructFieldExist("GraphicsOrganizationData")) {
+			var data = xmp.getStructField("GraphicsOrganizationData", true);
+			if (data && data instanceof Array) {
+				return data;
+			}
+		}
+	} catch (e) { }
+	return [];
 }
 
 function getGraphicOrganizationEntry(doc, graphicName) {
- if (!graphicName) return null;
- var name = String(graphicName).replace(/^\s+|\s+$/g, "");
- if (!name) return null;
- var data = getGraphicsOrganizationDataFromDoc(doc);
- for (var i = 0; i < data.length; i++) {
-  if (data[i] && String(data[i].name || "").replace(/^\s+|\s+$/g, "") === name) {
-   return data[i];
-  }
- }
- return null;
+	if (!graphicName) return null;
+	var name = String(graphicName).replace(/^\s+|\s+$/g, "");
+	if (!name) return null;
+	var data = getGraphicsOrganizationDataFromDoc(doc);
+	for (var i = 0; i < data.length; i++) {
+		if (data[i] && String(data[i].name || "").replace(/^\s+|\s+$/g, "") === name) {
+			return data[i];
+		}
+	}
+	return null;
 }
 
 function getGraphicUnderbase234SwatchFromOrgData(doc, graphicName) {
- var entry = getGraphicOrganizationEntry(doc, graphicName);
- if (!entry) return "";
- var raw = entry.underbase234Swatch != null
-  ? String(entry.underbase234Swatch).replace(/^\s+|\s+$/g, "")
-  : "";
- if (raw) return raw;
- var metaFields = ["underbase2Swatch", "underbase3Swatch", "underbase4Swatch"];
- for (var f = 0; f < metaFields.length; f++) {
-  if (entry[metaFields[f]] != null) {
-   raw = String(entry[metaFields[f]]).replace(/^\s+|\s+$/g, "");
-   if (raw) return raw;
-  }
- }
- return "";
+	var entry = getGraphicOrganizationEntry(doc, graphicName);
+	if (!entry) return "";
+	var raw = entry.underbase234Swatch != null
+		? String(entry.underbase234Swatch).replace(/^\s+|\s+$/g, "")
+		: "";
+	if (raw) return raw;
+	var metaFields = ["underbase2Swatch", "underbase3Swatch", "underbase4Swatch"];
+	for (var f = 0; f < metaFields.length; f++) {
+		if (entry[metaFields[f]] != null) {
+			raw = String(entry[metaFields[f]]).replace(/^\s+|\s+$/g, "");
+			if (raw) return raw;
+		}
+	}
+	return "";
 }
 
 function getGraphicsUnderbaseSwatchNameForIndex(profileMetadata, doc, ubIndex) {
- if (ubIndex <= 0) {
-  return getProfileUnderbaseSwatchName(profileMetadata);
- }
- var metaFields = ["underbase2Swatch", "underbase3Swatch", "underbase4Swatch"];
- var xmpFields = ["Underbase2Swatch", "Underbase3Swatch", "Underbase4Swatch"];
- var idx = ubIndex > 3 ? 3 : ubIndex;
- var fieldIdx = idx - 1;
- var raw = "";
- if (profileMetadata && profileMetadata[metaFields[fieldIdx]] != null) {
-  raw = String(profileMetadata[metaFields[fieldIdx]]).replace(/^\s+|\s+$/g, "");
- }
- if (!raw && profileMetadata && profileMetadata.graphicName) {
-  raw = getGraphicUnderbase234SwatchFromOrgData(doc, profileMetadata.graphicName);
- }
- if (!raw) raw = getUnderbaseSwatchFieldFromXmp(doc, xmpFields[fieldIdx]);
- if (!raw && fieldIdx > 0) return getGraphicsUnderbaseSwatchNameForIndex(profileMetadata, doc, idx - 1);
- if (!raw) raw = getUnderbaseSwatchFieldFromXmp(doc, "Underbase2Swatch");
- if (!raw) return getUnderbase2SwatchName(profileMetadata, doc);
- return raw;
+	if (ubIndex <= 0) {
+		return getProfileUnderbaseSwatchName(profileMetadata);
+	}
+	var metaFields = ["underbase2Swatch", "underbase3Swatch", "underbase4Swatch"];
+	var xmpFields = ["Underbase2Swatch", "Underbase3Swatch", "Underbase4Swatch"];
+	var idx = ubIndex > 3 ? 3 : ubIndex;
+	var fieldIdx = idx - 1;
+	var raw = "";
+	if (profileMetadata && profileMetadata[metaFields[fieldIdx]] != null) {
+		raw = String(profileMetadata[metaFields[fieldIdx]]).replace(/^\s+|\s+$/g, "");
+	}
+	if (!raw && profileMetadata && profileMetadata.graphicName) {
+		raw = getGraphicUnderbase234SwatchFromOrgData(doc, profileMetadata.graphicName);
+	}
+	if (!raw) raw = getUnderbaseSwatchFieldFromXmp(doc, xmpFields[fieldIdx]);
+	if (!raw && fieldIdx > 0) return getGraphicsUnderbaseSwatchNameForIndex(profileMetadata, doc, idx - 1);
+	if (!raw) raw = getUnderbaseSwatchFieldFromXmp(doc, "Underbase2Swatch");
+	if (!raw) return getUnderbase2SwatchName(profileMetadata, doc);
+	return raw;
 }
 
 function enrichProfileMetadataWithGraphicsUnderbaseSwatches(profileMetadata, doc) {
- if (!profileMetadata) profileMetadata = {};
- var graphicName = profileMetadata.graphicName != null
-  ? String(profileMetadata.graphicName).replace(/^\s+|\s+$/g, "")
-  : "";
- var orgSwatch = graphicName ? getGraphicUnderbase234SwatchFromOrgData(doc, graphicName) : "";
- var pairs = [
-  { meta: "underbase2Swatch", xmp: "Underbase2Swatch" },
-  { meta: "underbase3Swatch", xmp: "Underbase3Swatch" },
-  { meta: "underbase4Swatch", xmp: "Underbase4Swatch" }
- ];
- for (var f = 0; f < pairs.length; f++) {
-  var cur = profileMetadata[pairs[f].meta];
-  if (cur != null && String(cur).replace(/^\s+|\s+$/g, "") !== "") continue;
-  if (orgSwatch) {
-   profileMetadata[pairs[f].meta] = orgSwatch;
-   continue;
-  }
-  var fromXmp = getUnderbaseSwatchFieldFromXmp(doc, pairs[f].xmp);
-  if (fromXmp) profileMetadata[pairs[f].meta] = fromXmp;
- }
- return profileMetadata;
+	if (!profileMetadata) profileMetadata = {};
+	var graphicName = profileMetadata.graphicName != null
+		? String(profileMetadata.graphicName).replace(/^\s+|\s+$/g, "")
+		: "";
+	var orgSwatch = graphicName ? getGraphicUnderbase234SwatchFromOrgData(doc, graphicName) : "";
+	var pairs = [
+		{ meta: "underbase2Swatch", xmp: "Underbase2Swatch" },
+		{ meta: "underbase3Swatch", xmp: "Underbase3Swatch" },
+		{ meta: "underbase4Swatch", xmp: "Underbase4Swatch" }
+	];
+	for (var f = 0; f < pairs.length; f++) {
+		var cur = profileMetadata[pairs[f].meta];
+		if (cur != null && String(cur).replace(/^\s+|\s+$/g, "") !== "") continue;
+		if (orgSwatch) {
+			profileMetadata[pairs[f].meta] = orgSwatch;
+			continue;
+		}
+		var fromXmp = getUnderbaseSwatchFieldFromXmp(doc, pairs[f].xmp);
+		if (fromXmp) profileMetadata[pairs[f].meta] = fromXmp;
+	}
+	return profileMetadata;
 }
 
 function getWhiteUbPassIndexFromLayerName(layerName) {
- var n = String(layerName || "").replace(/^\s+|\s+$/g, "");
- if (/^white\s*ub$/i.test(n)) return 0;
- var m = n.match(/^white\s*ub\s+(\d+)$/i);
- if (!m || !m[1]) return -1;
- var num = parseInt(m[1], 10);
- return isNaN(num) ? -1 : num - 1;
+	var n = String(layerName || "").replace(/^\s+|\s+$/g, "");
+	if (/^white\s*ub$/i.test(n)) return 0;
+	var m = n.match(/^white\s*ub\s+(\d+)$/i);
+	if (!m || !m[1]) return -1;
+	var num = parseInt(m[1], 10);
+	return isNaN(num) ? -1 : num - 1;
 }
 
 /** Underbase 2 Swatch from document XMP (Graphics tab choice). */
 function getUnderbase2SwatchNameFromDocument(doc) {
- var name = "";
- try {
-  if (!doc) return "";
-  var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
-  if (xmp.isXmpCreated && xmp.doesStructFieldExist("SeparationProfileMetadata")) {
-   var profileMeta = xmp.getStructField("SeparationProfileMetadata", true);
-   if (profileMeta && profileMeta.underbase2Swatch != null) {
-    name = String(profileMeta.underbase2Swatch).replace(/^\s+|\s+$/g, "");
-   }
-  }
-  if (!name && xmp.isXmpCreated && xmp.doesStructFieldExist("Underbase2Swatch")) {
-   var ub2Val = xmp.getStructField("Underbase2Swatch", false);
-   if (ub2Val != null) {
-    name = String(ub2Val).replace(/^\s+|\s+$/g, "");
-   }
-  }
- } catch (e) { }
- return name;
+	var name = "";
+	try {
+		if (!doc) return "";
+		var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
+		if (xmp.isXmpCreated && xmp.doesStructFieldExist("SeparationProfileMetadata")) {
+			var profileMeta = xmp.getStructField("SeparationProfileMetadata", true);
+			if (profileMeta && profileMeta.underbase2Swatch != null) {
+				name = String(profileMeta.underbase2Swatch).replace(/^\s+|\s+$/g, "");
+			}
+		}
+		if (!name && xmp.isXmpCreated && xmp.doesStructFieldExist("Underbase2Swatch")) {
+			var ub2Val = xmp.getStructField("Underbase2Swatch", false);
+			if (ub2Val != null) {
+				name = String(ub2Val).replace(/^\s+|\s+$/g, "");
+			}
+		}
+	} catch (e) { }
+	return name;
 }
 
 function getFirstFillColorFromContainer(container) {
- if (!container) {
-  return null;
- }
- try {
-  if (container.typename === "PathItem" && container.filled && container.fillColor) {
-   return container.fillColor;
-  }
-  if (container.typename === "CompoundPathItem" && container.pathItems && container.pathItems.length > 0) {
-   var firstPath = container.pathItems[0];
-   if (firstPath && firstPath.filled && firstPath.fillColor) {
-    return firstPath.fillColor;
-   }
-  }
-  if (container.pageItems && container.pageItems.length > 0) {
-   for (var i = 0; i < container.pageItems.length; i++) {
-    var found = getFirstFillColorFromContainer(container.pageItems[i]);
-    if (found) {
-     return found;
-    }
-   }
-  }
-  if (container.layers && container.layers.length > 0) {
-   for (var l = 0; l < container.layers.length; l++) {
-    var layerFill = getFirstFillColorFromContainer(container.layers[l]);
-    if (layerFill) {
-     return layerFill;
-    }
-   }
-  }
- } catch (e) { }
- return null;
+	if (!container) {
+		return null;
+	}
+	try {
+		if (container.typename === "PathItem" && container.filled && container.fillColor) {
+			return container.fillColor;
+		}
+		if (container.typename === "CompoundPathItem" && container.pathItems && container.pathItems.length > 0) {
+			var firstPath = container.pathItems[0];
+			if (firstPath && firstPath.filled && firstPath.fillColor) {
+				return firstPath.fillColor;
+			}
+		}
+		if (container.pageItems && container.pageItems.length > 0) {
+			for (var i = 0; i < container.pageItems.length; i++) {
+				var found = getFirstFillColorFromContainer(container.pageItems[i]);
+				if (found) {
+					return found;
+				}
+			}
+		}
+		if (container.layers && container.layers.length > 0) {
+			for (var l = 0; l < container.layers.length; l++) {
+				var layerFill = getFirstFillColorFromContainer(container.layers[l]);
+				if (layerFill) {
+					return layerFill;
+				}
+			}
+		}
+	} catch (e) { }
+	return null;
 }
 
 function getFirstFillColorFromSeparatedArtSublayer(doc, layerName) {
- try {
-  var separatedArtLayer = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SEPARATED_ART);
-  if (!separatedArtLayer || !separatedArtLayer.layers) {
-   return null;
-  }
-  var targetLayer = null;
-  for (var i = 0; i < separatedArtLayer.layers.length; i++) {
-   if (String(separatedArtLayer.layers[i].name) === String(layerName)) {
-    targetLayer = separatedArtLayer.layers[i];
-    break;
-   }
-  }
-  if (!targetLayer) {
-   return null;
-  }
-  return getFirstFillColorFromContainer(targetLayer);
- } catch (e) {
-  return null;
- }
+	try {
+		var separatedArtLayer = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SEPARATED_ART);
+		if (!separatedArtLayer || !separatedArtLayer.layers) {
+			return null;
+		}
+		var targetLayer = null;
+		for (var i = 0; i < separatedArtLayer.layers.length; i++) {
+			if (String(separatedArtLayer.layers[i].name) === String(layerName)) {
+				targetLayer = separatedArtLayer.layers[i];
+				break;
+			}
+		}
+		if (!targetLayer) {
+			return null;
+		}
+		return getFirstFillColorFromContainer(targetLayer);
+	} catch (e) {
+		return null;
+	}
 }
 
 function buildSwatchDataFromColor(swatchName, color) {
- var swatchData = {
-  name: swatchName,
-  hex: "#808080",
-  cmyk: null,
-  rgb: null,
-  fillSwatchName: null
- };
- if (!color) {
-  return swatchData;
- }
+	var swatchData = {
+		name: swatchName,
+		hex: "#808080",
+		cmyk: null,
+		rgb: null,
+		fillSwatchName: null
+	};
+	if (!color) {
+		return swatchData;
+	}
 
- swatchData.hex = getColorHex(color);
- swatchData.fillSwatchName = getColorName(color);
+	swatchData.hex = getColorHex(color);
+	swatchData.fillSwatchName = getColorName(color);
 
- if (color.typename === CONSTANTS.COLOR_TYPES.SPOT) {
-  var spotColor = color.spot.color;
-  if (spotColor.typename === CONSTANTS.COLOR_TYPES.CMYK) {
-   swatchData.cmyk = {
-    c: Math.round(spotColor.cyan),
-    m: Math.round(spotColor.magenta),
-    y: Math.round(spotColor.yellow),
-    k: Math.round(spotColor.black)
-   };
-  }
- } else if (color.typename === CONSTANTS.COLOR_TYPES.CMYK) {
-  swatchData.cmyk = {
-   c: Math.round(color.cyan),
-   m: Math.round(color.magenta),
-   y: Math.round(color.yellow),
-   k: Math.round(color.black)
-  };
- }
+	if (color.typename === CONSTANTS.COLOR_TYPES.SPOT) {
+		var spotColor = color.spot.color;
+		if (spotColor.typename === CONSTANTS.COLOR_TYPES.CMYK) {
+			swatchData.cmyk = {
+				c: Math.round(spotColor.cyan),
+				m: Math.round(spotColor.magenta),
+				y: Math.round(spotColor.yellow),
+				k: Math.round(spotColor.black)
+			};
+		}
+	} else if (color.typename === CONSTANTS.COLOR_TYPES.CMYK) {
+		swatchData.cmyk = {
+			c: Math.round(color.cyan),
+			m: Math.round(color.magenta),
+			y: Math.round(color.yellow),
+			k: Math.round(color.black)
+		};
+	}
 
- if (color.typename === CONSTANTS.COLOR_TYPES.RGB) {
-  swatchData.rgb = {
-   r: Math.round(color.red),
-   g: Math.round(color.green),
-   b: Math.round(color.blue)
-  };
- } else if (swatchData.cmyk) {
-  swatchData.rgb = cmykToRgb(
-   swatchData.cmyk.c,
-   swatchData.cmyk.m,
-   swatchData.cmyk.y,
-   swatchData.cmyk.k
-  );
- }
+	if (color.typename === CONSTANTS.COLOR_TYPES.RGB) {
+		swatchData.rgb = {
+			r: Math.round(color.red),
+			g: Math.round(color.green),
+			b: Math.round(color.blue)
+		};
+	} else if (swatchData.cmyk) {
+		swatchData.rgb = cmykToRgb(
+			swatchData.cmyk.c,
+			swatchData.cmyk.m,
+			swatchData.cmyk.y,
+			swatchData.cmyk.k
+		);
+	}
 
- return swatchData;
+	return swatchData;
 }
 
 function buildSwatchDataFromDocumentSwatch(doc, swatchName) {
- var swatch = getSwatchByName(doc, swatchName);
- if (swatch && swatch.color) {
-  return buildSwatchDataFromColor(swatchName, swatch.color);
- }
- return null;
+	var swatch = getSwatchByName(doc, swatchName);
+	if (swatch && swatch.color) {
+		return buildSwatchDataFromColor(swatchName, swatch.color);
+	}
+	return null;
 }
 
 /**
@@ -855,280 +895,280 @@ function buildSwatchDataFromDocumentSwatch(doc, swatchName) {
  * For White UB 2+, prefers the actual layer fill swatch (e.g. PANTONE White C).
  */
 function resolveLayerSwatchData(doc, layerName) {
- var name = String(layerName || "");
+	var name = String(layerName || "");
 
- if (isWhiteUbLayerName(name) && getWhiteUbLayerNumber(name) >= 2) {
-  var ubFillColor = getFirstFillColorFromSeparatedArtSublayer(doc, name);
-  if (ubFillColor) {
-   return buildSwatchDataFromColor(name, ubFillColor);
-  }
-  var ub2FromMeta = getUnderbase2SwatchNameFromDocument(doc);
-  if (ub2FromMeta) {
-   var ub2SwatchData = buildSwatchDataFromDocumentSwatch(doc, ub2FromMeta);
-   if (ub2SwatchData && (ub2SwatchData.cmyk !== null || ub2SwatchData.rgb !== null)) {
-    ub2SwatchData.name = name;
-    return ub2SwatchData;
-   }
-  }
-  var defaultWhiteName = getDefaultUnderbaseWhiteSwatchName(doc);
-  var defaultSwatchData = buildSwatchDataFromDocumentSwatch(doc, defaultWhiteName);
-  if (defaultSwatchData) {
-   defaultSwatchData.name = name;
-   return defaultSwatchData;
-  }
- }
+	if (isWhiteUbLayerName(name) && getWhiteUbLayerNumber(name) >= 2) {
+		var ubFillColor = getFirstFillColorFromSeparatedArtSublayer(doc, name);
+		if (ubFillColor) {
+			return buildSwatchDataFromColor(name, ubFillColor);
+		}
+		var ub2FromMeta = getUnderbase2SwatchNameFromDocument(doc);
+		if (ub2FromMeta) {
+			var ub2SwatchData = buildSwatchDataFromDocumentSwatch(doc, ub2FromMeta);
+			if (ub2SwatchData && (ub2SwatchData.cmyk !== null || ub2SwatchData.rgb !== null)) {
+				ub2SwatchData.name = name;
+				return ub2SwatchData;
+			}
+		}
+		var defaultWhiteName = getDefaultUnderbaseWhiteSwatchName(doc);
+		var defaultSwatchData = buildSwatchDataFromDocumentSwatch(doc, defaultWhiteName);
+		if (defaultSwatchData) {
+			defaultSwatchData.name = name;
+			return defaultSwatchData;
+		}
+	}
 
- var swatchData = buildSwatchDataFromDocumentSwatch(doc, name);
- if (swatchData && (swatchData.cmyk !== null || swatchData.rgb !== null)) {
-  return swatchData;
- }
+	var swatchData = buildSwatchDataFromDocumentSwatch(doc, name);
+	if (swatchData && (swatchData.cmyk !== null || swatchData.rgb !== null)) {
+		return swatchData;
+	}
 
- var fillColor = getFirstFillColorFromSeparatedArtSublayer(doc, name);
- if (fillColor) {
-  return buildSwatchDataFromColor(name, fillColor);
- }
+	var fillColor = getFirstFillColorFromSeparatedArtSublayer(doc, name);
+	if (fillColor) {
+		return buildSwatchDataFromColor(name, fillColor);
+	}
 
- if (swatchData) {
-  return swatchData;
- }
+	if (swatchData) {
+		return swatchData;
+	}
 
- return buildSwatchDataFromColor(name, null);
+	return buildSwatchDataFromColor(name, null);
 }
 
 function getDefaultUnderbaseWhiteSwatchName(doc) {
- var fallback = CONSTANTS.SWATCH_NAMES.WHITE_UB;
- try {
-  if (!doc || !doc.swatches || doc.swatches.length === 0) {
-   return fallback;
-  }
+	var fallback = CONSTANTS.SWATCH_NAMES.WHITE_UB;
+	try {
+		if (!doc || !doc.swatches || doc.swatches.length === 0) {
+			return fallback;
+		}
 
-  var whiteSwatches = [];
-  for (var i = 0; i < doc.swatches.length; i++) {
-   var swatch = doc.swatches[i];
-   if (!swatch || !swatch.name || !swatch.color) {
-    continue;
-   }
-   var name = String(swatch.name);
-   var isWhiteUbVariant = /^white\s*ub(\s*\d+)?$/i.test(name);
-   if (name.charAt(0) === "[") {
-    continue;
-   }
-   if (isWhiteUbVariant) {
-    continue;
-   }
-   if (name.toLowerCase().indexOf("white") === -1) {
-    continue;
-   }
-   whiteSwatches.push(swatch);
-  }
+		var whiteSwatches = [];
+		for (var i = 0; i < doc.swatches.length; i++) {
+			var swatch = doc.swatches[i];
+			if (!swatch || !swatch.name || !swatch.color) {
+				continue;
+			}
+			var name = String(swatch.name);
+			var isWhiteUbVariant = /^white\s*ub(\s*\d+)?$/i.test(name);
+			if (name.charAt(0) === "[") {
+				continue;
+			}
+			if (isWhiteUbVariant) {
+				continue;
+			}
+			if (name.toLowerCase().indexOf("white") === -1) {
+				continue;
+			}
+			whiteSwatches.push(swatch);
+		}
 
-  if (whiteSwatches.length === 1) {
-   return whiteSwatches[0].name;
-  }
-  if (whiteSwatches.length > 1) {
-   var withoutTrailingNumber = [];
-   for (var w = 0; w < whiteSwatches.length; w++) {
-    if (!swatchNameHasTrailingNumber(whiteSwatches[w].name)) {
-     withoutTrailingNumber.push(whiteSwatches[w]);
-    }
-   }
-   if (withoutTrailingNumber.length === 1) {
-    return withoutTrailingNumber[0].name;
-   }
-   return whiteSwatches[0].name;
-  }
+		if (whiteSwatches.length === 1) {
+			return whiteSwatches[0].name;
+		}
+		if (whiteSwatches.length > 1) {
+			var withoutTrailingNumber = [];
+			for (var w = 0; w < whiteSwatches.length; w++) {
+				if (!swatchNameHasTrailingNumber(whiteSwatches[w].name)) {
+					withoutTrailingNumber.push(whiteSwatches[w]);
+				}
+			}
+			if (withoutTrailingNumber.length === 1) {
+				return withoutTrailingNumber[0].name;
+			}
+			return whiteSwatches[0].name;
+		}
 
-  var lowestSum = null;
-  var lowestName = null;
-  for (var s = 0; s < doc.swatches.length; s++) {
-   var candidate = doc.swatches[s];
-   if (!candidate || !candidate.name || !candidate.color) {
-    continue;
-   }
-   var candidateName = String(candidate.name);
-   if (candidateName.charAt(0) === "[") {
-    continue;
-   }
-   var sum = getSwatchCmykSum(doc, candidate);
-   if (sum === null) {
-    continue;
-   }
-   if (lowestSum === null || sum < lowestSum) {
-    lowestSum = sum;
-    lowestName = candidateName;
-   }
-  }
+		var lowestSum = null;
+		var lowestName = null;
+		for (var s = 0; s < doc.swatches.length; s++) {
+			var candidate = doc.swatches[s];
+			if (!candidate || !candidate.name || !candidate.color) {
+				continue;
+			}
+			var candidateName = String(candidate.name);
+			if (candidateName.charAt(0) === "[") {
+				continue;
+			}
+			var sum = getSwatchCmykSum(doc, candidate);
+			if (sum === null) {
+				continue;
+			}
+			if (lowestSum === null || sum < lowestSum) {
+				lowestSum = sum;
+				lowestName = candidateName;
+			}
+		}
 
-  if (lowestName && getSwatchByName(doc, lowestName)) {
-   return lowestName;
-  }
- } catch (e) { }
- return fallback;
+		if (lowestName && getSwatchByName(doc, lowestName)) {
+			return lowestName;
+		}
+	} catch (e) { }
+	return fallback;
 }
 
 function applySwatchToFill(doc, swatchName) {
- var swatch = getSwatchByName(doc, swatchName);
- if (swatch) {
-  doc.defaultFilled = true;
-  doc.defaultFillColor = swatch.color;
-  return true;
- }
- return false;
+	var swatch = getSwatchByName(doc, swatchName);
+	if (swatch) {
+		doc.defaultFilled = true;
+		doc.defaultFillColor = swatch.color;
+		return true;
+	}
+	return false;
 }
 
 function applyStroke(doc, swatchName, strokeWidth) {
- var swatch = getSwatchByName(doc, swatchName);
- if (swatch) {
-  doc.defaultStroked = true;
-  doc.defaultStrokeColor = swatch.color;
-  doc.defaultStrokeWidth = strokeWidth || CONSTANTS.STYLES.DEFAULT_STROKE_WIDTH;
-  return true;
- }
- return false;
+	var swatch = getSwatchByName(doc, swatchName);
+	if (swatch) {
+		doc.defaultStroked = true;
+		doc.defaultStrokeColor = swatch.color;
+		doc.defaultStrokeWidth = strokeWidth || CONSTANTS.STYLES.DEFAULT_STROKE_WIDTH;
+		return true;
+	}
+	return false;
 }
 
 function getGeneralSettingsFromDisk() {
- try {
-  var documentsFolder = Folder.myDocuments || new Folder("~/Documents");
-  var settingsPath = documentsFolder.fsName + "/LEAP Settings/LEAP_Seps/general_settings.json";
-  var settingsFile = new File(settingsPath);
-  if (!settingsFile.exists) {
-   return null;
-  }
-  if (!settingsFile.open("r")) {
-   return null;
-  }
-  var content = settingsFile.read();
-  settingsFile.close();
-  if (!content || !content.length) {
-   return null;
-  }
-  var parsed;
-  if (typeof JSON !== "undefined" && JSON.parse) {
-   parsed = JSON.parse(content);
-  } else {
-   parsed = eval("(" + content + ")");
-  }
-  return parsed || null;
- } catch (e) {
-  return null;
- }
+	try {
+		var documentsFolder = Folder.myDocuments || new Folder("~/Documents");
+		var settingsPath = documentsFolder.fsName + "/LEAP Settings/LEAP_Seps/general_settings.json";
+		var settingsFile = new File(settingsPath);
+		if (!settingsFile.exists) {
+			return null;
+		}
+		if (!settingsFile.open("r")) {
+			return null;
+		}
+		var content = settingsFile.read();
+		settingsFile.close();
+		if (!content || !content.length) {
+			return null;
+		}
+		var parsed;
+		if (typeof JSON !== "undefined" && JSON.parse) {
+			parsed = JSON.parse(content);
+		} else {
+			parsed = eval("(" + content + ")");
+		}
+		return parsed || null;
+	} catch (e) {
+		return null;
+	}
 }
 
 /** Choke stroke swatch from general_settings.json, or GARMENT if unset, blank, or not in doc. */
 function getChokeStrokeSwatchNameForDocument(doc) {
- var fallback = CONSTANTS.SWATCH_NAMES.GARMENT;
- var gen = getGeneralSettingsFromDisk();
- if (!gen) {
-  return fallback;
- }
- var raw = gen.chokeStrokeColorSwatch;
- if (raw === undefined || raw === null) {
-  return fallback;
- }
- var name = String(raw).replace(/^\s+|\s+$/g, "");
- if (!name.length) {
-  return fallback;
- }
- if (getSwatchByName(doc, name)) {
-  return name;
- }
- return fallback;
+	var fallback = CONSTANTS.SWATCH_NAMES.GARMENT;
+	var gen = getGeneralSettingsFromDisk();
+	if (!gen) {
+		return fallback;
+	}
+	var raw = gen.chokeStrokeColorSwatch;
+	if (raw === undefined || raw === null) {
+		return fallback;
+	}
+	var name = String(raw).replace(/^\s+|\s+$/g, "");
+	if (!name.length) {
+		return fallback;
+	}
+	if (getSwatchByName(doc, name)) {
+		return name;
+	}
+	return fallback;
 }
 
 /** Apply choke stroke; if it fails, force default swatch (e.g. settings name invalid at apply time). */
 function applyChokeStroke(doc, strokeWidth) {
- var defaultName = CONSTANTS.SWATCH_NAMES.GARMENT;
- var width = strokeWidth != null ? strokeWidth : CONSTANTS.STYLES.CHOKE_STROKE_WIDTH;
- var chosen = getChokeStrokeSwatchNameForDocument(doc);
- if (applyStroke(doc, chosen, width)) {
-  return true;
- }
- if (chosen !== defaultName) {
-  return applyStroke(doc, defaultName, width);
- }
- return false;
+	var defaultName = CONSTANTS.SWATCH_NAMES.GARMENT;
+	var width = strokeWidth != null ? strokeWidth : CONSTANTS.STYLES.CHOKE_STROKE_WIDTH;
+	var chosen = getChokeStrokeSwatchNameForDocument(doc);
+	if (applyStroke(doc, chosen, width)) {
+		return true;
+	}
+	if (chosen !== defaultName) {
+		return applyStroke(doc, defaultName, width);
+	}
+	return false;
 }
 
 function findTextFrameInGroup(items, name) {
- for (var i = 0; i < items.length; i++) {
-  var item = items[i];
+	for (var i = 0; i < items.length; i++) {
+		var item = items[i];
 
-  if (item.typename === "TextFrame" && item.name === name) {
-   return item;
-  }
+		if (item.typename === "TextFrame" && item.name === name) {
+			return item;
+		}
 
-  if (item.typename === "GroupItem" && item.pageItems && item.pageItems.length > 0) {
-   var found = findTextFrameInGroup(item.pageItems, name);
-   if (found) return found;
-  }
- }
- return null;
+		if (item.typename === "GroupItem" && item.pageItems && item.pageItems.length > 0) {
+			var found = findTextFrameInGroup(item.pageItems, name);
+			if (found) return found;
+		}
+	}
+	return null;
 }
 
 function updateTextFrameInGroup(group, frameName, content) {
- var textFrame = findTextFrameInGroup(group.pageItems, frameName);
- if (textFrame) {
-  textFrame.contents = content;
- } else {
-  throw new Error("Text frame not found: " + frameName);
- }
+	var textFrame = findTextFrameInGroup(group.pageItems, frameName);
+	if (textFrame) {
+		textFrame.contents = content;
+	} else {
+		throw new Error("Text frame not found: " + frameName);
+	}
 }
 
 function setTextFrameColor(textFrame, color) {
- try {
-  if (textFrame && textFrame.textRange && color) {
-   textFrame.textRange.fillColor = color;
-  }
- } catch (e) {
- }
+	try {
+		if (textFrame && textFrame.textRange && color) {
+			textFrame.textRange.fillColor = color;
+		}
+	} catch (e) {
+	}
 }
 
 function applyColorToAllTextFramesInGroup(group, color) {
- if (!group || !color) return;
+	if (!group || !color) return;
 
- function findAndColorTextFrames(items) {
-  for (var i = 0; i < items.length; i++) {
-   var item = items[i];
+	function findAndColorTextFrames(items) {
+		for (var i = 0; i < items.length; i++) {
+			var item = items[i];
 
-   if (item.typename === "TextFrame") {
-    setTextFrameColor(item, color);
-   } else if (item.typename === "GroupItem" && item.pageItems && item.pageItems.length > 0) {
-    findAndColorTextFrames(item.pageItems);
-   }
-  }
- }
+			if (item.typename === "TextFrame") {
+				setTextFrameColor(item, color);
+			} else if (item.typename === "GroupItem" && item.pageItems && item.pageItems.length > 0) {
+				findAndColorTextFrames(item.pageItems);
+			}
+		}
+	}
 
- findAndColorTextFrames(group.pageItems);
+	findAndColorTextFrames(group.pageItems);
 }
 
 function findRectangleInGroup(items, name) {
- for (var i = 0; i < items.length; i++) {
-  var item = items[i];
+	for (var i = 0; i < items.length; i++) {
+		var item = items[i];
 
-  if (item.typename === "PathItem" && item.name === name) {
-   return item;
-  }
+		if (item.typename === "PathItem" && item.name === name) {
+			return item;
+		}
 
-  if (item.typename === "GroupItem" && item.pageItems && item.pageItems.length > 0) {
-   var found = findRectangleInGroup(item.pageItems, name);
-   if (found) return found;
-  }
- }
- return null;
+		if (item.typename === "GroupItem" && item.pageItems && item.pageItems.length > 0) {
+			var found = findRectangleInGroup(item.pageItems, name);
+			if (found) return found;
+		}
+	}
+	return null;
 }
 
 function applyColorToRectanglesInGroup(group, color) {
- if (!group || !color) return;
+	if (!group || !color) return;
 
- var colRect = findRectangleInGroup(group.pageItems, "COLOR");
- if (colRect) {
-  try {
-   colRect.filled = true;
-   colRect.fillColor = color;
-  } catch (e) {
-  }
- }
+	var colRect = findRectangleInGroup(group.pageItems, "COLOR");
+	if (colRect) {
+		try {
+			colRect.filled = true;
+			colRect.fillColor = color;
+		} catch (e) {
+		}
+	}
 }
 
 /**
@@ -1137,90 +1177,90 @@ function applyColorToRectanglesInGroup(group, color) {
  * Returns { success, error?, renamedLayer, renamedSwatch }.
  */
 function renameSeparationInkInDocument(doc, fromName, toName) {
- var result = { success: true, error: null, renamedLayer: false, renamedSwatch: false };
- var from = String(fromName || "").replace(/^\s+|\s+$/g, "");
- var to = String(toName || "").replace(/^\s+|\s+$/g, "");
- if (!from || !to) {
-  result.success = false;
-  result.error = "Missing from or to ink name.";
-  return result;
- }
- if (from.toLowerCase() === to.toLowerCase()) {
-  return result;
- }
+	var result = { success: true, error: null, renamedLayer: false, renamedSwatch: false };
+	var from = String(fromName || "").replace(/^\s+|\s+$/g, "");
+	var to = String(toName || "").replace(/^\s+|\s+$/g, "");
+	if (!from || !to) {
+		result.success = false;
+		result.error = "Missing from or to ink name.";
+		return result;
+	}
+	if (from.toLowerCase() === to.toLowerCase()) {
+		return result;
+	}
 
- var existingTargetSwatch = getSwatchByName(doc, to);
- var sourceSwatchForConflict = getSwatchByName(doc, from);
- if (existingTargetSwatch) {
-  if (
-   !sourceSwatchForConflict ||
-   String(existingTargetSwatch.name).toLowerCase() !== String(sourceSwatchForConflict.name).toLowerCase()
-  ) {
-   result.success = false;
-   result.error = "A swatch named \"" + to + "\" already exists.";
-   return result;
-  }
- }else{
-  sourceSwatchForConflict.name = to;
-  result.renamedSwatch = true;
- }
+	var existingTargetSwatch = getSwatchByName(doc, to);
+	var sourceSwatchForConflict = getSwatchByName(doc, from);
+	if (existingTargetSwatch) {
+		if (
+			!sourceSwatchForConflict ||
+			String(existingTargetSwatch.name).toLowerCase() !== String(sourceSwatchForConflict.name).toLowerCase()
+		) {
+			result.success = false;
+			result.error = "A swatch named \"" + to + "\" already exists.";
+			return result;
+		}
+	} else {
+		sourceSwatchForConflict.name = to;
+		result.renamedSwatch = true;
+	}
 
- var sep = null;
- try {
-  sep = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SEPARATED_ART);
- } catch (eSep) { }
- if (sep) {
-  var i;
-  var lyr = null;
-  for (i = 0; i < sep.layers.length; i++) {
-   if (String(sep.layers[i].name).toLowerCase() === from.toLowerCase()) {
-    lyr = sep.layers[i];
-    break;
-   }
-  }
-  if (lyr) {
-   try {
-    lyr.name = to;
-    result.renamedLayer = true;
-   } catch (eLyr) {
-    result.success = false;
-    result.error = (result.error ? result.error + " " : "") + "Layer rename: " + (eLyr.message || eLyr);
-   }
-  }
- }
+	var sep = null;
+	try {
+		sep = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SEPARATED_ART);
+	} catch (eSep) { }
+	if (sep) {
+		var i;
+		var lyr = null;
+		for (i = 0; i < sep.layers.length; i++) {
+			if (String(sep.layers[i].name).toLowerCase() === from.toLowerCase()) {
+				lyr = sep.layers[i];
+				break;
+			}
+		}
+		if (lyr) {
+			try {
+				lyr.name = to;
+				result.renamedLayer = true;
+			} catch (eLyr) {
+				result.success = false;
+				result.error = (result.error ? result.error + " " : "") + "Layer rename: " + (eLyr.message || eLyr);
+			}
+		}
+	}
 
-//  var sw = getSwatchByName(doc, from);
-//  if (result.success && sw && sw.color) {
-//   try {
-//    if (sw.color.typename === "SpotColor" && sw.color.spot) {
-//     sw.color.spot.name = to;
-//     result.renamedSwatch = true;
-//    } else {
-//     try {
-//      sw.name = to;
-//      result.renamedSwatch = true;
-//     } catch (eNm) { }
-//    }
-//   } catch (eSw) {
-//    result.success = false;
-//    result.error = (result.error ? result.error + " " : "") + "Swatch rename: " + (eSw.message || eSw);
-//   }
-//  }
+	//  var sw = getSwatchByName(doc, from);
+	//  if (result.success && sw && sw.color) {
+	//   try {
+	//    if (sw.color.typename === "SpotColor" && sw.color.spot) {
+	//     sw.color.spot.name = to;
+	//     result.renamedSwatch = true;
+	//    } else {
+	//     try {
+	//      sw.name = to;
+	//      result.renamedSwatch = true;
+	//     } catch (eNm) { }
+	//    }
+	//   } catch (eSw) {
+	//    result.success = false;
+	//    result.error = (result.error ? result.error + " " : "") + "Swatch rename: " + (eSw.message || eSw);
+	//   }
+	//  }
 
- if (!result.success) {
-  return result;
- }
+	if (!result.success) {
+		return result;
+	}
 
- if (!result.renamedLayer && !result.renamedSwatch) {
-  result.success = false;
-  result.error =
-   (result.error ? result.error + " " : "") +
-   "No SEPARATED_ART sublayer or swatch found named \"" +
-   from +
-   "\".";
- }
+	if (!result.renamedLayer && !result.renamedSwatch) {
+		result.success = false;
+		result.error =
+			(result.error ? result.error + " " : "") +
+			"No SEPARATED_ART sublayer or swatch found named \"" +
+			from +
+			"\".";
+	}
 
- return result;
+	return result;
 }
 
 /*
@@ -1229,195 +1269,195 @@ function renameSeparationInkInDocument(doc, fromName, toName) {
  * updateGridColorLabels. Returns null when the plate or its art cannot be resolved.
  */
 function getPlateArtColorByLayerName(doc, layerName) {
- try {
-  if (!doc || !layerName) return null;
-  var separatedArtLayer = findLayerByName(doc.layers, CONSTANTS.LAYER_NAMES.SEPARATED_ART);
-  if (!separatedArtLayer || !separatedArtLayer.layers) return null;
-  var target = String(layerName).replace(/^\s+|\s+$/g, "").toUpperCase();
-  for (var i = 0; i < separatedArtLayer.layers.length; i++) {
-   var sub = separatedArtLayer.layers[i];
-   if (!sub || !sub.name) continue;
-   if (String(sub.name).replace(/^\s+|\s+$/g, "").toUpperCase() !== target) continue;
-   return getFirstFillColorFromContainer(sub);
-  }
- } catch (e) {
-  /* Best-effort: the caller falls through to its White UB fallbacks. */
- }
- return null;
+	try {
+		if (!doc || !layerName) return null;
+		var separatedArtLayer = findLayerByName(doc.layers, CONSTANTS.LAYER_NAMES.SEPARATED_ART);
+		if (!separatedArtLayer || !separatedArtLayer.layers) return null;
+		var target = String(layerName).replace(/^\s+|\s+$/g, "").toUpperCase();
+		for (var i = 0; i < separatedArtLayer.layers.length; i++) {
+			var sub = separatedArtLayer.layers[i];
+			if (!sub || !sub.name) continue;
+			if (String(sub.name).replace(/^\s+|\s+$/g, "").toUpperCase() !== target) continue;
+			return getFirstFillColorFromContainer(sub);
+		}
+	} catch (e) {
+		/* Best-effort: the caller falls through to its White UB fallbacks. */
+	}
+	return null;
 }
 
 function updateGridColorLabels(doc, separationData) {
- var result = {
-  updatedLabels: 0,
-  deletedLabels: 0,
-  errors: []
- };
+	var result = {
+		updatedLabels: 0,
+		deletedLabels: 0,
+		errors: []
+	};
 
- var infoBoxLayer = findLayerByName(doc.layers, "GRID INFO BOX");
- if (!infoBoxLayer) {
-  result.errors.push("GRID INFO BOX layer not found in document");
-  return result;
- }
+	var infoBoxLayer = findLayerByName(doc.layers, "GRID INFO BOX");
+	if (!infoBoxLayer) {
+		result.errors.push("GRID INFO BOX layer not found in document");
+		return result;
+	}
 
- var groupsWithData = {};
+	var groupsWithData = {};
 
- for (var i = 0; i < separationData.length; i++) {
-  var sepData = separationData[i];
-  var groupName = String(sepData.seq);
-  var labelGroup = null;
+	for (var i = 0; i < separationData.length; i++) {
+		var sepData = separationData[i];
+		var groupName = String(sepData.seq);
+		var labelGroup = null;
 
-  for (var j = 0; j < infoBoxLayer.groupItems.length; j++) {
-   if (infoBoxLayer.groupItems[j].name === groupName) {
-    labelGroup = infoBoxLayer.groupItems[j];
-    break;
-   }
-  }
+		for (var j = 0; j < infoBoxLayer.groupItems.length; j++) {
+			if (infoBoxLayer.groupItems[j].name === groupName) {
+				labelGroup = infoBoxLayer.groupItems[j];
+				break;
+			}
+		}
 
-  if (!labelGroup) {
-   result.errors.push("Group '" + groupName + "' not found in GRID INFO BOX layer");
-   continue;
-  }
+		if (!labelGroup) {
+			result.errors.push("Group '" + groupName + "' not found in GRID INFO BOX layer");
+			continue;
+		}
 
-  var swatchColor = null;
-  var swatchLookupName = sepData.swatchName || sepData.colorName;
-  if (swatchLookupName) {
-   var swatch = getSwatchByName(doc, swatchLookupName);
-   if (swatch && swatch.color) {
-    swatchColor = swatch.color;
-   }
-   /*
-    * No swatch carries that name. The row names a PLATE, and a plate does not always have a
-    * same-named swatch: a profile with custom underbase names prints "SL White UB 2nd" on the
-    * plain "White UB" swatch, and the White-UB fallbacks below only recognise "White UB [N]".
-    * Take the colour off the plate's own art instead — by definition the ink that plate prints
-    * with — which also covers second hits, Choke and Blocker. Without this the label kept the SEP
-    * template's default text colour, [Registration], so it printed on EVERY separation.
-    */
-   if (!swatchColor) {
-    swatchColor = getPlateArtColorByLayerName(doc, swatchLookupName);
-   }
-   if (!swatchColor) {
-    /*
-     * Last resort for underbase rows. Matched on CONTAINS rather than the old
-     * "^White UB [N]$", so custom profile names ("SL White UB 2nd") reach these fallbacks
-     * instead of dropping through to the error and keeping the template's [Registration] text.
-     */
-    var lookupStr = String(swatchLookupName);
-    var isWhiteUbVariant = /white\s*ub/i.test(lookupStr);
-    if (isWhiteUbVariant) {
-     /* Pass number from either spelling: "White UB 2" and "SL White UB 2nd" both give 2. */
-     var ubNumMatch = lookupStr.match(/(\d+)\s*(?:st|nd|rd|th)?\s*$/i);
-     var ubNum = ubNumMatch && ubNumMatch[1] ? parseInt(ubNumMatch[1], 10) : 1;
-     if (ubNum >= 2) {
-      var ub2Name = getUnderbase2SwatchNameFromDocument(doc);
-      if (ub2Name) {
-       var ub2Swatch = getSwatchByName(doc, ub2Name);
-       if (ub2Swatch && ub2Swatch.color) {
-        swatchColor = ub2Swatch.color;
-       }
-      }
-     }
-     if (!swatchColor) {
-      var whiteUbSwatch = getSwatchByName(doc, "White UB");
-      if (whiteUbSwatch && whiteUbSwatch.color) {
-       swatchColor = whiteUbSwatch.color;
-      } else {
-       result.errors.push("Swatch '" + swatchLookupName + "' not found for group '" + groupName + "' and fallback 'White UB' swatch missing");
-      }
-     }
-    } else {
-     result.errors.push("Swatch '" + swatchLookupName + "' not found for group '" + groupName + "'");
-    }
-   }
-  }
+		var swatchColor = null;
+		var swatchLookupName = sepData.swatchName || sepData.colorName;
+		if (swatchLookupName) {
+			var swatch = getSwatchByName(doc, swatchLookupName);
+			if (swatch && swatch.color) {
+				swatchColor = swatch.color;
+			}
+			/*
+			 * No swatch carries that name. The row names a PLATE, and a plate does not always have a
+			 * same-named swatch: a profile with custom underbase names prints "SL White UB 2nd" on the
+			 * plain "White UB" swatch, and the White-UB fallbacks below only recognise "White UB [N]".
+			 * Take the colour off the plate's own art instead — by definition the ink that plate prints
+			 * with — which also covers second hits, Choke and Blocker. Without this the label kept the SEP
+			 * template's default text colour, [Registration], so it printed on EVERY separation.
+			 */
+			if (!swatchColor) {
+				swatchColor = getPlateArtColorByLayerName(doc, swatchLookupName);
+			}
+			if (!swatchColor) {
+				/*
+				 * Last resort for underbase rows. Matched on CONTAINS rather than the old
+				 * "^White UB [N]$", so custom profile names ("SL White UB 2nd") reach these fallbacks
+				 * instead of dropping through to the error and keeping the template's [Registration] text.
+				 */
+				var lookupStr = String(swatchLookupName);
+				var isWhiteUbVariant = /white\s*ub/i.test(lookupStr);
+				if (isWhiteUbVariant) {
+					/* Pass number from either spelling: "White UB 2" and "SL White UB 2nd" both give 2. */
+					var ubNumMatch = lookupStr.match(/(\d+)\s*(?:st|nd|rd|th)?\s*$/i);
+					var ubNum = ubNumMatch && ubNumMatch[1] ? parseInt(ubNumMatch[1], 10) : 1;
+					if (ubNum >= 2) {
+						var ub2Name = getUnderbase2SwatchNameFromDocument(doc);
+						if (ub2Name) {
+							var ub2Swatch = getSwatchByName(doc, ub2Name);
+							if (ub2Swatch && ub2Swatch.color) {
+								swatchColor = ub2Swatch.color;
+							}
+						}
+					}
+					if (!swatchColor) {
+						var whiteUbSwatch = getSwatchByName(doc, "White UB");
+						if (whiteUbSwatch && whiteUbSwatch.color) {
+							swatchColor = whiteUbSwatch.color;
+						} else {
+							result.errors.push("Swatch '" + swatchLookupName + "' not found for group '" + groupName + "' and fallback 'White UB' swatch missing");
+						}
+					}
+				} else {
+					result.errors.push("Swatch '" + swatchLookupName + "' not found for group '" + groupName + "'");
+				}
+			}
+		}
 
-  try {
-   updateTextFrameInGroup(labelGroup, "SEQ", String(sepData.seq));
-   updateTextFrameInGroup(labelGroup, "COLOR NAME", sepData.colorName);
-   updateTextFrameInGroup(labelGroup, "MESH", sepData.mesh);
-   updateTextFrameInGroup(labelGroup, "MICRON", sepData.micron);
-   updateTextFrameInGroup(labelGroup, "FLASH", sepData.flash ? "Y" : "N");
-   updateTextFrameInGroup(labelGroup, "COOL", sepData.cool ? "Y" : "N");
-   updateTextFrameInGroup(labelGroup, "WB", sepData.wb ? "Y" : "N");
+		try {
+			updateTextFrameInGroup(labelGroup, "SEQ", String(sepData.seq));
+			updateTextFrameInGroup(labelGroup, "COLOR NAME", sepData.colorName);
+			updateTextFrameInGroup(labelGroup, "MESH", sepData.mesh);
+			updateTextFrameInGroup(labelGroup, "MICRON", sepData.micron);
+			updateTextFrameInGroup(labelGroup, "FLASH", sepData.flash ? "Y" : "N");
+			updateTextFrameInGroup(labelGroup, "COOL", sepData.cool ? "Y" : "N");
+			updateTextFrameInGroup(labelGroup, "WB", sepData.wb ? "Y" : "N");
 
-   if (swatchColor) {
-    applyColorToAllTextFramesInGroup(labelGroup, swatchColor);
-    applyColorToRectanglesInGroup(labelGroup, swatchColor);
-   }
+			if (swatchColor) {
+				applyColorToAllTextFramesInGroup(labelGroup, swatchColor);
+				applyColorToRectanglesInGroup(labelGroup, swatchColor);
+			}
 
-   labelGroup.hidden = false;
-   groupsWithData[groupName] = true;
+			labelGroup.hidden = false;
+			groupsWithData[groupName] = true;
 
-   result.updatedLabels++;
-  } catch (e) {
-   result.errors.push("Error updating group '" + groupName + "': " + e.message);
-  }
- }
+			result.updatedLabels++;
+		} catch (e) {
+			result.errors.push("Error updating group '" + groupName + "': " + e.message);
+		}
+	}
 
- var maxGroupsToCheck = 14;
- for (var i = 1; i <= maxGroupsToCheck; i++) {
-  var groupName = String(i);
+	var maxGroupsToCheck = 14;
+	for (var i = 1; i <= maxGroupsToCheck; i++) {
+		var groupName = String(i);
 
-  if (groupsWithData[groupName]) {
-   continue;
-  }
+		if (groupsWithData[groupName]) {
+			continue;
+		}
 
-  var labelGroup = null;
+		var labelGroup = null;
 
-  for (var j = 0; j < infoBoxLayer.groupItems.length; j++) {
-   if (infoBoxLayer.groupItems[j].name === groupName) {
-    labelGroup = infoBoxLayer.groupItems[j];
-    break;
-   }
-  }
+		for (var j = 0; j < infoBoxLayer.groupItems.length; j++) {
+			if (infoBoxLayer.groupItems[j].name === groupName) {
+				labelGroup = infoBoxLayer.groupItems[j];
+				break;
+			}
+		}
 
-  if (!labelGroup) {
-   continue;
-  }
+		if (!labelGroup) {
+			continue;
+		}
 
-  try {
-   labelGroup.hidden = true;
-  } catch (e) {
-   result.errors.push("Error hiding group '" + groupName + "': " + e.message);
-  }
- }
+		try {
+			labelGroup.hidden = true;
+		} catch (e) {
+			result.errors.push("Error hiding group '" + groupName + "': " + e.message);
+		}
+	}
 
- return result;
+	return result;
 }
 
 function normalizeKey(str) {
- return str.toLowerCase().replace(/[\s_-]/g, '');
+	return str.toLowerCase().replace(/[\s_-]/g, '');
 }
 
 function findValueInJSON(obj, key) {
- var normalizedSearchKey = normalizeKey(key);
+	var normalizedSearchKey = normalizeKey(key);
 
- if (obj.hasOwnProperty(key)) {
-  return obj[key];
- }
+	if (obj.hasOwnProperty(key)) {
+		return obj[key];
+	}
 
- for (var prop in obj) {
-  if (obj.hasOwnProperty(prop)) {
-   var normalizedProp = normalizeKey(prop);
+	for (var prop in obj) {
+		if (obj.hasOwnProperty(prop)) {
+			var normalizedProp = normalizeKey(prop);
 
-   if (normalizedProp === normalizedSearchKey) {
-    if (typeof obj[prop] !== 'object' || obj[prop] === null) {
-     return obj[prop];
-    }
-   }
-  }
- }
+			if (normalizedProp === normalizedSearchKey) {
+				if (typeof obj[prop] !== 'object' || obj[prop] === null) {
+					return obj[prop];
+				}
+			}
+		}
+	}
 
- for (var prop in obj) {
-  if (obj.hasOwnProperty(prop) && typeof obj[prop] === 'object' && obj[prop] !== null) {
-   var result = findValueInJSON(obj[prop], key);
-   if (result !== null) {
-    return result;
-   }
-  }
- }
+	for (var prop in obj) {
+		if (obj.hasOwnProperty(prop) && typeof obj[prop] === 'object' && obj[prop] !== null) {
+			var result = findValueInJSON(obj[prop], key);
+			if (result !== null) {
+				return result;
+			}
+		}
+	}
 
- return null;
+	return null;
 }
 
 /*
@@ -1425,58 +1465,58 @@ function findValueInJSON(obj, key) {
  * Parsed manually from the ISO string because ExtendScript has no reliable date parser/formatter.
  */
 function formatSeparationDate(isoStr) {
- if (!isoStr || typeof isoStr !== 'string') return '';
- try {
-  var s = isoStr.trim();
-  var datePart = s.indexOf('T') >= 0 ? s.substring(0, s.indexOf('T')) : s.substring(0, 10);
-  if (datePart.length < 10) return '';
-  var parts = datePart.split('-');
-  if (parts.length !== 3) return '';
-  var year = parts[0];
-  var month = parts[1];
-  var day = parts[2];
-  if (!year || !month || !day) return '';
-  return month + '/' + day + '/' + year;
- } catch (e) {
-  return '';
- }
+	if (!isoStr || typeof isoStr !== 'string') return '';
+	try {
+		var s = isoStr.trim();
+		var datePart = s.indexOf('T') >= 0 ? s.substring(0, s.indexOf('T')) : s.substring(0, 10);
+		if (datePart.length < 10) return '';
+		var parts = datePart.split('-');
+		if (parts.length !== 3) return '';
+		var year = parts[0];
+		var month = parts[1];
+		var day = parts[2];
+		if (!year || !month || !day) return '';
+		return month + '/' + day + '/' + year;
+	} catch (e) {
+		return '';
+	}
 }
 
 // Read the graphic position lookup JSON from the configured server base path.
 // Expected location: <ServerBasePath>/SETTINGS/graphic_positions.json
 // Expected shape: [{ "ABBV": "FT", "DESC": "FRONT" }, ...]
 function loadGraphicPositionLookup() {
- try {
-  if (typeof getServerBasePath !== 'function') return [];
-  var serverBasePath = getServerBasePath();
-  if (!serverBasePath) return [];
-  var normalizedBasePath = String(serverBasePath).replace(/\/$/, "");
-  var lookupPath = normalizedBasePath + "/SETTINGS/graphic_positions.json";
-  var lookupFile = new File(lookupPath);
-  if (!lookupFile.exists) return [];
-  if (!lookupFile.open("r")) return [];
-  var content = lookupFile.read();
-  lookupFile.close();
-  if (!content || !content.length) return [];
-  var parsed;
-  if (typeof JSON !== "undefined" && JSON.parse) {
-   parsed = JSON.parse(content);
-  } else {
-   parsed = eval("(" + content + ")");
-  }
-  return (parsed && parsed instanceof Array) ? parsed : [];
- } catch (e) {
-  return [];
- }
+	try {
+		if (typeof getServerBasePath !== 'function') return [];
+		var serverBasePath = getServerBasePath();
+		if (!serverBasePath) return [];
+		var normalizedBasePath = String(serverBasePath).replace(/\/$/, "");
+		var lookupPath = normalizedBasePath + "/SETTINGS/graphic_positions.json";
+		var lookupFile = new File(lookupPath);
+		if (!lookupFile.exists) return [];
+		if (!lookupFile.open("r")) return [];
+		var content = lookupFile.read();
+		lookupFile.close();
+		if (!content || !content.length) return [];
+		var parsed;
+		if (typeof JSON !== "undefined" && JSON.parse) {
+			parsed = JSON.parse(content);
+		} else {
+			parsed = eval("(" + content + ")");
+		}
+		return (parsed && parsed instanceof Array) ? parsed : [];
+	} catch (e) {
+		return [];
+	}
 }
 
 function normalizeInkMatchString(value) {
- if (value == null) return "";
- return String(value).replace(/^\s+|\s+$/g, "").toUpperCase();
+	if (value == null) return "";
+	return String(value).replace(/^\s+|\s+$/g, "").toUpperCase();
 }
 
 function escapeRegExpForInkMatch(str) {
- return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /**
@@ -1484,252 +1524,252 @@ function escapeRegExpForInkMatch(str) {
  * Numeric Pantone codes must match the full number token — "123" must not match "1235".
  */
 function inkExceptionNameMatchesName(exceptionInk, targetName) {
- var needle = normalizeInkMatchString(exceptionInk);
- var target = normalizeInkMatchString(targetName);
- if (!needle || !target) return false;
- if (target === needle) return true;
+	var needle = normalizeInkMatchString(exceptionInk);
+	var target = normalizeInkMatchString(targetName);
+	if (!needle || !target) return false;
+	if (target === needle) return true;
 
- /*
-  * The exception's Ink Color is a color code ("62Q", "24C", "4FA", "1235", or a full
-  * "PANTONE 1235 C"). It must match a COMPLETE alphanumeric token in the target name, never a bare
-  * digit fragment. Matching only the digit run ("24" out of "24C") wrongly collided with unrelated
-  * tokens such as the season code in "SPORT RED 62Q S24" (the "24" inside "S24"), so the WRONG
-  * exception row was picked. Alphanumeric token boundaries fix that and still (a) keep "123" from
-  * matching "1235", and (b) resolve reformatted Pantone names, because the shared number token
-  * ("1235") matches both "PANTONE 1235 C" and "LS 1235" / "LS 1235 2".
-  */
- var codeToken = needle;
- var pantoneNumber = needle.match(/PANTONE\s+([0-9]+[A-Z]?)/);
- if (pantoneNumber) {
-  codeToken = pantoneNumber[1];
- }
- if (/^[0-9A-Z]+$/.test(codeToken)) {
-  var tokenRe = new RegExp("(?:^|[^A-Z0-9])" + escapeRegExpForInkMatch(codeToken) + "(?:[^A-Z0-9]|$)");
-  return tokenRe.test(target);
- }
+	/*
+	 * The exception's Ink Color is a color code ("62Q", "24C", "4FA", "1235", or a full
+	 * "PANTONE 1235 C"). It must match a COMPLETE alphanumeric token in the target name, never a bare
+	 * digit fragment. Matching only the digit run ("24" out of "24C") wrongly collided with unrelated
+	 * tokens such as the season code in "SPORT RED 62Q S24" (the "24" inside "S24"), so the WRONG
+	 * exception row was picked. Alphanumeric token boundaries fix that and still (a) keep "123" from
+	 * matching "1235", and (b) resolve reformatted Pantone names, because the shared number token
+	 * ("1235") matches both "PANTONE 1235 C" and "LS 1235" / "LS 1235 2".
+	 */
+	var codeToken = needle;
+	var pantoneNumber = needle.match(/PANTONE\s+([0-9]+[A-Z]?)/);
+	if (pantoneNumber) {
+		codeToken = pantoneNumber[1];
+	}
+	if (/^[0-9A-Z]+$/.test(codeToken)) {
+		var tokenRe = new RegExp("(?:^|[^A-Z0-9])" + escapeRegExpForInkMatch(codeToken) + "(?:[^A-Z0-9]|$)");
+		return tokenRe.test(target);
+	}
 
- if (target.indexOf(needle) !== -1) return true;
- if (needle.indexOf(target) !== -1) return true;
- return false;
+	if (target.indexOf(needle) !== -1) return true;
+	if (needle.indexOf(target) !== -1) return true;
+	return false;
 }
 
 // Read/write profile ink exceptions JSON from the configured server base path.
 // Expected location: <ServerBasePath>/SETTINGS/LEAP_SEPS/Data/profile_ink_exceptions.json
 function getProfileInkExceptionsJsonPath() {
- try {
-  if (typeof getServerBasePath !== "function") return null;
-  var serverBasePath = getServerBasePath();
-  if (!serverBasePath) return null;
-  var normalizedBasePath = String(serverBasePath).replace(/\/$/, "");
-  return normalizedBasePath + "/SETTINGS/LEAP_SEPS/Data/profile_ink_exceptions.json";
- } catch (e) {
-  return null;
- }
+	try {
+		if (typeof getServerBasePath !== "function") return null;
+		var serverBasePath = getServerBasePath();
+		if (!serverBasePath) return null;
+		var normalizedBasePath = String(serverBasePath).replace(/\/$/, "");
+		return normalizedBasePath + "/SETTINGS/LEAP_SEPS/Data/profile_ink_exceptions.json";
+	} catch (e) {
+		return null;
+	}
 }
 
 function loadProfileInkExceptionsJson() {
- try {
-  var jsonPath = getProfileInkExceptionsJsonPath();
-  if (!jsonPath) return [];
-  var jsonFile = new File(jsonPath);
-  if (!jsonFile.exists) return [];
-  if (!jsonFile.open("r")) return [];
-  var content = jsonFile.read();
-  jsonFile.close();
-  if (!content || !content.length) return [];
-  var parsed;
-  if (typeof JSON !== "undefined" && JSON.parse) {
-   parsed = JSON.parse(content);
-  } else {
-   parsed = eval("(" + content + ")");
-  }
-  return (parsed && parsed instanceof Array) ? parsed : [];
- } catch (e) {
-  return [];
- }
+	try {
+		var jsonPath = getProfileInkExceptionsJsonPath();
+		if (!jsonPath) return [];
+		var jsonFile = new File(jsonPath);
+		if (!jsonFile.exists) return [];
+		if (!jsonFile.open("r")) return [];
+		var content = jsonFile.read();
+		jsonFile.close();
+		if (!content || !content.length) return [];
+		var parsed;
+		if (typeof JSON !== "undefined" && JSON.parse) {
+			parsed = JSON.parse(content);
+		} else {
+			parsed = eval("(" + content + ")");
+		}
+		return (parsed && parsed instanceof Array) ? parsed : [];
+	} catch (e) {
+		return [];
+	}
 }
 
 function saveProfileInkExceptionsJson(entries) {
- try {
-  var jsonPath = getProfileInkExceptionsJsonPath();
-  if (!jsonPath) {
-   return { success: false, error: "Could not determine profile_ink_exceptions.json path" };
-  }
-  var jsonFile = new File(jsonPath);
-  var jsonFolder = jsonFile.parent;
-  if (!jsonFolder.exists) {
-   jsonFolder.create();
-  }
-  if (!jsonFile.open("w")) {
-   return { success: false, error: "Failed to open profile_ink_exceptions.json for writing" };
-  }
-  var jsonString = JSON.stringify(entries, null, 2);
-  jsonFile.write(jsonString);
-  jsonFile.close();
-  return { success: true };
- } catch (e) {
-  return { success: false, error: e.message || e.toString() };
- }
+	try {
+		var jsonPath = getProfileInkExceptionsJsonPath();
+		if (!jsonPath) {
+			return { success: false, error: "Could not determine profile_ink_exceptions.json path" };
+		}
+		var jsonFile = new File(jsonPath);
+		var jsonFolder = jsonFile.parent;
+		if (!jsonFolder.exists) {
+			jsonFolder.create();
+		}
+		if (!jsonFile.open("w")) {
+			return { success: false, error: "Failed to open profile_ink_exceptions.json for writing" };
+		}
+		var jsonString = JSON.stringify(entries, null, 2);
+		jsonFile.write(jsonString);
+		jsonFile.close();
+		return { success: true };
+	} catch (e) {
+		return { success: false, error: e.message || e.toString() };
+	}
 }
 
 // Return the ABBV for a given position DESC using the graphic position lookup.
 // Falls back to the original positionDesc when no match is found.
 function getGraphicPositionAbbreviation(positionDesc) {
- if (positionDesc == null) return '';
- var original = String(positionDesc).trim();
- if (!original) return '';
- try {
-  var target = original.toLowerCase();
-  var lookup = loadGraphicPositionLookup();
-  for (var i = 0; i < lookup.length; i++) {
-   var entry = lookup[i];
-   if (!entry) continue;
-   var desc = entry.DESC != null ? entry.DESC : (entry.desc != null ? entry.desc : '');
-   if (!desc) continue;
-   if (String(desc).trim().toLowerCase() === target) {
-    var abbv = entry.ABBV != null ? entry.ABBV : (entry.abbv != null ? entry.abbv : '');
-    if (abbv != null && String(abbv).trim() !== '') {
-     return String(abbv).trim();
-    }
-    break;
-   }
-  }
- } catch (e) { }
- return original;
+	if (positionDesc == null) return '';
+	var original = String(positionDesc).trim();
+	if (!original) return '';
+	try {
+		var target = original.toLowerCase();
+		var lookup = loadGraphicPositionLookup();
+		for (var i = 0; i < lookup.length; i++) {
+			var entry = lookup[i];
+			if (!entry) continue;
+			var desc = entry.DESC != null ? entry.DESC : (entry.desc != null ? entry.desc : '');
+			if (!desc) continue;
+			if (String(desc).trim().toLowerCase() === target) {
+				var abbv = entry.ABBV != null ? entry.ABBV : (entry.abbv != null ? entry.abbv : '');
+				if (abbv != null && String(abbv).trim() !== '') {
+					return String(abbv).trim();
+				}
+				break;
+			}
+		}
+	} catch (e) { }
+	return original;
 }
 
 function formatSeparationVersionLabel(versionNumber) {
- var n = parseInt(versionNumber, 10);
- if (isNaN(n) || n < 1) {
-  n = 1;
- }
- return "V" + n;
+	var n = parseInt(versionNumber, 10);
+	if (isNaN(n) || n < 1) {
+		n = 1;
+	}
+	return "V" + n;
 }
 
 function separationProfileNameFromEntry(entry) {
- if (entry && entry.profileMetadata && entry.profileMetadata.profileName) {
-  return String(entry.profileMetadata.profileName);
- }
- return "";
+	if (entry && entry.profileMetadata && entry.profileMetadata.profileName) {
+		return String(entry.profileMetadata.profileName);
+	}
+	return "";
 }
 
 function findSeparationEntryIndex(separations, graphicName, profileName) {
- if (!separations || !separations.length || !graphicName) {
-  return -1;
- }
- var graphicKey = String(graphicName);
- var profileKey = profileName != null ? String(profileName) : "";
- for (var i = 0; i < separations.length; i++) {
-  var entry = separations[i];
-  if (!entry || String(entry.graphicName) !== graphicKey) {
-   continue;
-  }
-  var entryProfile = separationProfileNameFromEntry(entry);
-  if (profileKey && entryProfile) {
-   if (entryProfile === profileKey) {
-    return i;
-   }
-  } else if (!profileKey && !entryProfile) {
-   return i;
-  }
- }
- return -1;
+	if (!separations || !separations.length || !graphicName) {
+		return -1;
+	}
+	var graphicKey = String(graphicName);
+	var profileKey = profileName != null ? String(profileName) : "";
+	for (var i = 0; i < separations.length; i++) {
+		var entry = separations[i];
+		if (!entry || String(entry.graphicName) !== graphicKey) {
+			continue;
+		}
+		var entryProfile = separationProfileNameFromEntry(entry);
+		if (profileKey && entryProfile) {
+			if (entryProfile === profileKey) {
+				return i;
+			}
+		} else if (!profileKey && !entryProfile) {
+			return i;
+		}
+	}
+	return -1;
 }
 
 function getStoredSeparationVersionFromEntry(entry) {
- if (!entry) {
-  return 0;
- }
- var fromMeta = entry.profileMetadata && entry.profileMetadata.separationVersion != null
-  ? parseInt(entry.profileMetadata.separationVersion, 10)
-  : NaN;
- if (!isNaN(fromMeta) && fromMeta > 0) {
-  return fromMeta;
- }
- var fromEntry = entry.separationVersion != null ? parseInt(entry.separationVersion, 10) : NaN;
- if (!isNaN(fromEntry) && fromEntry > 0) {
-  return fromEntry;
- }
- return 0;
+	if (!entry) {
+		return 0;
+	}
+	var fromMeta = entry.profileMetadata && entry.profileMetadata.separationVersion != null
+		? parseInt(entry.profileMetadata.separationVersion, 10)
+		: NaN;
+	if (!isNaN(fromMeta) && fromMeta > 0) {
+		return fromMeta;
+	}
+	var fromEntry = entry.separationVersion != null ? parseInt(entry.separationVersion, 10) : NaN;
+	if (!isNaN(fromEntry) && fromEntry > 0) {
+		return fromEntry;
+	}
+	return 0;
 }
 
 function loadSeparationsFromVersionDoc(versionDoc) {
- var separations = [];
- if (!versionDoc) {
-  return separations;
- }
- try {
-  var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", versionDoc);
-  if (xmp.isXmpCreated && xmp.doesStructFieldExist("LEAPSeparationProfileData")) {
-   var existing = xmp.getStructField("LEAPSeparationProfileData", true);
-   if (existing instanceof Array) {
-    separations = existing;
-   }
-  }
- } catch (e) { }
- return separations;
+	var separations = [];
+	if (!versionDoc) {
+		return separations;
+	}
+	try {
+		var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", versionDoc);
+		if (xmp.isXmpCreated && xmp.doesStructFieldExist("LEAPSeparationProfileData")) {
+			var existing = xmp.getStructField("LEAPSeparationProfileData", true);
+			if (existing instanceof Array) {
+				separations = existing;
+			}
+		}
+	} catch (e) { }
+	return separations;
 }
 
 function persistSeparationVersionOnVersionDoc(versionDoc, graphicName, profileName, versionNumber) {
- if (!versionDoc || !graphicName || versionNumber == null) {
-  return false;
- }
- var version = parseInt(versionNumber, 10);
- if (isNaN(version) || version < 1) {
-  return false;
- }
- try {
-  var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", versionDoc);
-  if (!xmp.isXmpCreated) {
-   return false;
-  }
-  var separations = loadSeparationsFromVersionDoc(versionDoc);
-  var idx = findSeparationEntryIndex(separations, graphicName, profileName);
-  if (idx < 0) {
-   separations.push({
-    graphicName: String(graphicName),
-    profileMetadata: {
-     profileName: profileName != null ? String(profileName) : "",
-     separationVersion: version
-    },
-    separatedDocumentPath: "",
-    separationVersion: version
-   });
-  } else {
-   var entry = separations[idx];
-   if (!entry.profileMetadata || typeof entry.profileMetadata !== "object") {
-    entry.profileMetadata = {};
-   }
-   entry.profileMetadata.separationVersion = version;
-   entry.separationVersion = version;
-   separations[idx] = entry;
-  }
-  xmp.setStructField("LEAPSeparationProfileData", separations, true, false);
-  xmp.commit();
-  if (versionDoc.fullName && versionDoc.fullName.fsName) {
-   try {
-    versionDoc.save();
-   } catch (saveErr) { }
-  }
-  return true;
- } catch (e) {
-  return false;
- }
+	if (!versionDoc || !graphicName || versionNumber == null) {
+		return false;
+	}
+	var version = parseInt(versionNumber, 10);
+	if (isNaN(version) || version < 1) {
+		return false;
+	}
+	try {
+		var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", versionDoc);
+		if (!xmp.isXmpCreated) {
+			return false;
+		}
+		var separations = loadSeparationsFromVersionDoc(versionDoc);
+		var idx = findSeparationEntryIndex(separations, graphicName, profileName);
+		if (idx < 0) {
+			separations.push({
+				graphicName: String(graphicName),
+				profileMetadata: {
+					profileName: profileName != null ? String(profileName) : "",
+					separationVersion: version
+				},
+				separatedDocumentPath: "",
+				separationVersion: version
+			});
+		} else {
+			var entry = separations[idx];
+			if (!entry.profileMetadata || typeof entry.profileMetadata !== "object") {
+				entry.profileMetadata = {};
+			}
+			entry.profileMetadata.separationVersion = version;
+			entry.separationVersion = version;
+			separations[idx] = entry;
+		}
+		xmp.setStructField("LEAPSeparationProfileData", separations, true, false);
+		xmp.commit();
+		if (versionDoc.fullName && versionDoc.fullName.fsName) {
+			try {
+				versionDoc.save();
+			} catch (saveErr) { }
+		}
+		return true;
+	} catch (e) {
+		return false;
+	}
 }
 
 function getNextSeparationVersion(versionDoc, graphicName, profileName) {
- var separations = loadSeparationsFromVersionDoc(versionDoc);
- var idx = findSeparationEntryIndex(separations, graphicName, profileName);
- if (idx < 0) {
-  return 1;
- }
- return getStoredSeparationVersionFromEntry(separations[idx]) + 1;
+	var separations = loadSeparationsFromVersionDoc(versionDoc);
+	var idx = findSeparationEntryIndex(separations, graphicName, profileName);
+	if (idx < 0) {
+		return 1;
+	}
+	return getStoredSeparationVersionFromEntry(separations[idx]) + 1;
 }
 
 function bumpSeparationVersionOnVersionDoc(versionDoc, graphicName, profileName) {
- var nextVersion = getNextSeparationVersion(versionDoc, graphicName, profileName);
- persistSeparationVersionOnVersionDoc(versionDoc, graphicName, profileName, nextVersion);
- return nextVersion;
+	var nextVersion = getNextSeparationVersion(versionDoc, graphicName, profileName);
+	persistSeparationVersionOnVersionDoc(versionDoc, graphicName, profileName, nextVersion);
+	return nextVersion;
 }
 
 /*
@@ -1769,16 +1809,16 @@ var SEPARATION_SIDECAR_EXTENSION = ".json";
 
 /* Flat-registry file names must survive being a single path segment. */
 function sanitizeSeparationKeyPart(value) {
- if (value == null) {
-  return "";
- }
- var text = String(value).replace(/^\s+|\s+$/g, "");
- if (!text) {
-  return "";
- }
- /* Whitelist: avoids putting a slash inside a regex char class, which the
-    ExtendScript regex-literal parser mishandles. */
- return text.replace(/[^A-Za-z0-9._-]+/g, "_");
+	if (value == null) {
+		return "";
+	}
+	var text = String(value).replace(/^\s+|\s+$/g, "");
+	if (!text) {
+		return "";
+	}
+	/* Whitelist: avoids putting a slash inside a regex char class, which the
+		 ExtendScript regex-literal parser mishandles. */
+	return text.replace(/[^A-Za-z0-9._-]+/g, "_");
 }
 
 /*
@@ -1788,19 +1828,19 @@ function sanitizeSeparationKeyPart(value) {
  * graphic+profile identity findSeparationEntryIndex already uses for XMP).
  */
 function buildSeparationRegistryKey(league, teamCode, graphicName, profileCode) {
- var parts = [];
- var leaguePart = sanitizeSeparationKeyPart(league);
- var teamPart = sanitizeSeparationKeyPart(teamCode);
- var graphicPart = sanitizeSeparationKeyPart(graphicName);
- var profilePart = sanitizeSeparationKeyPart(profileCode);
- if (leaguePart) { parts.push(leaguePart); }
- if (teamPart) { parts.push(teamPart); }
- if (graphicPart) { parts.push(graphicPart.toUpperCase()); }
- if (profilePart) { parts.push(profilePart); }
- if (!parts.length) {
-  return "";
- }
- return parts.join("__");
+	var parts = [];
+	var leaguePart = sanitizeSeparationKeyPart(league);
+	var teamPart = sanitizeSeparationKeyPart(teamCode);
+	var graphicPart = sanitizeSeparationKeyPart(graphicName);
+	var profilePart = sanitizeSeparationKeyPart(profileCode);
+	if (leaguePart) { parts.push(leaguePart); }
+	if (teamPart) { parts.push(teamPart); }
+	if (graphicPart) { parts.push(graphicPart.toUpperCase()); }
+	if (profilePart) { parts.push(profilePart); }
+	if (!parts.length) {
+		return "";
+	}
+	return parts.join("__");
 }
 
 /*
@@ -1809,74 +1849,74 @@ function buildSeparationRegistryKey(league, teamCode, graphicName, profileCode) 
  * write without failing the separation itself.
  */
 function getSeparationRegistryFolder(rootFolder, createIfMissing) {
- try {
-  if (!rootFolder || !rootFolder.fsName) {
-   return null;
-  }
-  var registryFolder = new Folder(rootFolder.fsName + "/" + SEPARATION_REGISTRY_FOLDER_NAME);
-  if (!registryFolder.exists) {
-   if (!createIfMissing) {
-    return null;
-   }
-   if (!registryFolder.create()) {
-    return null;
-   }
-  }
-  return registryFolder;
- } catch (e) {
-  return null;
- }
+	try {
+		if (!rootFolder || !rootFolder.fsName) {
+			return null;
+		}
+		var registryFolder = new Folder(rootFolder.fsName + "/" + SEPARATION_REGISTRY_FOLDER_NAME);
+		if (!registryFolder.exists) {
+			if (!createIfMissing) {
+				return null;
+			}
+			if (!registryFolder.create()) {
+				return null;
+			}
+		}
+		return registryFolder;
+	} catch (e) {
+		return null;
+	}
 }
 
 /* Read + parse one sidecar file. Returns null on any problem (never throws). */
 function readSeparationSidecarFile(sidecarFile) {
- try {
-  if (!sidecarFile || !sidecarFile.exists) {
-   return null;
-  }
-  sidecarFile.encoding = "UTF-8";
-  if (!sidecarFile.open("r")) {
-   return null;
-  }
-  var contents = sidecarFile.read();
-  sidecarFile.close();
-  if (!contents) {
-   return null;
-  }
-  var parsed = JSON.parse(contents);
-  if (!parsed || typeof parsed !== "object") {
-   return null;
-  }
-  return parsed;
- } catch (e) {
-  try { sidecarFile.close(); } catch (closeErr) { }
-  return null;
- }
+	try {
+		if (!sidecarFile || !sidecarFile.exists) {
+			return null;
+		}
+		sidecarFile.encoding = "UTF-8";
+		if (!sidecarFile.open("r")) {
+			return null;
+		}
+		var contents = sidecarFile.read();
+		sidecarFile.close();
+		if (!contents) {
+			return null;
+		}
+		var parsed = JSON.parse(contents);
+		if (!parsed || typeof parsed !== "object") {
+			return null;
+		}
+		return parsed;
+	} catch (e) {
+		try { sidecarFile.close(); } catch (closeErr) { }
+		return null;
+	}
 }
 
 /* Write one sidecar file. Returns true only when the bytes actually landed. */
 function writeSeparationSidecarFile(sidecarFile, data) {
- try {
-  if (!sidecarFile) {
-   return false;
-  }
-  var parent = sidecarFile.parent;
-  if (parent && !parent.exists) {
-   if (!parent.create()) {
-    return false;
-   }
-  }
-  sidecarFile.encoding = "UTF-8";
-  if (!sidecarFile.open("w")) {
-   return false;
-  }
-  sidecarFile.write(JSON.stringify(data, null, 2));
-  sidecarFile.close();
-  return true;
- } catch (e) {
-  try { sidecarFile.close(); } catch (closeErr) { }
-  return false;
- }
+	try {
+		if (!sidecarFile) {
+			return false;
+		}
+		var parent = sidecarFile.parent;
+		if (parent && !parent.exists) {
+			if (!parent.create()) {
+				return false;
+			}
+		}
+		sidecarFile.encoding = "UTF-8";
+		if (!sidecarFile.open("w")) {
+			return false;
+		}
+		sidecarFile.write(JSON.stringify(data, null, 2));
+		sidecarFile.close();
+		return true;
+	} catch (e) {
+		try { sidecarFile.close(); } catch (closeErr) { }
+		return false;
+	}
 }
 
 /*
@@ -1885,42 +1925,42 @@ function writeSeparationSidecarFile(sidecarFile, data) {
  * "recorded as empty" from "written by an older build".
  */
 function buildSeparationSidecarData(info) {
- var src = info || {};
- var version = parseInt(src.separationVersion, 10);
- if (isNaN(version) || version < 1) {
-  version = 1;
- }
- var stamp = "";
- try { stamp = new Date().toString(); } catch (eDate) { stamp = ""; }
- return {
-  /* Schema marker so a future format change can be detected and migrated. */
-  sidecarVersion: 1,
-  /* --- reopen context: how to get back to the LEAP source data --- */
-  jobRoot: src.jobRoot != null ? String(src.jobRoot) : "",
-  teamoutsRoot: src.teamoutsRoot != null ? String(src.teamoutsRoot) : "",
-  separationsRoot: src.separationsRoot != null ? String(src.separationsRoot) : "",
-  teamJsonPath: src.teamJsonPath != null ? String(src.teamJsonPath) : "",
-  sourceDocumentPath: src.sourceDocumentPath != null ? String(src.sourceDocumentPath) : "",
-  /* --- identity --- */
-  league: src.league != null ? String(src.league) : "",
-  teamCode: src.teamCode != null ? String(src.teamCode) : "",
-  graphicName: src.graphicName != null ? String(src.graphicName) : "",
-  profileName: src.profileName != null ? String(src.profileName) : "",
-  profileCode: src.profileCode != null ? String(src.profileCode) : "",
-  separationVersion: version,
-  /* --- where the separated .ai actually is (the whole point) --- */
-  separationFilePath: src.separationFilePath != null ? String(src.separationFilePath) : "",
-  /*
-   * True when the file was CREATED at the Export-Settings "Separation file path" location, so the
-   * export-time copy must be skipped. This is a recorded flag rather than a source==dest path
-   * comparison because a RELATIVE template resolves against the document's own folder: once the file
-   * lives at <legacy>/<relative>, re-resolving at export time would nest it again
-   * (<legacy>/<relative>/<relative>) on every export. A separation that fell back to the legacy
-   * folder records false and still gets copied as before.
-   */
-  createdAtConfiguredPath: src.createdAtConfiguredPath === true,
-  updatedAt: stamp
- };
+	var src = info || {};
+	var version = parseInt(src.separationVersion, 10);
+	if (isNaN(version) || version < 1) {
+		version = 1;
+	}
+	var stamp = "";
+	try { stamp = new Date().toString(); } catch (eDate) { stamp = ""; }
+	return {
+		/* Schema marker so a future format change can be detected and migrated. */
+		sidecarVersion: 1,
+		/* --- reopen context: how to get back to the LEAP source data --- */
+		jobRoot: src.jobRoot != null ? String(src.jobRoot) : "",
+		teamoutsRoot: src.teamoutsRoot != null ? String(src.teamoutsRoot) : "",
+		separationsRoot: src.separationsRoot != null ? String(src.separationsRoot) : "",
+		teamJsonPath: src.teamJsonPath != null ? String(src.teamJsonPath) : "",
+		sourceDocumentPath: src.sourceDocumentPath != null ? String(src.sourceDocumentPath) : "",
+		/* --- identity --- */
+		league: src.league != null ? String(src.league) : "",
+		teamCode: src.teamCode != null ? String(src.teamCode) : "",
+		graphicName: src.graphicName != null ? String(src.graphicName) : "",
+		profileName: src.profileName != null ? String(src.profileName) : "",
+		profileCode: src.profileCode != null ? String(src.profileCode) : "",
+		separationVersion: version,
+		/* --- where the separated .ai actually is (the whole point) --- */
+		separationFilePath: src.separationFilePath != null ? String(src.separationFilePath) : "",
+		/*
+		 * True when the file was CREATED at the Export-Settings "Separation file path" location, so the
+		 * export-time copy must be skipped. This is a recorded flag rather than a source==dest path
+		 * comparison because a RELATIVE template resolves against the document's own folder: once the file
+		 * lives at <legacy>/<relative>, re-resolving at export time would nest it again
+		 * (<legacy>/<relative>/<relative>) on every export. A separation that fell back to the legacy
+		 * folder records false and still gets copied as before.
+		 */
+		createdAtConfiguredPath: src.createdAtConfiguredPath === true,
+		updatedAt: stamp
+	};
 }
 
 /*
@@ -1930,90 +1970,90 @@ function buildSeparationSidecarData(info) {
  * log which copies landed.
  */
 function writeSeparationSidecar(info) {
- var data = buildSeparationSidecarData(info);
- var report = { data: data, besideFile: "", registryFile: "", besideWritten: false, registryWritten: false };
+	var data = buildSeparationSidecarData(info);
+	var report = { data: data, besideFile: "", registryFile: "", besideWritten: false, registryWritten: false };
 
- /* (1) Beside the separated file, same base name. */
- try {
-  if (data.separationFilePath) {
-   var sepFile = new File(data.separationFilePath);
-   var sepBase = sepFile.name.replace(/\.[^.]+$/, "");
-   if (sepBase) {
-    var besideFile = new File(sepFile.parent.fsName + "/" + sepBase + SEPARATION_SIDECAR_EXTENSION);
-    report.besideWritten = writeSeparationSidecarFile(besideFile, data);
-    report.besideFile = besideFile.fsName;
-   }
-  }
- } catch (eBeside) { }
+	/* (1) Beside the separated file, same base name. */
+	try {
+		if (data.separationFilePath) {
+			var sepFile = new File(data.separationFilePath);
+			var sepBase = sepFile.name.replace(/\.[^.]+$/, "");
+			if (sepBase) {
+				var besideFile = new File(sepFile.parent.fsName + "/" + sepBase + SEPARATION_SIDECAR_EXTENSION);
+				report.besideWritten = writeSeparationSidecarFile(besideFile, data);
+				report.besideFile = besideFile.fsName;
+			}
+		}
+	} catch (eBeside) { }
 
- /* (2) Flat in 09 SEPARATIONS/ — the discovery registry. */
- try {
-  var registryKey = buildSeparationRegistryKey(data.league, data.teamCode, data.graphicName, data.profileCode);
-  if (registryKey) {
-   var registryFolder = null;
-   if (data.separationsRoot) {
-    registryFolder = new Folder(data.separationsRoot);
-    if (!registryFolder.exists && !registryFolder.create()) {
-     registryFolder = null;
-    }
-   }
-   if (!registryFolder && data.jobRoot) {
-    registryFolder = getSeparationRegistryFolder(new Folder(data.jobRoot), true);
-   }
-   if (registryFolder) {
-    var registryFile = new File(registryFolder.fsName + "/" + registryKey + SEPARATION_SIDECAR_EXTENSION);
-    report.registryWritten = writeSeparationSidecarFile(registryFile, data);
-    report.registryFile = registryFile.fsName;
-   }
-  }
- } catch (eRegistry) { }
+	/* (2) Flat in 09 SEPARATIONS/ — the discovery registry. */
+	try {
+		var registryKey = buildSeparationRegistryKey(data.league, data.teamCode, data.graphicName, data.profileCode);
+		if (registryKey) {
+			var registryFolder = null;
+			if (data.separationsRoot) {
+				registryFolder = new Folder(data.separationsRoot);
+				if (!registryFolder.exists && !registryFolder.create()) {
+					registryFolder = null;
+				}
+			}
+			if (!registryFolder && data.jobRoot) {
+				registryFolder = getSeparationRegistryFolder(new Folder(data.jobRoot), true);
+			}
+			if (registryFolder) {
+				var registryFile = new File(registryFolder.fsName + "/" + registryKey + SEPARATION_SIDECAR_EXTENSION);
+				report.registryWritten = writeSeparationSidecarFile(registryFile, data);
+				report.registryFile = registryFile.fsName;
+			}
+		}
+	} catch (eRegistry) { }
 
- return report;
+	return report;
 }
 
 /* One registry entry by identity, or null when it was never recorded. */
 function readSeparationRegistryEntry(rootFolder, league, teamCode, graphicName, profileCode) {
- try {
-  var registryFolder = getSeparationRegistryFolder(rootFolder, false);
-  if (!registryFolder) {
-   return null;
-  }
-  var registryKey = buildSeparationRegistryKey(league, teamCode, graphicName, profileCode);
-  if (!registryKey) {
-   return null;
-  }
-  return readSeparationSidecarFile(
-   new File(registryFolder.fsName + "/" + registryKey + SEPARATION_SIDECAR_EXTENSION)
-  );
- } catch (e) {
-  return null;
- }
+	try {
+		var registryFolder = getSeparationRegistryFolder(rootFolder, false);
+		if (!registryFolder) {
+			return null;
+		}
+		var registryKey = buildSeparationRegistryKey(league, teamCode, graphicName, profileCode);
+		if (!registryKey) {
+			return null;
+		}
+		return readSeparationSidecarFile(
+			new File(registryFolder.fsName + "/" + registryKey + SEPARATION_SIDECAR_EXTENSION)
+		);
+	} catch (e) {
+		return null;
+	}
 }
 
 /* Every descriptor in the flat registry. Used for listing and version scans. */
 function readAllSeparationRegistryEntries(rootFolder) {
- var entries = [];
- try {
-  var registryFolder = getSeparationRegistryFolder(rootFolder, false);
-  if (!registryFolder) {
-   return entries;
-  }
-  var files = registryFolder.getFiles("*" + SEPARATION_SIDECAR_EXTENSION);
-  if (!files || !files.length) {
-   return entries;
-  }
-  for (var i = 0; i < files.length; i++) {
-   /* getFiles returns Folders too when a folder name ends in .json. */
-   if (!(files[i] instanceof File)) {
-    continue;
-   }
-   var parsed = readSeparationSidecarFile(files[i]);
-   if (parsed) {
-    entries.push(parsed);
-   }
-  }
- } catch (e) { }
- return entries;
+	var entries = [];
+	try {
+		var registryFolder = getSeparationRegistryFolder(rootFolder, false);
+		if (!registryFolder) {
+			return entries;
+		}
+		var files = registryFolder.getFiles("*" + SEPARATION_SIDECAR_EXTENSION);
+		if (!files || !files.length) {
+			return entries;
+		}
+		for (var i = 0; i < files.length; i++) {
+			/* getFiles returns Folders too when a folder name ends in .json. */
+			if (!(files[i] instanceof File)) {
+				continue;
+			}
+			var parsed = readSeparationSidecarFile(files[i]);
+			if (parsed) {
+				entries.push(parsed);
+			}
+		}
+	} catch (e) { }
+	return entries;
 }
 
 /*
@@ -2023,33 +2063,33 @@ function readAllSeparationRegistryEntries(rootFolder) {
  * sidecar was left behind). Returns null for pre-sidecar documents.
  */
 function readSeparationSidecarForDocument(doc) {
- if (!doc) {
-  return null;
- }
- try {
-  if (doc.fullName && doc.fullName.fsName) {
-   var docFile = new File(doc.fullName);
-   var base = docFile.name.replace(/\.[^.]+$/, "");
-   if (base) {
-    var beside = readSeparationSidecarFile(
-     new File(docFile.parent.fsName + "/" + base + SEPARATION_SIDECAR_EXTENSION)
-    );
-    if (beside) {
-     return beside;
-    }
-   }
-  }
- } catch (eBeside) { }
- try {
-  var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
-  if (xmp.isXmpCreated && xmp.doesStructFieldExist("LEAPSeparationSourceContext")) {
-   var fromXmp = xmp.getStructField("LEAPSeparationSourceContext", true);
-   if (fromXmp && typeof fromXmp === "object") {
-    return fromXmp;
-   }
-  }
- } catch (eXmp) { }
- return null;
+	if (!doc) {
+		return null;
+	}
+	try {
+		if (doc.fullName && doc.fullName.fsName) {
+			var docFile = new File(doc.fullName);
+			var base = docFile.name.replace(/\.[^.]+$/, "");
+			if (base) {
+				var beside = readSeparationSidecarFile(
+					new File(docFile.parent.fsName + "/" + base + SEPARATION_SIDECAR_EXTENSION)
+				);
+				if (beside) {
+					return beside;
+				}
+			}
+		}
+	} catch (eBeside) { }
+	try {
+		var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
+		if (xmp.isXmpCreated && xmp.doesStructFieldExist("LEAPSeparationSourceContext")) {
+			var fromXmp = xmp.getStructField("LEAPSeparationSourceContext", true);
+			if (fromXmp && typeof fromXmp === "object") {
+				return fromXmp;
+			}
+		}
+	} catch (eXmp) { }
+	return null;
 }
 
 /*
@@ -2057,20 +2097,20 @@ function readSeparationSidecarForDocument(doc) {
  * stays self-sufficient if it is moved or mailed without its sidecar.
  */
 function persistSeparationSourceContextOnDoc(doc, data) {
- try {
-  if (!doc || !data) {
-   return false;
-  }
-  var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
-  if (!xmp.isXmpCreated) {
-   return false;
-  }
-  xmp.setStructField("LEAPSeparationSourceContext", data, true, false);
-  xmp.commit();
-  return true;
- } catch (e) {
-  return false;
- }
+	try {
+		if (!doc || !data) {
+			return false;
+		}
+		var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
+		if (!xmp.isXmpCreated) {
+			return false;
+		}
+		xmp.setStructField("LEAPSeparationSourceContext", data, true, false);
+		xmp.commit();
+		return true;
+	} catch (e) {
+		return false;
+	}
 }
 
 /*
@@ -2087,37 +2127,37 @@ function persistSeparationSourceContextOnDoc(doc, data) {
  * that checks `fromSidecar` behaves exactly as before for existing files.
  */
 function resolveSeparationSourceContext(doc) {
- var ctx = {
-  fromSidecar: false,
-  teamJsonPath: "",
-  league: "",
-  teamCode: "",
-  graphicName: "",
-  rootFolder: null,
-  leagueFolder: null
- };
- try {
-  var sidecar = readSeparationSidecarForDocument(doc);
-  if (!sidecar) {
-   return ctx;
-  }
-  ctx.teamJsonPath = sidecar.teamJsonPath ? String(sidecar.teamJsonPath) : "";
-  ctx.league = sidecar.league ? String(sidecar.league) : "";
-  ctx.teamCode = sidecar.teamCode ? String(sidecar.teamCode) : "";
-  ctx.graphicName = sidecar.graphicName ? String(sidecar.graphicName) : "";
-  if (sidecar.jobRoot) {
-   ctx.rootFolder = new Folder(String(sidecar.jobRoot));
-  }
-  var teamoutsRoot = sidecar.teamoutsRoot ? String(sidecar.teamoutsRoot) : "";
-  if (!teamoutsRoot && ctx.rootFolder) {
-   teamoutsRoot = ctx.rootFolder.fsName + "/01 TEAMOUTS";
-  }
-  if (teamoutsRoot && ctx.league) {
-   ctx.leagueFolder = new Folder(teamoutsRoot + "/" + ctx.league);
-  }
-  ctx.fromSidecar = !!(ctx.teamJsonPath || ctx.leagueFolder);
- } catch (e) { }
- return ctx;
+	var ctx = {
+		fromSidecar: false,
+		teamJsonPath: "",
+		league: "",
+		teamCode: "",
+		graphicName: "",
+		rootFolder: null,
+		leagueFolder: null
+	};
+	try {
+		var sidecar = readSeparationSidecarForDocument(doc);
+		if (!sidecar) {
+			return ctx;
+		}
+		ctx.teamJsonPath = sidecar.teamJsonPath ? String(sidecar.teamJsonPath) : "";
+		ctx.league = sidecar.league ? String(sidecar.league) : "";
+		ctx.teamCode = sidecar.teamCode ? String(sidecar.teamCode) : "";
+		ctx.graphicName = sidecar.graphicName ? String(sidecar.graphicName) : "";
+		if (sidecar.jobRoot) {
+			ctx.rootFolder = new Folder(String(sidecar.jobRoot));
+		}
+		var teamoutsRoot = sidecar.teamoutsRoot ? String(sidecar.teamoutsRoot) : "";
+		if (!teamoutsRoot && ctx.rootFolder) {
+			teamoutsRoot = ctx.rootFolder.fsName + "/01 TEAMOUTS";
+		}
+		if (teamoutsRoot && ctx.league) {
+			ctx.leagueFolder = new Folder(teamoutsRoot + "/" + ctx.league);
+		}
+		ctx.fromSidecar = !!(ctx.teamJsonPath || ctx.leagueFolder);
+	} catch (e) { }
+	return ctx;
 }
 
 /*
@@ -2135,45 +2175,45 @@ function resolveSeparationSourceContext(doc) {
  * their existing fallback.
  */
 function resolveJobFoldersFromDocument(doc, docFile) {
- var out = { rootFolder: null, league: "", teamCode: "" };
- try {
-  if (!docFile) {
-   return out;
-  }
-  /* (1) Job root = the nearest ancestor holding a "02 GRAPHICS" folder. */
-  var candidate = docFile.parent;
-  var guard = 0;
-  while (candidate && guard < 12) {
-   guard++;
-   try {
-    var graphicsProbe = new Folder(candidate.fsName + "/02 GRAPHICS");
-    if (graphicsProbe.exists) {
-     out.rootFolder = candidate;
-     break;
-    }
-   } catch (eProbe) { }
-   candidate = candidate.parent;
-  }
+	var out = { rootFolder: null, league: "", teamCode: "" };
+	try {
+		if (!docFile) {
+			return out;
+		}
+		/* (1) Job root = the nearest ancestor holding a "02 GRAPHICS" folder. */
+		var candidate = docFile.parent;
+		var guard = 0;
+		while (candidate && guard < 12) {
+			guard++;
+			try {
+				var graphicsProbe = new Folder(candidate.fsName + "/02 GRAPHICS");
+				if (graphicsProbe.exists) {
+					out.rootFolder = candidate;
+					break;
+				}
+			} catch (eProbe) { }
+			candidate = candidate.parent;
+		}
 
-  /* (2) League / team from the separated document's own XMP batch row. */
-  try {
-   var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
-   if (xmp.isXmpCreated && xmp.doesStructFieldExist("SeparationProfileMetadata")) {
-    var meta = xmp.getStructField("SeparationProfileMetadata", true);
-    var batch = meta && meta.batchVariableSource ? meta.batchVariableSource : null;
-    if (batch) {
-     out.league = String(
-      batch["League_desc"] || batch["League"] || batch["League Desc"] || ""
-     ).replace(/^\s+|\s+$/g, "");
-     out.teamCode = String(
-      batch["Lineup Org Code"] || batch["Lineup_Org_Code"] || batch["Team Code"] ||
-      batch["TeamCode"] || batch["Org Code"] || ""
-     ).replace(/^\s+|\s+$/g, "");
-    }
-   }
-  } catch (eXmp) { }
- } catch (e) { }
- return out;
+		/* (2) League / team from the separated document's own XMP batch row. */
+		try {
+			var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
+			if (xmp.isXmpCreated && xmp.doesStructFieldExist("SeparationProfileMetadata")) {
+				var meta = xmp.getStructField("SeparationProfileMetadata", true);
+				var batch = meta && meta.batchVariableSource ? meta.batchVariableSource : null;
+				if (batch) {
+					out.league = String(
+						batch["League_desc"] || batch["League"] || batch["League Desc"] || ""
+					).replace(/^\s+|\s+$/g, "");
+					out.teamCode = String(
+						batch["Lineup Org Code"] || batch["Lineup_Org_Code"] || batch["Team Code"] ||
+						batch["TeamCode"] || batch["Org Code"] || ""
+					).replace(/^\s+|\s+$/g, "");
+				}
+			}
+		} catch (eXmp) { }
+	} catch (e) { }
+	return out;
 }
 
 /*
@@ -2184,170 +2224,170 @@ function resolveJobFoldersFromDocument(doc, docFile) {
  * overwrites an existing separation.
  */
 function getNextSeparationVersionFromRegistry(rootFolder, versionDoc, league, teamCode, graphicName, profileName, profileCode) {
- var highest = 0;
- try {
-  var entry = readSeparationRegistryEntry(rootFolder, league, teamCode, graphicName, profileCode);
-  if (entry) {
-   var fromRegistry = parseInt(entry.separationVersion, 10);
-   if (!isNaN(fromRegistry) && fromRegistry > highest) {
-    highest = fromRegistry;
-   }
-  }
- } catch (eRegistry) { }
- try {
-  var fromXmp = getNextSeparationVersion(versionDoc, graphicName, profileName) - 1;
-  if (fromXmp > highest) {
-   highest = fromXmp;
-  }
- } catch (eXmp) { }
- return highest + 1;
+	var highest = 0;
+	try {
+		var entry = readSeparationRegistryEntry(rootFolder, league, teamCode, graphicName, profileCode);
+		if (entry) {
+			var fromRegistry = parseInt(entry.separationVersion, 10);
+			if (!isNaN(fromRegistry) && fromRegistry > highest) {
+				highest = fromRegistry;
+			}
+		}
+	} catch (eRegistry) { }
+	try {
+		var fromXmp = getNextSeparationVersion(versionDoc, graphicName, profileName) - 1;
+		if (fromXmp > highest) {
+			highest = fromXmp;
+		}
+	} catch (eXmp) { }
+	return highest + 1;
 }
 
 /** Find an open team version document (01 TEAMOUTS, not a separation file). */
 function findOpenVersionDocument() {
- var versionDoc = null;
- try {
-  if (app.documents.length > 0) {
-   var activeDoc = app.activeDocument;
-   if (activeDoc && activeDoc.fullName && activeDoc.fullName.fsName) {
-    var activeDocPath = activeDoc.fullName.fsName;
-    var isSeparatedDoc = activeDocPath.indexOf("09 SEPARATIONS") !== -1;
-    var isVersionDoc = activeDocPath.indexOf("01 TEAMOUTS") !== -1 && !isSeparatedDoc;
-    if (isVersionDoc) {
-     versionDoc = activeDoc;
-    }
-   }
-  }
-  if (!versionDoc) {
-   for (var d = 0; d < app.documents.length; d++) {
-    var doc = app.documents[d];
-    if (!doc || !doc.fullName || !doc.fullName.fsName) {
-     continue;
-    }
-    var docPath = doc.fullName.fsName;
-    var isSeparatedDoc2 = docPath.indexOf("09 SEPARATIONS") !== -1;
-    var isVersionDoc2 = docPath.indexOf("01 TEAMOUTS") !== -1 && !isSeparatedDoc2;
-    if (isVersionDoc2) {
-     versionDoc = doc;
-     break;
-    }
-   }
-  }
- } catch (e) { }
- return versionDoc;
+	var versionDoc = null;
+	try {
+		if (app.documents.length > 0) {
+			var activeDoc = app.activeDocument;
+			if (activeDoc && activeDoc.fullName && activeDoc.fullName.fsName) {
+				var activeDocPath = activeDoc.fullName.fsName;
+				var isSeparatedDoc = activeDocPath.indexOf("09 SEPARATIONS") !== -1;
+				var isVersionDoc = activeDocPath.indexOf("01 TEAMOUTS") !== -1 && !isSeparatedDoc;
+				if (isVersionDoc) {
+					versionDoc = activeDoc;
+				}
+			}
+		}
+		if (!versionDoc) {
+			for (var d = 0; d < app.documents.length; d++) {
+				var doc = app.documents[d];
+				if (!doc || !doc.fullName || !doc.fullName.fsName) {
+					continue;
+				}
+				var docPath = doc.fullName.fsName;
+				var isSeparatedDoc2 = docPath.indexOf("09 SEPARATIONS") !== -1;
+				var isVersionDoc2 = docPath.indexOf("01 TEAMOUTS") !== -1 && !isSeparatedDoc2;
+				if (isVersionDoc2) {
+					versionDoc = doc;
+					break;
+				}
+			}
+		}
+	} catch (e) { }
+	return versionDoc;
 }
 
 /** Update [C#] (ink count) and/or [V#] (separation version label) in all document text frames. */
 function updateSeparationPageVariables(doc, colorCount, separationVersion) {
- if (!doc || !doc.textFrames) {
-  return;
- }
- var hasColor = colorCount !== null && colorCount !== undefined && colorCount !== "";
- var hasVersion = separationVersion !== null && separationVersion !== undefined && separationVersion !== "";
- if (!hasColor && !hasVersion) {
-  return;
- }
- try {
-  for (var i = 0; i < doc.textFrames.length; i++) {
-   var textFrame = doc.textFrames[i];
-   var content = textFrame.contents;
-   var updatedContent = content;
-   var regex = /\[([^\]]+)\]/g;
-   var match;
-   while ((match = regex.exec(content)) !== null) {
-    var variableName = String(match[1] || "");
-    var fullMatch = match[0];
-    var key = variableName.toLowerCase().replace(/\s/g, "_");
-    var value = null;
-    if (hasColor && (key === "c#" || variableName === "C#")) {
-     value = String(colorCount);
-    } else if (hasVersion && (key === "v#" || variableName === "V#")) {
-     value = formatSeparationVersionLabel(separationVersion);
-    }
-    if (value !== null && value !== undefined) {
-     updatedContent = updatedContent.split(fullMatch).join(value);
-    }
-   }
-   if (updatedContent !== content) {
-    textFrame.contents = updatedContent;
-   }
-  }
- } catch (e) {
-  $.writeln("Error updating separation page variables: " + e.message);
- }
+	if (!doc || !doc.textFrames) {
+		return;
+	}
+	var hasColor = colorCount !== null && colorCount !== undefined && colorCount !== "";
+	var hasVersion = separationVersion !== null && separationVersion !== undefined && separationVersion !== "";
+	if (!hasColor && !hasVersion) {
+		return;
+	}
+	try {
+		for (var i = 0; i < doc.textFrames.length; i++) {
+			var textFrame = doc.textFrames[i];
+			var content = textFrame.contents;
+			var updatedContent = content;
+			var regex = /\[([^\]]+)\]/g;
+			var match;
+			while ((match = regex.exec(content)) !== null) {
+				var variableName = String(match[1] || "");
+				var fullMatch = match[0];
+				var key = variableName.toLowerCase().replace(/\s/g, "_");
+				var value = null;
+				if (hasColor && (key === "c#" || variableName === "C#")) {
+					value = String(colorCount);
+				} else if (hasVersion && (key === "v#" || variableName === "V#")) {
+					value = formatSeparationVersionLabel(separationVersion);
+				}
+				if (value !== null && value !== undefined) {
+					updatedContent = updatedContent.split(fullMatch).join(value);
+				}
+			}
+			if (updatedContent !== content) {
+				textFrame.contents = updatedContent;
+			}
+		}
+	} catch (e) {
+		$.writeln("Error updating separation page variables: " + e.message);
+	}
 }
 
 // Update variables in document ([ARTIST], [Artist Initials], [POS], [DATE], [STYLE_CODE], jsonData keys; optional profileMetadata.batchVariableSource from BATCH .xlsx after JSON)
 function updateVariablesInDocument(doc, jsonData, styleCodes, profileMetadata) {
- try {
-  var meta = profileMetadata || {};
-  var textFrames = doc.textFrames;
+	try {
+		var meta = profileMetadata || {};
+		var textFrames = doc.textFrames;
 
-  for (var i = 0; i < textFrames.length; i++) {
-   var textFrame = textFrames[i];
-   var content = textFrame.contents;
+		for (var i = 0; i < textFrames.length; i++) {
+			var textFrame = textFrames[i];
+			var content = textFrame.contents;
 
-   var regex = /\[([^\]]+)\]/g;
-   var match;
-   var updatedContent = content;
+			var regex = /\[([^\]]+)\]/g;
+			var match;
+			var updatedContent = content;
 
-   while ((match = regex.exec(content)) !== null) {
-    var variableName = match[1];
-    var fullMatch = match[0];
-    var key = variableName.toLowerCase().replace(/\s/g, '_');
-    var value = null;
+			while ((match = regex.exec(content)) !== null) {
+				var variableName = match[1];
+				var fullMatch = match[0];
+				var key = variableName.toLowerCase().replace(/\s/g, '_');
+				var value = null;
 
-    if (key === 'style_code') {
-     if (styleCodes && styleCodes.length > 0) {
-      value = styleCodes.join(', ');
-     } else {
-      value = findValueInJSON(jsonData, variableName);
-     }
-    } else if (key === 'artist') {
-     value = (meta.artistName != null && meta.artistName !== '') ? String(meta.artistName).trim() : '';
-    } else if (key === 'artist_initials' || key === 'artistinitials') {
-     value = (meta.artistInitials != null && meta.artistInitials !== '') ? String(meta.artistInitials).trim() : '';
-    } else if (key === 'pos') {
-     var rawPosition = (meta.position != null && meta.position !== '') ? String(meta.position).trim() : (findValueInJSON(jsonData, 'Position') || findValueInJSON(jsonData, 'position') || '');
-     value = rawPosition ? getGraphicPositionAbbreviation(rawPosition) : '';
-    } else if (key === 'date') {
-     value = formatSeparationDate(meta.createdDate || '');
-    } else if (key === 'c#') {
-     if (meta.separationColorCount != null && meta.separationColorCount !== '') {
-      value = String(meta.separationColorCount);
-     }
-    } else if (key === 'v#') {
-     /* [V#] is written only at export (with the control number) — leave the placeholder untouched here. */
-     value = null;
-    } else {
-     value = findValueInJSON(jsonData, variableName);
-    }
+				if (key === 'style_code') {
+					if (styleCodes && styleCodes.length > 0) {
+						value = styleCodes.join(', ');
+					} else {
+						value = findValueInJSON(jsonData, variableName);
+					}
+				} else if (key === 'artist') {
+					value = (meta.artistName != null && meta.artistName !== '') ? String(meta.artistName).trim() : '';
+				} else if (key === 'artist_initials' || key === 'artistinitials') {
+					value = (meta.artistInitials != null && meta.artistInitials !== '') ? String(meta.artistInitials).trim() : '';
+				} else if (key === 'pos') {
+					var rawPosition = (meta.position != null && meta.position !== '') ? String(meta.position).trim() : (findValueInJSON(jsonData, 'Position') || findValueInJSON(jsonData, 'position') || '');
+					value = rawPosition ? getGraphicPositionAbbreviation(rawPosition) : '';
+				} else if (key === 'date') {
+					value = formatSeparationDate(meta.createdDate || '');
+				} else if (key === 'c#') {
+					if (meta.separationColorCount != null && meta.separationColorCount !== '') {
+						value = String(meta.separationColorCount);
+					}
+				} else if (key === 'v#') {
+					/* [V#] is written only at export (with the control number) — leave the placeholder untouched here. */
+					value = null;
+				} else {
+					value = findValueInJSON(jsonData, variableName);
+				}
 
-    var batchSrc = meta.batchVariableSource;
-    if (
-     (value === null || value === undefined || value === '') &&
-     batchSrc &&
-     typeof batchSrc === 'object'
-    ) {
-     var fromBatch = findValueInJSON(batchSrc, variableName);
-     if (fromBatch !== null && fromBatch !== undefined && fromBatch !== '') {
-      value = fromBatch;
-     }
-    }
+				var batchSrc = meta.batchVariableSource;
+				if (
+					(value === null || value === undefined || value === '') &&
+					batchSrc &&
+					typeof batchSrc === 'object'
+				) {
+					var fromBatch = findValueInJSON(batchSrc, variableName);
+					if (fromBatch !== null && fromBatch !== undefined && fromBatch !== '') {
+						value = fromBatch;
+					}
+				}
 
-    if (value !== null && value !== undefined) {
-     var strVal = value.toString();
-     updatedContent = updatedContent.split(fullMatch).join(strVal);
-    }
-   }
+				if (value !== null && value !== undefined) {
+					var strVal = value.toString();
+					updatedContent = updatedContent.split(fullMatch).join(strVal);
+				}
+			}
 
-   if (updatedContent !== content) {
-    textFrame.contents = updatedContent;
-   }
-  }
- } catch (e) {
-  $.writeln('Error updating variables: ' + e.message);
- }
+			if (updatedContent !== content) {
+				textFrame.contents = updatedContent;
+			}
+		}
+	} catch (e) {
+		$.writeln('Error updating variables: ' + e.message);
+	}
 }
 
 /*
@@ -2372,39 +2412,39 @@ function updateVariablesInDocument(doc, jsonData, styleCodes, profileMetadata) {
 var LEAP_TEAM_JSON_OVERRIDES = {};
 
 function setTeamJsonOverride(docName, jsonData) {
- /*
-  * Both arguments are required. An override stored without a key would be served to whatever
-  * document happened to be active next, which is exactly the class of bug this is meant to fix.
-  */
- if (!docName || !jsonData) {
-  return false;
- }
- LEAP_TEAM_JSON_OVERRIDES[String(docName)] = jsonData;
- return true;
+	/*
+	 * Both arguments are required. An override stored without a key would be served to whatever
+	 * document happened to be active next, which is exactly the class of bug this is meant to fix.
+	 */
+	if (!docName || !jsonData) {
+		return false;
+	}
+	LEAP_TEAM_JSON_OVERRIDES[String(docName)] = jsonData;
+	return true;
 }
 
 function clearTeamJsonOverride(docName) {
- /* No name clears everything -- used when the panel wants a clean slate rather than one eviction. */
- if (docName) {
-  delete LEAP_TEAM_JSON_OVERRIDES[String(docName)];
-  return;
- }
- LEAP_TEAM_JSON_OVERRIDES = {};
+	/* No name clears everything -- used when the panel wants a clean slate rather than one eviction. */
+	if (docName) {
+		delete LEAP_TEAM_JSON_OVERRIDES[String(docName)];
+		return;
+	}
+	LEAP_TEAM_JSON_OVERRIDES = {};
 }
 
 function getTeamJsonOverride(docName) {
- if (!docName) {
-  return null;
- }
- var key = String(docName);
- /*
-  * hasOwnProperty guards against a document named after an Object.prototype member ("constructor",
-  * "toString") returning a function instead of team data.
-  */
- if (!LEAP_TEAM_JSON_OVERRIDES.hasOwnProperty(key)) {
-  return null;
- }
- return LEAP_TEAM_JSON_OVERRIDES[key] || null;
+	if (!docName) {
+		return null;
+	}
+	var key = String(docName);
+	/*
+	 * hasOwnProperty guards against a document named after an Object.prototype member ("constructor",
+	 * "toString") returning a function instead of team data.
+	 */
+	if (!LEAP_TEAM_JSON_OVERRIDES.hasOwnProperty(key)) {
+		return null;
+	}
+	return LEAP_TEAM_JSON_OVERRIDES[key] || null;
 }
 
 /*
@@ -2424,191 +2464,191 @@ function getTeamJsonOverride(docName) {
  * sidecar (same convention as getTemplateFile.lastAttemptedPath).
  */
 function findAndReadJSONFile(docName, leagueFolder, preferredJsonPath) {
- findAndReadJSONFile.lastResolvedPath = "";
- /*
-  * Reset on every call so a caller can never read a diagnostic left behind by an earlier lookup.
-  * "source" names the branch that answered; the remaining fields describe how far the disk scan
-  * got, which is what separates a genuinely missing folder from one that exists but cannot be
-  * enumerated or read -- indistinguishable before this, and the reason a Box-mount failure looked
-  * identical to a non-LEAP document.
-  */
- findAndReadJSONFile.lastDiagnostic = {
-  source: "",
-  jsonFolderPath: "",
-  jsonFolderExists: false,
-  jsonFileCount: 0,
-  matchedFile: "",
-  bytesRead: 0,
-  parseError: ""
- };
+	findAndReadJSONFile.lastResolvedPath = "";
+	/*
+	 * Reset on every call so a caller can never read a diagnostic left behind by an earlier lookup.
+	 * "source" names the branch that answered; the remaining fields describe how far the disk scan
+	 * got, which is what separates a genuinely missing folder from one that exists but cannot be
+	 * enumerated or read -- indistinguishable before this, and the reason a Box-mount failure looked
+	 * identical to a non-LEAP document.
+	 */
+	findAndReadJSONFile.lastDiagnostic = {
+		source: "",
+		jsonFolderPath: "",
+		jsonFolderExists: false,
+		jsonFileCount: 0,
+		matchedFile: "",
+		bytesRead: 0,
+		parseError: ""
+	};
 
- /*
-  * Panel-supplied JSON wins outright. It is only ever set after ExtendScript has already failed to
-  * read this document's team JSON from disk, so preferring it costs working setups nothing.
-  */
- var override = getTeamJsonOverride(docName);
- if (override) {
-  findAndReadJSONFile.lastDiagnostic.source = "panel-override";
-  return override;
- }
+	/*
+	 * Panel-supplied JSON wins outright. It is only ever set after ExtendScript has already failed to
+	 * read this document's team JSON from disk, so preferring it costs working setups nothing.
+	 */
+	var override = getTeamJsonOverride(docName);
+	if (override) {
+		findAndReadJSONFile.lastDiagnostic.source = "panel-override";
+		return override;
+	}
 
- /* Recorded path next -- correct even when the document sits outside the LEAP tree. */
- if (preferredJsonPath) {
-  try {
-   var preferredFile = new File(String(preferredJsonPath));
-   if (preferredFile.exists) {
-    preferredFile.open('r');
-    var preferredContent = preferredFile.read();
-    preferredFile.close();
-    var preferredParsed = JSON.parse(preferredContent);
-    if (preferredParsed) {
-     findAndReadJSONFile.lastResolvedPath = preferredFile.fsName;
-     findAndReadJSONFile.lastDiagnostic.source = "preferred-path";
-     findAndReadJSONFile.lastDiagnostic.matchedFile = preferredFile.name;
-     findAndReadJSONFile.lastDiagnostic.bytesRead = String(preferredContent || "").length;
-     return preferredParsed;
-    }
-   }
-  } catch (ePreferred) { }
- }
+	/* Recorded path next -- correct even when the document sits outside the LEAP tree. */
+	if (preferredJsonPath) {
+		try {
+			var preferredFile = new File(String(preferredJsonPath));
+			if (preferredFile.exists) {
+				preferredFile.open('r');
+				var preferredContent = preferredFile.read();
+				preferredFile.close();
+				var preferredParsed = JSON.parse(preferredContent);
+				if (preferredParsed) {
+					findAndReadJSONFile.lastResolvedPath = preferredFile.fsName;
+					findAndReadJSONFile.lastDiagnostic.source = "preferred-path";
+					findAndReadJSONFile.lastDiagnostic.matchedFile = preferredFile.name;
+					findAndReadJSONFile.lastDiagnostic.bytesRead = String(preferredContent || "").length;
+					return preferredParsed;
+				}
+			}
+		} catch (ePreferred) { }
+	}
 
- if (!leagueFolder || !leagueFolder.fsName) {
-  findAndReadJSONFile.lastDiagnostic.source = "no-league-folder";
-  return null;
- }
- var jsonFolder = new Folder(leagueFolder.fsName + "/JSON");
- findAndReadJSONFile.lastDiagnostic.jsonFolderPath = jsonFolder.fsName;
- if (!jsonFolder.exists) {
-  findAndReadJSONFile.lastDiagnostic.source = "json-folder-missing";
-  return null;
- }
- findAndReadJSONFile.lastDiagnostic.jsonFolderExists = true;
+	if (!leagueFolder || !leagueFolder.fsName) {
+		findAndReadJSONFile.lastDiagnostic.source = "no-league-folder";
+		return null;
+	}
+	var jsonFolder = new Folder(leagueFolder.fsName + "/JSON");
+	findAndReadJSONFile.lastDiagnostic.jsonFolderPath = jsonFolder.fsName;
+	if (!jsonFolder.exists) {
+		findAndReadJSONFile.lastDiagnostic.source = "json-folder-missing";
+		return null;
+	}
+	findAndReadJSONFile.lastDiagnostic.jsonFolderExists = true;
 
- var jsonFiles = jsonFolder.getFiles("*.json");
- findAndReadJSONFile.lastDiagnostic.jsonFileCount = jsonFiles ? jsonFiles.length : 0;
- var jsonFile = null;
+	var jsonFiles = jsonFolder.getFiles("*.json");
+	findAndReadJSONFile.lastDiagnostic.jsonFileCount = jsonFiles ? jsonFiles.length : 0;
+	var jsonFile = null;
 
- for (var i = 0; i < jsonFiles.length; i++) {
-  var fileName = jsonFiles[i].name;
-  if (fileName.indexOf(docName) !== -1) {
-   jsonFile = jsonFiles[i];
-   break;
-  }
- }
+	for (var i = 0; i < jsonFiles.length; i++) {
+		var fileName = jsonFiles[i].name;
+		if (fileName.indexOf(docName) !== -1) {
+			jsonFile = jsonFiles[i];
+			break;
+		}
+	}
 
- if (!jsonFile) {
-  /*
-   * An empty listing on a folder that reports as existing is the signature of a cloud mount that
-   * ExtendScript cannot enumerate; a non-empty listing with no hit is a real naming mismatch.
-   */
-  findAndReadJSONFile.lastDiagnostic.source =
-   findAndReadJSONFile.lastDiagnostic.jsonFileCount > 0 ? "no-filename-match" : "json-folder-empty";
-  return null;
- }
- findAndReadJSONFile.lastDiagnostic.matchedFile = jsonFile.name;
+	if (!jsonFile) {
+		/*
+		 * An empty listing on a folder that reports as existing is the signature of a cloud mount that
+		 * ExtendScript cannot enumerate; a non-empty listing with no hit is a real naming mismatch.
+		 */
+		findAndReadJSONFile.lastDiagnostic.source =
+			findAndReadJSONFile.lastDiagnostic.jsonFileCount > 0 ? "no-filename-match" : "json-folder-empty";
+		return null;
+	}
+	findAndReadJSONFile.lastDiagnostic.matchedFile = jsonFile.name;
 
- jsonFile.open('r');
- var jsonContent = jsonFile.read();
- jsonFile.close();
- findAndReadJSONFile.lastDiagnostic.bytesRead = String(jsonContent || "").length;
+	jsonFile.open('r');
+	var jsonContent = jsonFile.read();
+	jsonFile.close();
+	findAndReadJSONFile.lastDiagnostic.bytesRead = String(jsonContent || "").length;
 
- try {
-  var parsed = JSON.parse(jsonContent);
-  if (parsed) {
-   findAndReadJSONFile.lastResolvedPath = jsonFile.fsName;
-   findAndReadJSONFile.lastDiagnostic.source = "disk-scan";
-  }
-  return parsed;
- } catch (e) {
-  /* A zero-byte or truncated read on a streamed placeholder lands here, not in a missing file. */
-  findAndReadJSONFile.lastDiagnostic.source = "parse-error";
-  findAndReadJSONFile.lastDiagnostic.parseError = String(e && e.message ? e.message : e);
-  return null;
- }
+	try {
+		var parsed = JSON.parse(jsonContent);
+		if (parsed) {
+			findAndReadJSONFile.lastResolvedPath = jsonFile.fsName;
+			findAndReadJSONFile.lastDiagnostic.source = "disk-scan";
+		}
+		return parsed;
+	} catch (e) {
+		/* A zero-byte or truncated read on a streamed placeholder lands here, not in a missing file. */
+		findAndReadJSONFile.lastDiagnostic.source = "parse-error";
+		findAndReadJSONFile.lastDiagnostic.parseError = String(e && e.message ? e.message : e);
+		return null;
+	}
 }
 findAndReadJSONFile.lastResolvedPath = "";
 findAndReadJSONFile.lastDiagnostic = null;
 
 function decodeURIString(str) {
- if (!str) return str;
+	if (!str) return str;
 
- try {
-  return decodeURIComponent(str);
- } catch (e) {
-  return str;
- }
+	try {
+		return decodeURIComponent(str);
+	} catch (e) {
+		return str;
+	}
 }
 
 function deleteNonFillStrokeItems() {
- try {
-  app.selection = null;
-  var _tempRectangle = app.activeDocument.pathItems.rectangle(700, 100, 200, 100);
-  var _noneSwatch = app.activeDocument.swatches.getByName("[None]");
-  _tempRectangle.filled = true;
-  _tempRectangle.stroked = true;
-  _tempRectangle.fillColor = _noneSwatch.color;
-  _tempRectangle.strokeColor = _noneSwatch.color;
-  app.executeMenuCommand('Find Fill & Stroke menu item');
+	try {
+		app.selection = null;
+		var _tempRectangle = app.activeDocument.pathItems.rectangle(700, 100, 200, 100);
+		var _noneSwatch = app.activeDocument.swatches.getByName("[None]");
+		_tempRectangle.filled = true;
+		_tempRectangle.stroked = true;
+		_tempRectangle.fillColor = _noneSwatch.color;
+		_tempRectangle.strokeColor = _noneSwatch.color;
+		app.executeMenuCommand('Find Fill & Stroke menu item');
 
 
-  for (var i = app.selection.length - 1; i >= 0; i--) {
-   var selectedItem = app.selection[i];
-   if (!selectedItem) continue;
-   // Top-level PathItem that is a clipping path
-   if (selectedItem.typename === "PathItem" && selectedItem.clipping === true) {
-    selectedItem.selected = false;
-    // Top-level GroupItem that is a clipping group, or contains one deeper
-   } else if (selectedItem.typename === "CompoundPathItem" && selectedItem.pathItems[0].clipping) {
-    selectedItem.selected = false;
-   } else if (selectedItem.typename === "GroupItem") {
-    deselectedClippedItemsInGroup(selectedItem);
-   }
-  }
+		for (var i = app.selection.length - 1; i >= 0; i--) {
+			var selectedItem = app.selection[i];
+			if (!selectedItem) continue;
+			// Top-level PathItem that is a clipping path
+			if (selectedItem.typename === "PathItem" && selectedItem.clipping === true) {
+				selectedItem.selected = false;
+				// Top-level GroupItem that is a clipping group, or contains one deeper
+			} else if (selectedItem.typename === "CompoundPathItem" && selectedItem.pathItems[0].clipping) {
+				selectedItem.selected = false;
+			} else if (selectedItem.typename === "GroupItem") {
+				deselectedClippedItemsInGroup(selectedItem);
+			}
+		}
 
-  app.doScript("Clear", "LEAP Color Seps");
- }
- catch (e) {
- }
+		app.doScript("Clear", "LEAP Color Seps");
+	}
+	catch (e) {
+	}
 }
 
 function deselectedClippedItemsInGroup(item) {
- if (!item) return;
- // PathItem: .clipping === true means this path IS the clipping mask
- if (item.typename === "PathItem" && item.clipping === true) {
-  item.selected = false;
-  return;
- }
- if (item.typename === "CompoundPathItem" && item.pathItems[0].clipping) {
-  item.selected = false;
-  return;
- }
- // GroupItem: .clipped === true means the group contains a clipping mask
- if (item.typename === "GroupItem") {
-  if (item.clipped === true) {
-   item.selected = false;
-   return;
-  }
-  if (item.pageItems) {
-   for (var j = item.pageItems.length - 1; j >= 0; j--) {
-    deselectedClippedItemsInGroup(item.pageItems[j]);
-   }
-  }
- }
+	if (!item) return;
+	// PathItem: .clipping === true means this path IS the clipping mask
+	if (item.typename === "PathItem" && item.clipping === true) {
+		item.selected = false;
+		return;
+	}
+	if (item.typename === "CompoundPathItem" && item.pathItems[0].clipping) {
+		item.selected = false;
+		return;
+	}
+	// GroupItem: .clipped === true means the group contains a clipping mask
+	if (item.typename === "GroupItem") {
+		if (item.clipped === true) {
+			item.selected = false;
+			return;
+		}
+		if (item.pageItems) {
+			for (var j = item.pageItems.length - 1; j >= 0; j--) {
+				deselectedClippedItemsInGroup(item.pageItems[j]);
+			}
+		}
+	}
 }
 
 var _LEAP_AREA_EPS = 1e-6;
 
 function _gatherCompoundPathItems(items, out) {
- if (!items || !items.length) return;
- for (var i = 0; i < items.length; i++) {
-  var item = items[i];
-  if (!item) continue;
-  if (item.typename === "CompoundPathItem") {
-   out.push(item);
-  } else if (item.typename === "GroupItem" && item.pageItems && item.pageItems.length) {
-   _gatherCompoundPathItems(item.pageItems, out);
-  }
- }
+	if (!items || !items.length) return;
+	for (var i = 0; i < items.length; i++) {
+		var item = items[i];
+		if (!item) continue;
+		if (item.typename === "CompoundPathItem") {
+			out.push(item);
+		} else if (item.typename === "GroupItem" && item.pageItems && item.pageItems.length) {
+			_gatherCompoundPathItems(item.pageItems, out);
+		}
+	}
 }
 
 /**
@@ -2616,50 +2656,50 @@ function _gatherCompoundPathItems(items, out) {
  * Zero-area paths are removed; otherwise SizeAreaRatio = (width + height) / ABS(area), delete if > 100.
  */
 function deleteLeftoverPathsInLayer(layer) {
- if (!layer || !layer.pageItems) return;
- var compounds = [];
- _gatherCompoundPathItems(layer.pageItems, compounds);
- for (var c = 0; c < compounds.length; c++) {
-  deleteLeftoverPathsInCompound(compounds[c]);
- }
+	if (!layer || !layer.pageItems) return;
+	var compounds = [];
+	_gatherCompoundPathItems(layer.pageItems, compounds);
+	for (var c = 0; c < compounds.length; c++) {
+		deleteLeftoverPathsInCompound(compounds[c]);
+	}
 }
 
 function deleteLeftoverPathsInCompound(compound) {
- if (!compound || compound.typename !== "CompoundPathItem" || !compound.pathItems) return;
- for (var i = compound.pathItems.length - 1; i >= 0; i--) {
-  var pi = compound.pathItems[i];
-  if (!pi) continue;
-  var area;
-  try {
-   area = pi.area;
-  } catch (ea) {
-   continue;
-  }
-  if (Math.abs(area) < _LEAP_AREA_EPS) {
-   try {
-    pi.remove();
-   } catch (e0) { }
-   continue;
-  }
-  var absArea = Math.abs(area);
-  var b;
-  try {
-   b = pi.geometricBounds;
-  } catch (e1) {
-   continue;
-  }
-  var width = Math.abs(b[2] - b[0]);
-  var height = Math.abs(b[1] - b[3]);
-  var sizeAreaRatio = (width + height) / absArea;
-  if (sizeAreaRatio > 100) {
-   try {
-    pi.remove();
-   } catch (e2) { }
-  }
- }
- try {
-  if (compound.pathItems.length === 0) {
-   compound.remove();
-  }
- } catch (e3) { }
+	if (!compound || compound.typename !== "CompoundPathItem" || !compound.pathItems) return;
+	for (var i = compound.pathItems.length - 1; i >= 0; i--) {
+		var pi = compound.pathItems[i];
+		if (!pi) continue;
+		var area;
+		try {
+			area = pi.area;
+		} catch (ea) {
+			continue;
+		}
+		if (Math.abs(area) < _LEAP_AREA_EPS) {
+			try {
+				pi.remove();
+			} catch (e0) { }
+			continue;
+		}
+		var absArea = Math.abs(area);
+		var b;
+		try {
+			b = pi.geometricBounds;
+		} catch (e1) {
+			continue;
+		}
+		var width = Math.abs(b[2] - b[0]);
+		var height = Math.abs(b[1] - b[3]);
+		var sizeAreaRatio = (width + height) / absArea;
+		if (sizeAreaRatio > 100) {
+			try {
+				pi.remove();
+			} catch (e2) { }
+		}
+	}
+	try {
+		if (compound.pathItems.length === 0) {
+			compound.remove();
+		}
+	} catch (e3) { }
 }

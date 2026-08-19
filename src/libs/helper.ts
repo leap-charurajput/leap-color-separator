@@ -35,8 +35,21 @@ function leapSepsLogEval(level: string, message: string, detail?: unknown): void
   }
 }
 
+/*
+ * Name of the host handler a script invokes, e.g. "handleGetTemplateInfo('…')" -> "GetTemplateInfo".
+ * Every panel-authored script calls exactly one handleX(...) at its top level, so this names the
+ * operation reliably instead of sniffing for substrings. Falls back to the sniff list for the few
+ * inline scripts that have no handler.
+ */
+function handlerNameFromScript(script: string): string {
+  const m = /\bhandle([A-Z][A-Za-z0-9_]*)\s*\(/.exec(script);
+  return m ? m[1] : '';
+}
+
 function evalScriptLabel(script: unknown): string {
   if (typeof script !== 'string') return 'evalScript';
+  const handler = handlerNameFromScript(script);
+  if (handler) return handler;
   if (script.indexOf('unusedsw') !== -1 || script.indexOf('swtchdel') !== -1) {
     return 'removeUnusedSwatches';
   }
@@ -52,9 +65,26 @@ function evalScriptLabel(script: unknown): string {
   return 'evalScript';
 }
 
+/*
+ * Host calls that ran longer than this are logged even when they are otherwise "silent" — a slow
+ * round-trip is a signal worth keeping (cloud mount, huge document), a fast one is not.
+ */
+const SLOW_EVAL_MS = 1500;
+
 export async function evalScript(script: any) {
   const label = evalScriptLabel(script);
-  leapSepsLogEval('PROCESS', label + ' start');
+  /*
+   * LOGGING ONLY — the call itself is unchanged.
+   * The unnamed, sub-second host calls (selection polling every 700 ms, doc checks on every focus)
+   * used to write "evalScript start" + "evalScript done | {success:true}" for each — ~75% of a real
+   * log file was that heartbeat, and nothing useful was findable in it. Named operations still log
+   * start + done; anything else logs only when it FAILS or is SLOW.
+   */
+  const named = label !== 'evalScript';
+  const startedAt = Date.now();
+  /* One line per named operation, written on completion with its duration — a separate "start"
+     line said nothing the "done" line does not, and doubled the count. Long-running operations
+     (performSeparation) still announce their start via their own logProcess calls. */
 
   let res: unknown;
   try {
@@ -67,7 +97,12 @@ export async function evalScript(script: any) {
         }
       });
     });
-    leapSepsLogEval('PROCESS', label + ' done', compactEvalResult(res));
+    const elapsed = Date.now() - startedAt;
+    if (named) {
+      leapSepsLogEval('PROCESS', label + ' (' + elapsed + ' ms)', compactEvalResult(res));
+    } else if (elapsed >= SLOW_EVAL_MS) {
+      leapSepsLogEval('WARN', 'slow host call (' + elapsed + ' ms)', compactEvalResult(res));
+    }
   } catch (err) {
     leapSepsLogEval('ERROR', label + ' failed', err instanceof Error ? err.message : err);
     throw err;

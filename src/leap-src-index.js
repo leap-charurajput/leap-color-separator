@@ -61,6 +61,12 @@ class ScriptLoader {
  }
 
  log(val) {
+  /*
+   * "success eval" fired on every host round-trip (83 lines in one short session) and said nothing
+   * a reader could act on; failures are already logged by the caller with the real error. Only the
+   * error path is written now — logging only, no behaviour change.
+   */
+  if (val === 'success eval') return;
   if (typeof window !== 'undefined' && typeof window.leapSepsWrite === 'function') {
    window.leapSepsWrite('LOG', 'LeapSrc', String(val));
   }
