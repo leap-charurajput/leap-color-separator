@@ -11,6 +11,8 @@ export interface StandaloneSeparationRunInput {
 	exportedFilePath: string;
 	/* CAD reference PNG resolved panel-side (PNG folder near the source doc); placed on the SEP doc. */
 	cadPngPath?: string;
+	/* Two-stage flow: "prepare" | "generate". Omitted = legacy single-shot (no longer used by the panel). */
+	stage?: 'prepare' | 'generate' | 'full';
 }
 
 /*

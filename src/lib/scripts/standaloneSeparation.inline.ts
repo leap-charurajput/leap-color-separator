@@ -34,6 +34,19 @@ function stdSepErr(msg, extra) {
 }
 
 function standaloneSeparationRun(params) {
+	/*
+	 * Two-stage (same contract as the LEAP flow):
+	 *   stage "prepare"  -> create SEP doc, place the ASSETS art into SIZED_GRAPHICS, flatten, stamp
+	 *                       LEAPSeparationStatus = "preparedForSeps", save, STOP (user edits art).
+	 *   stage "generate" -> on the open prepared SEP doc: splitColors + underbase + XMP, stamp "separated".
+	 *   stage "full"     -> legacy single shot (kept; panel no longer calls it).
+	 */
+	var stage = params.stage || "full";
+	var isPrepare = stage === "prepare";
+	var isGenerate = stage === "generate";
+	if (isGenerate) {
+		return standaloneGenerateFromPrepared(params);
+	}
 	stdSepDebug = [];
 	if (!params) return stdSepErr("No parameters provided");
 
@@ -186,6 +199,92 @@ function standaloneSeparationRun(params) {
 		} catch (eSgLog) { }
 	} catch (ePrep) { stdSepLog("flatten prep error: " + (ePrep.message || ePrep)); }
 
+	if (isPrepare) {
+		/* Stamp status + everything Generate needs, then stop with the SEP document open for editing. */
+		try {
+			var prepXmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", sepDoc);
+			if (prepXmp.isXmpCreated) {
+				prepXmp.setStructField(SEP_STATUS_FIELD, SEP_STATUS_PREPARED, false, false);
+				prepXmp.setStructField("LEAPPreparedContext", {
+					graphicName: graphicName,
+					styleCodes: styleCodes,
+					standalone: true,
+					exportedFilePath: exportedFilePath,
+					separationVersion: profileMetadata.separationVersion || 1
+				}, true, false);
+				prepXmp.setStructField("SeparationProfileMetadata", profileMetadata, true, false);
+				prepXmp.commit();
+			}
+		} catch (ePrepXmp) { stdSepLog("prepare: XMP write error: " + (ePrepXmp.message || ePrepXmp)); }
+		try { sepDoc.save(); } catch (ePrepSave) { }
+		try { app.activeDocument = sepDoc; } catch (ePrepAct) { }
+		stdSepLog("prepared for seps: " + sepDocPath);
+		return JSON.stringify({
+			success: true,
+			stage: "prepared",
+			debugLog: stdSepDebug,
+			separatedDocumentPath: sepDocPath,
+			graphicName: graphicName
+		});
+	}
+
+	return standaloneSplitAndFinish(sepDoc, sepDocPath, graphicName, profileMetadata, stdSepDebug);
+}
+
+/* GENERATE stage for standalone: the active document must be the prepared SEP doc. */
+function standaloneGenerateFromPrepared(params) {
+	if (!app.documents.length) return stdSepErr("No document is open");
+	var sepDoc = app.activeDocument;
+	var status = getSeparationStatusFromDoc(sepDoc);
+	if (status !== SEP_STATUS_PREPARED) {
+		return stdSepErr(status === SEP_STATUS_SEPARATED
+			? "This separation has already been generated. Run Prepare for Seps again to start over."
+			: "Run Prepare for Seps first — the active document is not a prepared SEP document.");
+	}
+	var ctx = null;
+	var profileMetadata = params.profileMetadata || {};
+	try {
+		var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", sepDoc);
+		if (xmp.isXmpCreated) {
+			if (xmp.doesStructFieldExist("LEAPPreparedContext")) ctx = xmp.getStructField("LEAPPreparedContext", true);
+			if (xmp.doesStructFieldExist("SeparationProfileMetadata")) {
+				var stamped = xmp.getStructField("SeparationProfileMetadata", true);
+				if (stamped && typeof stamped === "object") profileMetadata = stamped;
+			}
+		}
+	} catch (eCtx) { }
+	if (!ctx || !ctx.graphicName) return stdSepErr("Prepared context missing on this document. Run Prepare for Seps again.");
+	var graphicName = String(ctx.graphicName);
+	var sepDocPath = new File(sepDoc.fullName).fsName;
+	try { unlockSizedGraphicsContents(sepDoc); } catch (eUnlock) { }
+	stdSepLog("generate (from prepared): graphic=" + graphicName + " doc=" + sepDocPath);
+	/* Outline + expand whatever the user edited (same treatment the LEAP generate applies) — the
+	   prepare-time flatten covered the PLACED art, not anything added since. */
+	try {
+		var expandReport = expandPreparedArtForSeparation(sepDoc, graphicName);
+		if (expandReport && expandReport.error) {
+			return stdSepErr("Could not expand the prepared art: " + expandReport.error, { separatedDocumentPath: sepDocPath });
+		}
+	} catch (eExpandPrep) {
+		return stdSepErr("Could not expand the prepared art: " + (eExpandPrep.message || eExpandPrep), { separatedDocumentPath: sepDocPath });
+	}
+	var result = standaloneSplitAndFinish(sepDoc, sepDocPath, graphicName, profileMetadata, stdSepDebug);
+	try {
+		var parsed = JSON.parse(result);
+		if (parsed && parsed.success) {
+			try { app.activeDocument = sepDoc; } catch (eA) { }
+			setSeparationStatusOnDoc(sepDoc, SEP_STATUS_SEPARATED);
+			try { sepDoc.save(); } catch (eS) { }
+			parsed.stage = "separated";
+			return JSON.stringify(parsed);
+		}
+	} catch (eP) { }
+	return result;
+}
+
+/* Shared second half: split + underbase + XMP. Used by the legacy full run and by Generate. */
+function standaloneSplitAndFinish(sepDoc, sepDocPath, graphicName, profileMetadata, stdSepDebug) {
+	try { app.activeDocument = sepDoc; } catch (eActSplit) { }
 	/* 3) Run the real color split + underbase + ink-exception pipeline (same as the LEAP path). */
 	loadLEAPColorSepsActions();
 	var splitColorsError = parseSplitColorsResult(splitColors(graphicName));
@@ -228,6 +327,7 @@ function standaloneSeparationRun(params) {
 		if (layerNames.length > 0) {
 			var sepXmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", sepDoc);
 			if (sepXmp.isXmpCreated) {
+				sepXmp.setStructField(SEP_STATUS_FIELD, SEP_STATUS_SEPARATED, false, false);
 				sepXmp.setStructField("SeparatedLayerNames", layerNames, true, false);
 				sepXmp.setStructField("LEAPSeparationColorsData", [], true, false);
 				sepXmp.commit();

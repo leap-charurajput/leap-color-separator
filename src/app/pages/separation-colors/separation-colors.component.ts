@@ -65,6 +65,8 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 	isLoadingGraphics = false;
 	isLoadingSwatches = false;
 	isSeparatedDoc = false;
+	/* Two-stage: active doc is a SEP doc prepared (art placed) but not generated yet. */
+	isPreparedNotGenerated = false;
 	graphicNameFromPath = '';
 	graphicSwatches: any[] = [];
 	// draggedIndex removed as it is handled by CDK
@@ -478,6 +480,17 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 					}
 
 					const data = result.data;
+
+					/*
+					 * Two-stage: a PREPARED SEP document has no plates yet — showing it here as a separated
+					 * document would render an empty plate list. Treat it as not-yet-separated and tell the
+					 * user where to go; the Separations tab carries the Generate button.
+					 */
+					this.isPreparedNotGenerated = data.isSeparatedDoc && String(data.separationStatus || '') === 'preparedForSeps';
+					if (this.isPreparedNotGenerated) {
+						this.setUIForNonSeparatedDocument();
+						return;
+					}
 
 					if (data.isSeparatedDoc) {
 						this.isSeparatedDoc = true;

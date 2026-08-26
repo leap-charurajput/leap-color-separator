@@ -205,8 +205,10 @@ export class ControllerService {
 		sepsTemplateFileName?: string;
 		exportedFilePath: string;
 		cadPngPath?: string;
+		/* Two-stage: "prepare" | "generate". The panel always sends one of these now. */
+		stage?: 'prepare' | 'generate' | 'full';
 	}): Promise<any> {
-		this.log('generateStandaloneSeparation called');
+		this.log('generateStandaloneSeparation called (stage=' + (payload?.stage || 'full') + ')');
 		return this.ensureSession().then(() => runStandaloneSeparation(payload));
 	}
 
@@ -2103,6 +2105,224 @@ export class ControllerService {
 					throw err;
 				});
 		});
+	}
+
+	/*
+	 * Delete a generated separation .ai (and its beside-sidecar .json). An INLINE host script first
+	 * closes the document if it is open in Illustrator — deleting a file under an open document
+	 * corrupts the session — then cep_node fs removes the files. The flat registry entry is left in
+	 * place (advisory; every reader treats stale entries as fallback-only).
+	 */
+	deleteSeparationFileFromDisk(filePath: string): Promise<{ success: boolean; error?: string }> {
+		this.log('deleteSeparationFileFromDisk called');
+		const pathLiteral = JSON.stringify(String(filePath));
+		const closeScript = `
+(function() {
+	try {
+		var targetPath = ${pathLiteral};
+		for (var d = app.documents.length - 1; d >= 0; d--) {
+			var doc = app.documents[d];
+			try {
+				if (doc && doc.fullName && doc.fullName.fsName === targetPath) {
+					doc.close(SaveOptions.DONOTSAVECHANGES);
+				}
+			} catch (eClose) { }
+		}
+		return JSON.stringify({ success: true });
+	} catch (e) {
+		return JSON.stringify({ success: false, error: e.message || e.toString() });
+	}
+})();
+`;
+		return this.ensureSession()
+			.then(() => evalScript(closeScript))
+			.then(() => {
+				const req = (window as any).cep_node?.require;
+				if (!req) return { success: false, error: 'file system unavailable' };
+				const fs = req('fs');
+				if (fs.existsSync(filePath)) {
+					fs.unlinkSync(filePath);
+				}
+				const sidecar = String(filePath).replace(/\.ai$/i, '.json');
+				try {
+					if (sidecar !== filePath && fs.existsSync(sidecar)) fs.unlinkSync(sidecar);
+				} catch (eSidecar) { /* sidecar is best-effort */ }
+				this.leapSepsLog.logInfo('Separations', 'Deleted separation file: ' + filePath);
+				return { success: true };
+			})
+			.catch((err: any) => ({ success: false, error: err?.message || String(err) }));
+	}
+
+	/*
+	 * Per-document profile suppression (LEAPSuppressedSeparationProfiles on the version doc's XMP).
+	 * Excel-derived groups regenerate from the team style codes on every load, so "delete" for them
+	 * means "stop listing this profile for this document" — a persisted name list the panel filters
+	 * against. Adding a profile back via Add Separation clears its suppression. INLINE per the
+	 * no-new-JSX policy.
+	 */
+	getSuppressedSeparationProfiles(): Promise<string[]> {
+		const script = `
+(function() {
+	try {
+		var versionDoc = null;
+		for (var d = 0; d < app.documents.length; d++) {
+			var doc = app.documents[d];
+			if (doc && doc.fullName && doc.fullName.fsName) {
+				var docPath = doc.fullName.fsName;
+				if (docPath.indexOf("01 TEAMOUTS") !== -1 && docPath.indexOf("09 SEPARATIONS") === -1) {
+					versionDoc = doc;
+					if (app.activeDocument === doc) break;
+				}
+			}
+		}
+		if (!versionDoc) return JSON.stringify({ success: true, profiles: [] });
+		var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", versionDoc);
+		if (!xmp.isXmpCreated || !xmp.doesStructFieldExist("LEAPSuppressedSeparationProfiles")) {
+			return JSON.stringify({ success: true, profiles: [] });
+		}
+		var list = xmp.getStructField("LEAPSuppressedSeparationProfiles", true);
+		if (!list || !(list instanceof Array)) list = [];
+		return JSON.stringify({ success: true, profiles: list });
+	} catch (e) {
+		return JSON.stringify({ success: false, profiles: [], error: e.message || e.toString() });
+	}
+})();
+`;
+		return this.ensureSession()
+			.then(() => evalScript(script))
+			.then((res: any) => {
+				const parsed = JSON.parse(String(res));
+				return Array.isArray(parsed?.profiles) ? parsed.profiles.map((x: any) => String(x)) : [];
+			})
+			.catch(() => []);
+	}
+
+	setSeparationProfileSuppressed(profileName: string, suppressed: boolean): Promise<any> {
+		const nameLiteral = JSON.stringify(String(profileName || '').trim());
+		const flagLiteral = suppressed ? 'true' : 'false';
+		const script = `
+(function() {
+	try {
+		var profileName = ${nameLiteral};
+		var suppress = ${flagLiteral};
+		if (!profileName) return JSON.stringify({ success: false, error: "profileName is required" });
+		var versionDoc = null;
+		for (var d = 0; d < app.documents.length; d++) {
+			var doc = app.documents[d];
+			if (doc && doc.fullName && doc.fullName.fsName) {
+				var docPath = doc.fullName.fsName;
+				if (docPath.indexOf("01 TEAMOUTS") !== -1 && docPath.indexOf("09 SEPARATIONS") === -1) {
+					versionDoc = doc;
+					if (app.activeDocument === doc) break;
+				}
+			}
+		}
+		if (!versionDoc) return JSON.stringify({ success: false, error: "Version document (01 TEAMOUTS) is not open" });
+		var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", versionDoc);
+		if (!xmp.isXmpCreated) return JSON.stringify({ success: false, error: "Could not open document XMP" });
+		var list = [];
+		if (xmp.doesStructFieldExist("LEAPSuppressedSeparationProfiles")) {
+			var existing = xmp.getStructField("LEAPSuppressedSeparationProfiles", true);
+			if (existing && existing instanceof Array) list = existing;
+		}
+		var target = profileName.toUpperCase();
+		var next = [];
+		for (var i = 0; i < list.length; i++) {
+			var name = list[i] != null ? String(list[i]) : "";
+			if (name.replace(/^\s+|\s+$/g, "").toUpperCase() !== target) next.push(name);
+		}
+		if (suppress) next.push(profileName);
+		xmp.setStructField("LEAPSuppressedSeparationProfiles", next, true, false);
+		xmp.commit();
+		try { versionDoc.save(); } catch (eSave) { }
+		return JSON.stringify({ success: true, suppressed: suppress, count: next.length });
+	} catch (e) {
+		return JSON.stringify({ success: false, error: e.message || e.toString() });
+	}
+})();
+`;
+		return this.ensureSession()
+			.then(() => evalScript(script))
+			.then((res: any) => JSON.parse(String(res)));
+	}
+
+	/*
+	 * Delete a manually added profile group from the version doc's XMP (LEAPSeparationProfileData,
+	 * matched by graphic + profile, case-insensitive). INLINE script on purpose — no JSX deploy
+	 * needed; it rides with the panel and uses the already-loaded xmpModifier global, the same way
+	 * the other lib/scripts inline host code does. Excel-derived groups never live in this array.
+	 */
+	removeSeparationProfileDataEntry(params: { graphicName: string; profileName: string }): Promise<any> {
+		this.log('removeSeparationProfileDataEntry called');
+		const graphicLiteral = JSON.stringify(String(params?.graphicName || '').trim());
+		const profileLiteral = JSON.stringify(String(params?.profileName || '').trim());
+		const script = `
+(function() {
+	try {
+		var graphicName = ${graphicLiteral};
+		var profileName = ${profileLiteral};
+		if (!graphicName || !profileName) {
+			return JSON.stringify({ success: false, error: "graphicName and profileName are required" });
+		}
+		var versionDoc = null;
+		for (var d = 0; d < app.documents.length; d++) {
+			var doc = app.documents[d];
+			if (doc && doc.fullName && doc.fullName.fsName) {
+				var docPath = doc.fullName.fsName;
+				if (docPath.indexOf("01 TEAMOUTS") !== -1 && docPath.indexOf("09 SEPARATIONS") === -1) {
+					versionDoc = doc;
+					if (app.activeDocument === doc) break;
+				}
+			}
+		}
+		if (!versionDoc) {
+			return JSON.stringify({ success: false, error: "Version document (01 TEAMOUTS) is not open" });
+		}
+		var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", versionDoc);
+		if (!xmp.isXmpCreated || !xmp.doesStructFieldExist("LEAPSeparationProfileData")) {
+			return JSON.stringify({ success: true, removed: 0 });
+		}
+		var entries = xmp.getStructField("LEAPSeparationProfileData", true);
+		if (!entries || !(entries instanceof Array)) {
+			return JSON.stringify({ success: true, removed: 0 });
+		}
+		/*
+		 * Match by PROFILE ONLY — symmetric with what makes the Delete item appear: the UI groups the
+		 * XMP entries by profile (ignoring graphicName) and renders the same groups under every graphic
+		 * section, so the entry's recorded graphicName routinely differs from the section the user
+		 * clicked in. Matching both fields deleted 0 entries and looked like a dead button.
+		 */
+		var pr = profileName.toUpperCase();
+		var kept = [];
+		var removed = 0;
+		for (var i = 0; i < entries.length; i++) {
+			var e = entries[i];
+			/* The profile lives NESTED at entry.profileMetadata.profileName (that is what
+			   handleLoadSeparationPaths reads too); older/manual entries may carry it flat. Reading
+			   only the flat key matched nothing — the second cause of "Nothing happening on Delete". */
+			var rawName = "";
+			if (e && e.profileMetadata && e.profileMetadata.profileName != null) {
+				rawName = String(e.profileMetadata.profileName);
+			} else if (e && e.profileName != null) {
+				rawName = String(e.profileName);
+			}
+			var ep = rawName.replace(/^\s+|\s+$/g, "").toUpperCase();
+			if (ep === pr) { removed++; } else { kept.push(e); }
+		}
+		if (removed > 0) {
+			xmp.setStructField("LEAPSeparationProfileData", kept, true, false);
+			xmp.commit();
+			try { versionDoc.save(); } catch (eSave) { }
+		}
+		return JSON.stringify({ success: true, removed: removed });
+	} catch (e) {
+		return JSON.stringify({ success: false, error: e.message || e.toString() });
+	}
+})();
+`;
+		return this.ensureSession().then(() =>
+			evalScript(script).then((res: any) => JSON.parse(String(res)))
+		);
 	}
 
 	addSeparationProfileDataEntry(params: {
@@ -4866,18 +5086,57 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
 		});
 	}
 
+	/*
+	 * Two-stage separation (LEAP flow).
+	 *   prepareForSeps()        -> host handlePrepareForSeps: SEP doc from template + LIVE art, status
+	 *                              "preparedForSeps", document left open for editing.
+	 *   generateFromPrepared()  -> host handleGenerateFromPrepared: plates from the art as edited,
+	 *                              status "separated".
+	 * performSeparation() is the legacy single-shot call (02 GRAPHICS art, no edit step). It is kept
+	 * intact but NO LONGER CALLED by the panel — Generate requires Prepare first, no fallback.
+	 */
+	prepareForSeps(
+		graphicName: string,
+		styleCodes: string[] = [],
+		profileMetadata: any = null,
+		options?: { sepsTemplateFileName?: string }
+	): Promise<any> {
+		return this.runSeparationStage('handlePrepareForSeps', 'prepareForSeps', graphicName, styleCodes, profileMetadata, options);
+	}
+
+	generateFromPrepared(
+		graphicName: string,
+		styleCodes: string[] = [],
+		profileMetadata: any = null,
+		options?: { sepsTemplateFileName?: string }
+	): Promise<any> {
+		return this.runSeparationStage('handleGenerateFromPrepared', 'generateFromPrepared', graphicName, styleCodes, profileMetadata, options);
+	}
+
+	/* LEGACY single-shot. Not used by the panel any more (see prepareForSeps / generateFromPrepared). */
 	performSeparation(
 		graphicName: string,
 		styleCodes: string[] = [],
 		profileMetadata: any = null,
 		options?: { recreateInActiveDoc?: boolean; sepsTemplateFileName?: string }
 	): Promise<any> {
+		return this.runSeparationStage('handlePerformSeparation', 'performSeparation', graphicName, styleCodes, profileMetadata, options);
+	}
+
+	private runSeparationStage(
+		handler: 'handlePrepareForSeps' | 'handleGenerateFromPrepared' | 'handlePerformSeparation',
+		label: string,
+		graphicName: string,
+		styleCodes: string[] = [],
+		profileMetadata: any = null,
+		options?: { recreateInActiveDoc?: boolean; sepsTemplateFileName?: string }
+	): Promise<any> {
 		this.log(
-			'performSeparation called for: ' +
+			label + ' called for: ' +
 			graphicName +
 			(options?.recreateInActiveDoc ? ' (recreate in active doc)' : '')
 		);
-		this.leapSepsLog.logProcess('performSeparation start', {
+		this.leapSepsLog.logProcess(label + ' start', {
 			graphicName,
 			styleCodes,
 			profileCode: profileMetadata?.profileCode,
@@ -4897,11 +5156,11 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
 				params.sepsTemplateFileName = String(options.sepsTemplateFileName);
 			}
 
-			return this.evalWithTeamJsonFallback('handlePerformSeparation', params, (r: any) =>
+			return this.evalWithTeamJsonFallback(handler, params, (r: any) =>
 				ControllerService.TEAM_JSON_UNREADABLE.test(String(r?.error || ''))
 			)
 				.then((result: any) => {
-					console.log('[Controller] performSeparation result:', result);
+					console.log('[Controller] ' + label + ' result:', result);
 					if (!result?.success) {
 						/*
 						 * The step trace goes out as its OWN log line, as the MESSAGE rather than the detail: the
@@ -4910,12 +5169,12 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
 						 * write never lands, this line is the only record of it.
 						 */
 						if (result?.splitColorsSteps) {
-							this.leapSepsLog.logError('performSeparation splitColors', String(result.splitColorsSteps));
+							this.leapSepsLog.logError(label + ' splitColors', String(result.splitColorsSteps));
 						}
-						this.leapSepsLog.logError('performSeparation', result?.error || 'Failed', result);
+						this.leapSepsLog.logError(label, result?.error || 'Failed', result);
 						return result;
 					}
-					this.leapSepsLog.logProcess('performSeparation JSX success', {
+					this.leapSepsLog.logProcess(label + ' JSX success', {
 						plates: result.layerNames?.length,
 						sepFile: result.separatedDocumentPath
 							? String(result.separatedDocumentPath).split('/').pop()
@@ -4924,12 +5183,12 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
 					/* Trace as the MESSAGE (details get truncated) — success runs need it too: a "successful"
 						 separation with only Choke + White UB was only explainable by this line. */
 					if (result?.splitColorsSteps) {
-						this.leapSepsLog.logInfo('performSeparation splitColors', String(result.splitColorsSteps));
+						this.leapSepsLog.logInfo(label + ' splitColors', String(result.splitColorsSteps));
 					}
 					return result;
 				})
 				.catch((err: any) => {
-					this.leapSepsLog.logError('performSeparation', err);
+					this.leapSepsLog.logError(label, err);
 					throw err;
 				});
 		});

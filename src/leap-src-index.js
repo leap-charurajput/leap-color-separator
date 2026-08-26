@@ -553,6 +553,18 @@ function getBatchExcelRecordsFromJson(documentPath, teamCode) {
  }
 }
 
+/*
+ * One batch cell can carry SEVERAL codes: "N199, 991N" in Lineup Style Code arrived as one token,
+ * so getProfileNamesFromExcel searched Styles.xlsx for a style literally named "N199, 991N" and the
+ * row rendered "Unknown Profile" although both codes are in the sheet. Split on comma/semicolon.
+ */
+function splitCodeCellValue(value) {
+ return String(value == null ? '' : value)
+  .split(/[,;]+/)
+  .map((part) => part.trim())
+  .filter((part) => part !== '');
+}
+
 function getUniqueValuesFromBatchRecords(records, columnName) {
  const rawValue = records ? records[columnName] : null;
  if (rawValue == null) {
@@ -564,13 +576,20 @@ function getUniqueValuesFromBatchRecords(records, columnName) {
 
  values.forEach((entry) => {
   if (entry == null) return;
-  const text = String(entry).trim();
-  if (text !== '') {
-   unique.add(text);
-  }
+  splitCodeCellValue(entry).forEach((code) => unique.add(code));
  });
 
  return Array.from(unique).sort();
+}
+
+/*
+ * Normalized key for STYLE-CODE matching across Excel files. Codes arrive from different sources
+ * (team batch Excel, Styles.xlsx, XMP) with case, ordinary/non-breaking-space and numeric-cell
+ * differences — an exact === match dropped codes that were visibly present in the sheet and the row
+ * surfaced as "Unknown Profile". Uppercase + strip ALL whitespace (incl. NBSP).
+ */
+function normalizeStyleCodeKey(value) {
+ return String(value == null ? '' : value).toUpperCase().replace(/[\s\u00A0]+/g, '');
 }
 
 async function getColorCodesFromExcel(teamCode, documentPath) {
@@ -743,10 +762,8 @@ async function getStyleCodesFromExcel(teamCode, documentPath) {
     if (rowTeamCode === String(teamCode).trim()) {
      const styleValue = rowData[styleCodeColIndex];
      if (styleValue) {
-      const styleStr = String(styleValue).trim();
-      if (styleStr !== '') {
-       styleSet.add(styleStr);
-      }
+      /* "N199, 991N" in one cell = two styles (see splitCodeCellValue). */
+      splitCodeCellValue(styleValue).forEach((code) => styleSet.add(code));
      }
     }
    }
@@ -959,7 +976,7 @@ async function getProfileNamesFromExcel(styleCodes) {
   }
   const sheetName = workbook.SheetNames[0];
   const worksheet = workbook.Sheets[sheetName];
-  const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+  const data = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false });
 
   if (data.length === 0) {
    return {};
@@ -977,20 +994,30 @@ async function getProfileNamesFromExcel(styleCodes) {
    throw new Error('Required columns not found in Excel file');
   }
 
-  const styleCodesSet = new Set(styleCodes.map((sc) => String(sc).trim()));
-  const profileMap = {};
+  /*
+   * NORMALIZED matching (see normalizeStyleCodeKey): the sheet's rows are indexed by normalized
+   * key, then each REQUESTED code is resolved through the same normalization — so "n199", "N199 "
+   * and an NBSP-padded cell all meet. The returned map is keyed by the ORIGINAL requested string,
+   * which is what the panel indexes with.
+   */
+  const rowsByNormalizedCode = {};
   for (let row = 1; row < data.length; row++) {
    const rowData = data[row];
    if (rowData && rowData[styleCodeColIndex]) {
-    const styleCode = String(rowData[styleCodeColIndex]).trim();
-    if (styleCodesSet.has(styleCode)) {
-     const profileName = rowData[profileNameColIndex];
-     if (profileName) {
-      profileMap[styleCode] = String(profileName).trim();
-     }
+    const key = normalizeStyleCodeKey(rowData[styleCodeColIndex]);
+    const profileName = rowData[profileNameColIndex];
+    if (key && profileName && !rowsByNormalizedCode[key]) {
+     rowsByNormalizedCode[key] = String(profileName).trim();
     }
    }
   }
+  const profileMap = {};
+  styleCodes.forEach((requested) => {
+   const hit = rowsByNormalizedCode[normalizeStyleCodeKey(requested)];
+   if (hit) {
+    profileMap[String(requested)] = hit;
+   }
+  });
 
   const withProfile = Object.keys(profileMap);
   const missing = styleCodes.filter((sc) => !profileMap[sc]);
@@ -1045,7 +1072,7 @@ async function getProfileNamesFromExcelAtPath(styleCodes, basePath) {
 
  const sheetName = workbook.SheetNames[0];
  const worksheet = workbook.Sheets[sheetName];
- const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+ const data = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false });
  if (!data.length) {
   return {};
  }
@@ -1121,7 +1148,7 @@ async function getStyleInformation(styleCodes) {
 
   const sheetName = workbook.SheetNames[0];
   const worksheet = workbook.Sheets[sheetName];
-  const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+  const data = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false });
 
   if (data.length === 0) {
    console.log('[getStyleInformation] Sheet is empty');
@@ -1192,7 +1219,7 @@ async function getStylesCatalogFromExcel(explicitBasePath) {
 
   const sheetName = workbook.SheetNames[0];
   const worksheet = workbook.Sheets[sheetName];
-  const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+  const data = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false });
   console.log('[StylesCatalog] Sheet name:', sheetName, '| total rows:', data.length);
 
   if (data.length === 0) {

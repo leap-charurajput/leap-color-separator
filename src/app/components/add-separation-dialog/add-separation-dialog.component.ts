@@ -10,6 +10,8 @@ export interface AddSeparationDialogResult {
 	mode: 'style' | 'profile';
 	profileName: string;
 	styleCodes: string[];
+	/* Where the manual style->profile decision should live: just this document, or the whole teamout. */
+	scope: 'file' | 'teamout';
 }
 
 @Component({
@@ -22,11 +24,18 @@ export class AddSeparationDialogComponent implements OnChanges {
 	@Input() graphicName = '';
 	@Input() isLoading = false;
 	@Input() styleOptions: AddSeparationDialogStyleOption[] = [];
+	/*
+	 * The styles this manual add is FOR — the graphic's style codes that came up "Unknown Profile".
+	 * Profile mode attaches exactly these (user decision), never the profile's whole catalog: picking
+	 * "Fanatics-Plastisol" used to attach every style mapped to it in Styles.xlsx (hundreds).
+	 */
+	@Input() targetStyleCodes: string[] = [];
 
 	@Output() cancel = new EventEmitter<void>();
 	@Output() confirm = new EventEmitter<AddSeparationDialogResult>();
 
 	selectionMode: 'style' | 'profile' = 'style';
+	scope: 'file' | 'teamout' = 'file';
 	query = '';
 	selectedStyleCode = '';
 	selectedProfileName = '';
@@ -48,6 +57,7 @@ export class AddSeparationDialogComponent implements OnChanges {
 
 	private resetState(): void {
 		this.selectionMode = 'style';
+		this.scope = 'file';
 		this.query = '';
 		this.selectedStyleCode = '';
 		this.selectedProfileName = '';
@@ -125,7 +135,15 @@ export class AddSeparationDialogComponent implements OnChanges {
 	get canSubmit(): boolean {
 		if (this.isLoading) return false;
 		if (this.selectionMode === 'style') return !!this.selectedStyleCode;
-		return !!this.selectedProfileName;
+		/* Profile mode needs both a profile AND the styles this add is for. */
+		return !!this.selectedProfileName && this.targetStyleCodesClean.length > 0;
+	}
+
+	/** The styles a profile-mode add will attach — shown in the dialog so the user sees exactly what they are mapping. */
+	get targetStyleCodesClean(): string[] {
+		return Array.from(
+			new Set((this.targetStyleCodes || []).map((s) => String(s || '').trim()).filter(Boolean))
+		);
 	}
 
 	onModeChange(mode: 'style' | 'profile'): void {
@@ -248,28 +266,33 @@ export class AddSeparationDialogComponent implements OnChanges {
 			this.confirm.emit({
 				mode: 'style',
 				profileName: this.selectedProfileFromStyle || 'Unknown Profile',
-				styleCodes: [styleCode]
+				styleCodes: [styleCode],
+				scope: this.scope
 			});
 			return;
 		}
 
 		const profileName = String(this.selectedProfileName || '').trim();
 		if (!profileName) return;
-		const styleCodes = (this.styleOptions || [])
-			.filter((item) => String(item?.profileName || '').trim() === profileName)
-			.map((item) => String(item?.styleCode || '').trim())
-			.filter(Boolean);
-		const deduped = Array.from(new Set(styleCodes)).sort();
+		/*
+		 * Profile mode attaches ONLY the styles this add is for (the graphic's missing-profile codes,
+		 * passed in as targetStyleCodes) — never every style mapped to the profile in Styles.xlsx.
+		 */
+		const deduped = Array.from(
+			new Set((this.targetStyleCodes || []).map((s) => String(s || '').trim()).filter(Boolean))
+		);
 		if (deduped.length === 0) return;
 		console.log('[AddSeparationDialog] Emitting profile confirm payload', {
 			mode: 'profile',
 			profileName,
-			styleCodes: deduped
+			styleCodes: deduped,
+			scope: this.scope
 		});
 		this.confirm.emit({
 			mode: 'profile',
 			profileName,
-			styleCodes: deduped
+			styleCodes: deduped,
+			scope: this.scope
 		});
 	}
 }

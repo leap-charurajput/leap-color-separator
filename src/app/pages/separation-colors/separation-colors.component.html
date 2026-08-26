@@ -3,7 +3,11 @@
  <div *ngIf="!isRunningInBrowser && !isSeparatedDoc" class="separation-colors-not-separated">
   <div class="panelTitle">Separation Colors</div>
   <div class="separation-colors-not-separated-message">
-   Front document is not a LEAP color separation document
+   <ng-container *ngIf="isPreparedNotGenerated; else notSepMsg">
+    This document is prepared for separation but not generated yet. Edit the art if needed, then use
+    Generate Separations on the Separations tab.
+   </ng-container>
+   <ng-template #notSepMsg>Front document is not a LEAP color separation document</ng-template>
   </div>
  </div>
 

@@ -157,3 +157,25 @@
 	justify-content: space-between;
 }
 
+
+/* Two-stage manual mapping: the styles being mapped + where the decision is stored. */
+.add-separation-modal-target-styles {
+	font-size: 11px;
+	color: #d6d6d6;
+	margin: 6px 0 2px;
+}
+
+.add-separation-modal-scope {
+	display: flex;
+	gap: 14px;
+	margin: 8px 0 2px;
+	font-size: 11px;
+	color: #d6d6d6;
+}
+
+.add-separation-scope-option {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	cursor: pointer;
+}

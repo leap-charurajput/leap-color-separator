@@ -802,15 +802,24 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 		}
 	}
 
+	/* Two-stage for standalone rows — same buttons as the LEAP rows. */
+	prepareStandaloneJob(job: any): void {
+		const hook = (window as any).__LEAP_STANDALONE__;
+		if (hook && typeof hook.openWithJob === 'function') {
+			hook.openWithJob({ ...job, autoStage: 'prepare' });
+		}
+	}
+
 	generateStandaloneJob(job: any): void {
 		const hook = (window as any).__LEAP_STANDALONE__;
 		if (hook && typeof hook.openWithJob === 'function') {
 			/*
-			 * autoGenerate: run the separation immediately rather than showing the form. The user pressed
-			 * Generate, not Edit — they expect it to run and land on Plates, exactly like the LEAP button.
-			 * The form component stays mounted (tab contents are kept alive), so this needs no tab switch.
+			 * Run the stage immediately rather than showing the form. The form component stays mounted
+			 * (tab contents are kept alive), so this needs no tab switch.
+			 * LEGACY single-shot (autoGenerate: true) is intentionally no longer sent — Generate requires
+			 * Prepare first; the form still honours autoGenerate if something else sends it.
 			 */
-			hook.openWithJob({ ...job, autoGenerate: true });
+			hook.openWithJob({ ...job, autoStage: 'generate' });
 		}
 	}
 
@@ -880,9 +889,18 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 			return;
 		}
 
+		/* Refresh the per-document suppression list; re-filter in place when it arrives. */
+		this.controller.getSuppressedSeparationProfiles().then((profiles) => {
+			this.suppressedProfiles = profiles || [];
+			if (this.suppressedProfiles.length && this.separations.length) {
+				this.separations = this.filterSuppressedGroups(this.separations);
+				this.cdr.detectChanges();
+			}
+		});
+
 		if (!this.teamCode || this.teamCode === '') {
 			console.log(logPrefix, 'Skipped – missing teamCode:', this.teamCode || '(empty)');
-			this.separations = this.buildSeparationsFromXmpGroups();
+			this.separations = this.filterSuppressedGroups(this.buildSeparationsFromXmpGroups());
 			this.allTeamStyleCodes = [];
 			if (this.separations.length > 0) {
 				console.log(logPrefix, 'Fallback – using XMP separation groups only:', this.separations);
@@ -932,6 +950,9 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 					}
 
 					const profileMap = profileResult.profileMap;
+					/* TEAMOUT-SCOPE PERSISTENCE — parked, see docs/TODO.md.
+					this.applyTeamoutOverrides(profileMap, styleCodes);
+					*/
 					this.styleCatalogOptions = styleCodes.map((styleCode: string) => ({
 						styleCode: String(styleCode || '').trim(),
 						profileName: String(profileMap[styleCode] || 'Unknown Profile').trim()
@@ -971,7 +992,9 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 					}));
 
 					console.log(logPrefix, 'Step 4 – Generated separations:', separationsList.length, 'profiles:', separationsList.map((s) => ({ id: s.id, profile: s.profile, styles: s.styles })));
-					this.separations = this.mergeSeparationGroups(separationsList, this.xmpSeparationGroups);
+					this.separations = this.filterSuppressedGroups(
+						this.mergeSeparationGroups(separationsList, this.xmpSeparationGroups)
+					);
 					this.isLoadingSeparations = false;
 					this.cdr.detectChanges();
 				});
@@ -1012,7 +1035,209 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 		return !!(graphic && graphic.distress);
 	}
 
+	/* ----- Two-stage button state (see runSeparationStage) ----- */
+
+	/** "preparedForSeps" | "separated" | "" for the ACTIVE document, from checkSeparatedDocument. */
+	get separationStatus(): string {
+		return String((this.separatedDocInfo as any)?.separationStatus || '');
+	}
+
+	/** Active document is a SEP doc that was prepared but not yet generated. */
+	get isPreparedSepDoc(): boolean {
+		return this.isSeparatedDoc && this.separationStatus === 'preparedForSeps';
+	}
+
+	/** Graphic recorded at Prepare — what Generate will run on. */
+	get preparedGraphicName(): string {
+		const ctx = (this.separatedDocInfo as any)?.preparedContext;
+		return ctx && ctx.graphicName ? String(ctx.graphicName) : '';
+	}
+
+	/**
+	 * Generate from the prepared SEP document (it is the active document; no separation row context
+	 * is needed — the host reads everything back from the document's XMP).
+	 */
+	handleGenerateFromPreparedDoc(): void {
+		const graphicName = this.preparedGraphicName;
+		if (!graphicName) {
+			this.reportFailure('separation-generate', 'Prepared graphic not recorded on this document — run Prepare for Seps again.');
+			return;
+		}
+		this.leapSepsLog.logClick('Generate separation (from prepared)', { graphicName });
+		const meta: any = (this.separatedDocInfo as any)?.profileMetaData || null;
+		const styleCodes: string[] = meta && Array.isArray(meta.styleCodes) ? meta.styleCodes : [];
+		const ctx: any = (this.separatedDocInfo as any)?.preparedContext || {};
+		/*
+		 * Standalone (Non-LEAP) prepared docs are generated by the standalone host script; LEAP ones by
+		 * handleGenerateFromPrepared. Both read their context from the SEP document's XMP.
+		 */
+		const run: Promise<any> = ctx.standalone
+			? this.controller.generateStandaloneSeparation({
+				graphicName,
+				styleCodes,
+				profileMetadata: meta,
+				jsonData: {},
+				exportedFilePath: String(ctx.exportedFilePath || ''),
+				stage: 'generate'
+			})
+			: this.controller.generateFromPrepared(graphicName, styleCodes, meta);
+		run
+			.then((result: any) => {
+				if (result?.success) {
+					this.dataIssues.clear('separation-generate');
+					const tabNavigation = (window as any).__LEAP_TAB_NAVIGATION__;
+					if (tabNavigation && typeof tabNavigation.navigateToTab === 'function') {
+						tabNavigation.navigateToTab(2);
+						setTimeout(() => {
+							if ((window as any).__LEAP_SEPARATION_COLORS_REFRESH__) {
+								(window as any).__LEAP_SEPARATION_COLORS_REFRESH__();
+							}
+						}, 500);
+					}
+					this.refreshData();
+				} else {
+					const message = result?.error || 'Generate failed. See today\'s log in Documents/LEAP Settings/Logs/LEAP_Seps.';
+					this.leapSepsLog.logError('Separations', message, result);
+					this.reportFailure('separation-generate', message);
+				}
+			})
+			.catch((err: any) => {
+				this.leapSepsLog.logError('Separations', err);
+				this.reportFailure('separation-generate', err?.message || String(err));
+			});
+	}
+
+	/*
+	 * Fill the prepared SEP document's printed PG Ink table + GRID INFO BOX from what the profile
+	 * already tells us — DOCUMENT-ONLY preview so the sheet does not sit full of [Token]s and empty
+	 * rows between Prepare and Generate. The Plates tab stays "not generated yet", and Generate
+	 * rewrites this table from the REAL plates (sequence, edits, renames — all final there).
+	 *
+	 * First pass is deliberately simple: the enabled White UB passes on top (pass 1, 2, 3… — the same
+	 * print order the Plates tab shows), then one row per graphic ink (profile colorMesh + flags).
+	 * UB rows use profile meshes and custom names when the profile has them. NO second-hit rows —
+	 * an "X 2" swatch with no plate behind it raises "ye swatch kahan se aaya" instead of helping.
+	 *
+	 * Best-effort: a prefill failure must never fail the Prepare (log only).
+	 */
+	private async prefillSepTableAfterPrepare(profileInfo: any, profileMetadata: any): Promise<void> {
+		try {
+			if (this.isRunningInBrowser) return;
+			/*
+			 * INKS COME FROM THE PREPARED DOCUMENT'S SPOT SWATCHES — the pasted live art brings its ink
+			 * spots into the SEP doc. The first version used getGraphicColors(), which returns GARMENT
+			 * colorway codes ("00A"/"127A"), and the grid promptly reported
+			 * "Swatch '00A' not found for group '1'". Template spots that are not inks are filtered:
+			 * [Registration]-style bracket names, GARMENT, every White-UB variant (incl. custom names),
+			 * Choke and Blocker.
+			 */
+			const allSpots = await this.controller.getSpotColorSwatches();
+			const inks = (allSpots || [])
+				.map((c) => String(c || '').trim())
+				.filter((name) =>
+					!!name &&
+					!name.startsWith('[') &&
+					name.toUpperCase() !== 'GARMENT' &&
+					!/white\s*ub/i.test(name) &&
+					name.toUpperCase() !== 'CHOKE' &&
+					name.toUpperCase() !== 'BLOCKER'
+				);
+			if (inks.length === 0) {
+				console.log('[SEPARATIONS] prefill skipped - no ink spot swatches in the prepared document');
+				return;
+			}
+			const colorMesh = profileInfo?.colorMesh != null && String(profileInfo.colorMesh).trim() !== ''
+				? String(profileInfo.colorMesh)
+				: '110';
+			const micron = profileInfo?.micron != null && String(profileInfo.micron).trim() !== ''
+				? String(profileInfo.micron)
+				: 'NA';
+			const flash = !!profileInfo?.flash;
+			const cool = !!profileInfo?.cool;
+			const wb = !!profileInfo?.wb;
+
+			/*
+			 * White UB passes FIRST, ascending (pass 1, 2, 3…) — the Plates tab prints Blocker →
+			 * White UBs → inks (sortColorRowsWithWhiteUBAtBottom), so the prefilled table shows the
+			 * same order the plates will.
+			 */
+			const rows: any[] = [];
+			const enabled: boolean[] = Array.isArray(profileMetadata?.underbaseEnabled)
+				? profileMetadata.underbaseEnabled
+				: [true, false, false, false];
+			const meshes: string[] = Array.isArray(profileMetadata?.underbaseMeshes)
+				? profileMetadata.underbaseMeshes
+				: [];
+			const names: string[] = Array.isArray(profileMetadata?.underbaseNames)
+				? profileMetadata.underbaseNames
+				: [];
+			for (let pass = 0; pass < enabled.length; pass++) {
+				if (!enabled[pass]) continue;
+				const name = String(names[pass] || '').trim() || (pass === 0 ? 'White UB' : 'White UB ' + (pass + 1));
+				rows.push({
+					colorName: name,
+					swatchName: name,
+					mesh: String(meshes[pass] || '').trim() || colorMesh,
+					micron,
+					flash,
+					cool,
+					wb,
+					hex: null,
+					type: 'separation'
+				});
+			}
+
+			for (const ink of inks) {
+				rows.push({
+					colorName: ink,
+					swatchName: ink,
+					mesh: colorMesh,
+					micron,
+					flash,
+					cool,
+					wb,
+					hex: null,
+					type: 'separation'
+				});
+			}
+
+			const separationData = rows.map((row, index) => ({ seq: index + 1, ...row }));
+			this.controller
+				.updateSepTable(separationData)
+				.then((res: any) => {
+					this.leapSepsLog.logInfo(
+						'Separations',
+						'INFO BOX prefilled after Prepare: ' + separationData.length + ' row(s) (' +
+						inks.length + ' ink(s) + ' + (separationData.length - inks.length) + ' UB)' +
+						(res?.errors?.length ? ' with ' + res.errors.length + ' warning(s)' : '')
+					);
+				})
+				.catch((err: any) => {
+					this.leapSepsLog.logWarn('Separations', 'INFO BOX prefill failed: ' + (err?.message || err));
+				});
+		} catch (e: any) {
+			this.leapSepsLog.logWarn('Separations', 'INFO BOX prefill error: ' + (e?.message || e));
+		}
+	}
+
+	/*
+	 * Two-stage separation. The separation row shows TWO buttons:
+	 *   Prepare for Seps      (version document active)  -> host creates the SEP doc with LIVE art,
+	 *                                                        status "preparedForSeps", leaves it open
+	 *   Generate Separations  (prepared SEP doc active)   -> host splits the art as the user left it,
+	 *                                                        status "separated", Plates tab opens
+	 * Generate WITHOUT Prepare is no longer possible — the legacy single-shot call stays in the code
+	 * (controller.performSeparation) but is not invoked from here.
+	 */
+	handlePrepareForSeps(separationId: number, graphicName: string): void {
+		this.runSeparationStage('prepare', separationId, graphicName);
+	}
+
 	handleGenerateSeparations(separationId: number, graphicName: string): void {
+		this.runSeparationStage('generate', separationId, graphicName);
+	}
+
+	private runSeparationStage(stage: 'prepare' | 'generate', separationId: number, graphicName: string): void {
 		if (!graphicName) {
 			return;
 		}
@@ -1022,7 +1247,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 			return;
 		}
 
-		this.leapSepsLog.logClick('Generate separation', {
+		this.leapSepsLog.logClick(stage === 'prepare' ? 'Prepare for Seps' : 'Generate separation', {
 			separationId,
 			graphicName,
 			profile: separation.profile,
@@ -1034,6 +1259,10 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 		const graphicColors = this.getGraphicColors(graphicName);
 		const graphicDistress = this.getGraphicDistress(graphicName);
 		const profileLookupOptions = { distress: graphicDistress };
+
+		/* Captured for the INFO-BOX prefill after a successful Prepare (see prefillSepTableAfterPrepare). */
+		let preparedProfileInfo: any = null;
+		let preparedProfileMetadata: any = null;
 
 		const getProfileCodeAndCreateSeparation = async () => {
 			let profileCode = null;
@@ -1254,20 +1483,26 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 				profileMetadata.separationFileNamePattern = this.separationFilePathPattern.trim();
 			}
 
-			console.log('[SEPARATIONS][UB_DEBUG] performSeparation payload profileMetadata:', profileMetadata);
+			preparedProfileInfo = profileInfo;
+			preparedProfileMetadata = profileMetadata;
+			console.log('[SEPARATIONS][UB_DEBUG] ' + stage + ' payload profileMetadata:', profileMetadata);
+			if (stage === 'prepare') {
+				return this.controller.prepareForSeps(graphicName, styleCodes, profileMetadata, { sepsTemplateFileName });
+			}
+			/* Generate runs on the prepared SEP doc; the host reads profileMetadata back from that
+			   document's XMP (stamped at Prepare, possibly edited since), so what we pass is advisory. */
+			return this.controller.generateFromPrepared(graphicName, styleCodes, profileMetadata, { sepsTemplateFileName });
+			/* LEGACY single-shot (no Prepare step) — intentionally disabled, kept for reference:
 			return this.controller.performSeparation(graphicName, styleCodes, profileMetadata, {
 				sepsTemplateFileName
 			});
+			*/
 		};
 
 		getProfileCodeAndCreateSeparation()
 			.then((result) => {
-				console.log('[SEPARATIONS] performSeparation result:', result);
+				console.log('[SEPARATIONS] ' + stage + ' result:', result);
 				if (result.success) {
-					setTimeout(() => {
-						this.loadSeparationPaths();
-					}, 1000);
-
 					setTimeout(() => {
 						this.loadSeparationPaths();
 					}, 1000);
@@ -1279,6 +1514,20 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 					setTimeout(() => {
 						this.loadSeparationPaths();
 					}, 4000);
+
+					if (stage === 'prepare') {
+						/*
+						 * Stay on the Separations tab: the prepared SEP document is now the active document,
+						 * so a refresh flips the buttons (Prepare disabled, Generate enabled) and the user can
+						 * edit the art before generating.
+						 */
+						this.dataIssues.clear('separation-generate');
+						/* Fill the document's printed PG Ink / GRID INFO BOX from the profile (document-only
+						   preview; Generate rewrites it from the real plates). */
+						this.prefillSepTableAfterPrepare(preparedProfileInfo, preparedProfileMetadata);
+						this.refreshData();
+						return;
+					}
 
 					const tabNavigation = (window as any).__LEAP_TAB_NAVIGATION__;
 					if (tabNavigation && typeof tabNavigation.navigateToTab === 'function') {
@@ -1348,8 +1597,125 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 			});
 	}
 
+	/* Profiles the user deleted for THIS document (XMP LEAPSuppressedSeparationProfiles). */
+	suppressedProfiles: string[] = [];
+
+	private isProfileSuppressed(profileName: string): boolean {
+		const target = String(profileName || '').trim().toUpperCase();
+		return this.suppressedProfiles.some((p) => String(p || '').trim().toUpperCase() === target);
+	}
+
+	/* Applied wherever the list is (re)built, so a deleted profile stays gone across reloads. */
+	private filterSuppressedGroups(list: Separation[]): Separation[] {
+		if (!this.suppressedProfiles.length) return list;
+		const kept = list.filter((sep) => !this.isProfileSuppressed(sep.profile));
+		if (kept.length !== list.length) {
+			console.log('[Separations] Suppressed profiles hidden:', list.length - kept.length);
+		}
+		return kept;
+	}
+
+	/* Did this row come from a manual Add Separation (XMP), rather than Styles.xlsx grouping? */
+	isXmpSeparationGroup(separation: Separation): boolean {
+		const profile = String(separation?.profile || '').trim().toUpperCase();
+		return this.xmpSeparationGroups.some((g) => String(g.profile || '').trim().toUpperCase() === profile);
+	}
+
+	/*
+	 * Row menu: Delete on EVERY group. Manually added (XMP) groups get their entries removed;
+	 * Excel-derived groups are SUPPRESSED per document (they regenerate from the team style codes
+	 * otherwise). A group WITH a generated file also deletes that file — hot-market case: the garment
+	 * code dictates e.g. HSWB by default but the job prints plastisol, so the user adds the right
+	 * profile manually and deletes the default one even after it was generated.
+	 */
+	getSeparationMenuItems(separation: Separation, graphicName: string): string[] {
+		return ['Edit', 'Delete', 'Duplicate'];
+	}
+
+	/* Delete confirmation state (mirrors the other confirm dialogs). filePath set = also delete the file. */
+	separationDeleteTarget: { separationId: number; graphicName: string; profileName: string; filePath: string } | null = null;
+
+	get separationDeleteMessage(): string {
+		const t = this.separationDeleteTarget;
+		if (!t) return '';
+		const base = 'Delete the separation profile \u201C' + t.profileName + '\u201D? It will no longer be listed for this document (Add Separation brings it back).';
+		if (!t.filePath) return base;
+		const fileName = t.filePath.split(/[\\/]/).pop() || t.filePath;
+		return base + ' The generated separation file \u201C' + fileName + '\u201D will also be DELETED from disk.';
+	}
+
+	confirmDeleteSeparationGroup(): void {
+		const target = this.separationDeleteTarget;
+		this.separationDeleteTarget = null;
+		if (!target) return;
+		/*
+		 * Delete = remove any manual XMP entries for the profile AND suppress the profile for this
+		 * document. Suppression is what makes deletion stick for Excel-derived groups (0 XMP entries
+		 * is a NORMAL outcome for those, not a failure); the entry removal keeps the XMP tidy for
+		 * manually added ones.
+		 */
+		const deleteFileFirst: Promise<string> = target.filePath
+			? this.controller.deleteSeparationFileFromDisk(target.filePath).then((r: any) => (r?.success ? '' : (r?.error || 'Unknown error')))
+			: Promise.resolve('');
+		deleteFileFirst
+			.then((fileError: string) => {
+				if (fileError) {
+					/* File deletion failing must stop the whole delete — suppressing the row while the
+					   file survives on disk would hide a real separation. */
+					this.reportFailure('separation-delete', 'Could not delete the separation file: ' + fileError);
+					throw new Error('__handled__');
+				}
+			})
+			.then(() => this.controller
+				.removeSeparationProfileDataEntry({ graphicName: target.graphicName, profileName: target.profileName })
+				.catch(() => ({ removed: 0 })))
+			.then((res: any) =>
+				this.controller
+					.setSeparationProfileSuppressed(target.profileName, true)
+					.then((sup: any) => ({ removed: res?.removed || 0, sup }))
+			)
+			.then(({ removed, sup }: any) => {
+				if (sup?.success) {
+					this.leapSepsLog.logInfo(
+						'Separations',
+						'Deleted separation group ' + target.profileName +
+						' (suppressed for this document; ' + removed + ' XMP entr' + (removed === 1 ? 'y' : 'ies') + ' removed)'
+					);
+					this.suppressedProfiles.push(target.profileName);
+					this.separations = this.filterSuppressedGroups(this.separations);
+					this.cdr.detectChanges();
+					this.loadSeparationPaths();
+				} else {
+					this.reportFailure('separation-delete', 'Could not delete the separation: ' + (sup?.error || 'Unknown error'));
+				}
+			})
+			.catch((err: any) => {
+				if (err?.message !== '__handled__') {
+					this.reportFailure('separation-delete', 'Could not delete the separation: ' + (err?.message || err));
+				}
+			});
+	}
+
+	cancelDeleteSeparationGroup(): void {
+		this.separationDeleteTarget = null;
+		this.cdr.detectChanges();
+	}
+
 	handleSeparationMenuClick(item: string, separationId: number, graphicName: string): void {
 		this.leapSepsLog.logClick('Separation menu: ' + item, { separationId, graphicName });
+		if (item === 'Delete') {
+			const separation = this.separations.find((sep) => sep.id === separationId);
+			if (separation) {
+				this.separationDeleteTarget = {
+					separationId,
+					graphicName,
+					profileName: separation.profile,
+					filePath: this.getSeparationPath(separation, graphicName) || ''
+				};
+				this.cdr.detectChanges();
+			}
+			return;
+		}
 		if (this.isRunningInBrowser) {
 			return;
 		}
@@ -1382,6 +1748,27 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 		if (item === 'Edit') {
 			this.openSeparationActionDialog('edit-new', graphicName, separation, false);
 		}
+	}
+
+	/*
+	 * Styles a manual profile-add is FOR: the codes currently showing "Unknown Profile" on this
+	 * graphic. Falls back to the graphic's full style set when nothing is missing (adding a second
+	 * profile on purpose) — never the whole Styles.xlsx catalog.
+	 */
+	get addSeparationTargetStyleCodes(): string[] {
+		const missing = new Set<string>();
+		const all = new Set<string>();
+		for (const sep of this.separations) {
+			for (const sc of sep.styles || []) {
+				const code = String(sc || '').trim();
+				if (!code) continue;
+				all.add(code);
+				if (this.hasUnknownProfile(sep) || this.isProfileMissingInSettings(sep)) {
+					missing.add(code);
+				}
+			}
+		}
+		return Array.from(missing.size > 0 ? missing : all);
 	}
 
 	async handleAddSeparation(graphicName: string): Promise<void> {
@@ -1466,6 +1853,86 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 		this.cdr.detectChanges();
 	}
 
+	// ----- TEAMOUT-WIDE MANUAL STYLE->PROFILE DECISIONS — PARKED (2026-08-25) -----
+	// Fully built (compiles clean); disabled on user decision until scheduled.
+	// Re-enable: uncomment this block, the two call sites marked "TEAMOUT-SCOPE PERSISTENCE — parked",
+	// and the scope radios in add-separation-dialog.component.html. Design: docs/TODO.md "Teamout profile overrides".
+	// 	/* ----- Teamout-wide manual style->profile decisions ----- */
+
+	// 	/*
+	// 	 * Overrides live in ONE json at the job root (the folder that contains 01 TEAMOUTS), keyed by
+	// 	 * style code — so a decision made once ("991N is Fanatics-Plastisol") applies to every file of
+	// 	 * the teamout, exactly like the user asked. Read best-effort on every separations load and merged
+	// 	 * over the Styles.xlsx map (an explicit user decision wins over the sheet).
+	// 	 */
+	// 	private teamoutOverridesPath(): string {
+	// 		try {
+	// 			const req = (window as any).cep_node?.require;
+	// 			if (!req || !this.versionDocumentPath) return '';
+	// 			const fs = req('fs');
+	// 			const path = req('path');
+	// 			let dir = path.dirname(String(this.versionDocumentPath));
+	// 			for (let up = 0; up < 12; up++) {
+	// 				if (fs.existsSync(path.join(dir, '01 TEAMOUTS'))) {
+	// 					return path.join(dir, 'style_profile_overrides.json');
+	// 				}
+	// 				const parent = path.dirname(dir);
+	// 				if (!parent || parent === dir) break;
+	// 				dir = parent;
+	// 			}
+	// 		} catch (e) { /* best-effort */ }
+	// 		return '';
+	// 	}
+
+	// 	private readTeamoutProfileOverrides(): { [styleCode: string]: string } {
+	// 		try {
+	// 			const req = (window as any).cep_node?.require;
+	// 			const file = this.teamoutOverridesPath();
+	// 			if (!req || !file) return {};
+	// 			const fs = req('fs');
+	// 			if (!fs.existsSync(file)) return {};
+	// 			const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+	// 			return parsed && typeof parsed === 'object' ? parsed : {};
+	// 		} catch (e) {
+	// 			return {};
+	// 		}
+	// 	}
+
+	// 	private writeTeamoutProfileOverrides(styleCodes: string[], profileName: string): void {
+	// 		try {
+	// 			const req = (window as any).cep_node?.require;
+	// 			const file = this.teamoutOverridesPath();
+	// 			if (!req || !file) {
+	// 				this.leapSepsLog.logWarn('Separations', 'Teamout override not saved - job root not found from ' + (this.versionDocumentPath || '(no doc)'));
+	// 				return;
+	// 			}
+	// 			const fs = req('fs');
+	// 			const current = this.readTeamoutProfileOverrides();
+	// 			styleCodes.forEach((sc) => { current[String(sc).trim()] = profileName; });
+	// 			fs.writeFileSync(file, JSON.stringify(current, null, 2), 'utf8');
+	// 			this.leapSepsLog.logInfo('Separations', 'Teamout profile override saved: ' + styleCodes.join(', ') + ' -> ' + profileName + ' (' + file + ')');
+	// 		} catch (e: any) {
+	// 			this.leapSepsLog.logError('Separations', 'Teamout override write failed: ' + (e?.message || e));
+	// 		}
+	// 	}
+
+	// 	/* Merge decisions over the Styles.xlsx map — normalized on style code, override wins. */
+	// 	private applyTeamoutOverrides(profileMap: { [k: string]: string }, styleCodes: string[]): void {
+	// 		const overrides = this.readTeamoutProfileOverrides();
+	// 		const norm = (v: string) => String(v || '').toUpperCase().replace(/[\s\u00A0]+/g, '');
+	// 		const byNorm: { [k: string]: string } = {};
+	// 		Object.keys(overrides).forEach((k) => { byNorm[norm(k)] = overrides[k]; });
+	// 		let applied = 0;
+	// 		styleCodes.forEach((sc) => {
+	// 			const hit = byNorm[norm(sc)];
+	// 			if (hit) { profileMap[sc] = hit; applied++; }
+	// 		});
+	// 		if (applied > 0) {
+	// 			console.log('[Separations] Applied teamout profile overrides for', applied, 'style code(s)');
+	// 		}
+	// 	}
+
+
 	async confirmAddSeparationDialog(result: AddSeparationDialogResult): Promise<void> {
 		console.log('[Separations] confirmAddSeparationDialog invoked', {
 			graphicName: this.addSeparationDialogGraphicName,
@@ -1482,6 +1949,21 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 			});
 			this.cancelAddSeparationDialog();
 			return;
+		}
+
+		/* TEAMOUT-SCOPE PERSISTENCE — parked (2026-08-25), see docs/TODO.md "Teamout profile overrides".
+		if (result?.scope === 'teamout') {
+			this.writeTeamoutProfileOverrides(styleCodes, profileName);
+		}
+		*/
+
+		/* Adding a profile back clears its per-document suppression — otherwise the new group would be
+		   filtered out on the very next load and the add would look like it did nothing. */
+		if (this.isProfileSuppressed(profileName)) {
+			this.suppressedProfiles = this.suppressedProfiles.filter(
+				(prof) => String(prof || '').trim().toUpperCase() !== profileName.trim().toUpperCase()
+			);
+			this.controller.setSeparationProfileSuppressed(profileName, false).catch(() => { /* best-effort */ });
 		}
 
 		/* Standalone: persist as another LEAPStandaloneJobs entry, not a LEAP XMP row. */

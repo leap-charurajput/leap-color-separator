@@ -530,6 +530,136 @@ function placeAndEmbedGraphicAI(sepDoc, graphicAIPath, graphicName) {
 		return false;
 	}
 }
+/*
+ * Place the version document's LIVE art for a graphic into the SEP document — the "Prepare for Seps"
+ * source. Mirrors placeAndEmbedGraphicAI step for step (copy, paste into SIZED_GRAPHICS, group, name
+ * = graphic, centre-top align to SEP_ART, prepare, overprint off) so Generate runs on an identical
+ * structure; the ONLY difference is where the art comes from: LIVE_ART/GRAPHIC:<name> of the open
+ * version document instead of the 02 GRAPHICS .ai on disk. BOUNDS:<name> stays behind — it is a
+ * guide, not art.
+ *
+ * Returns { success, error?, itemCount }. Never closes or saves the version document.
+ */
+function placeLiveArtGraphicIntoSepDoc(versionDoc, sepDoc, graphicName) {
+	var out = { success: false, error: "", itemCount: 0 };
+	try {
+		if (!versionDoc || !sepDoc || !graphicName) {
+			out.error = "Missing document or graphic name";
+			return out;
+		}
+		var liveArt = null;
+		try { liveArt = versionDoc.layers.getByName("LIVE_ART"); } catch (eLa) { liveArt = null; }
+		if (!liveArt) {
+			out.error = "LIVE_ART layer not found in the version document";
+			return out;
+		}
+		var graphicLayer = null;
+		var wanted = ("GRAPHIC:" + String(graphicName)).toUpperCase();
+		for (var i = 0; i < liveArt.layers.length; i++) {
+			var cand = liveArt.layers[i];
+			if (cand && cand.name && String(cand.name).toUpperCase() === wanted) { graphicLayer = cand; break; }
+		}
+		if (!graphicLayer) {
+			out.error = "GRAPHIC:" + graphicName + " sublayer not found under LIVE_ART";
+			return out;
+		}
+
+		/* SEP doc targets — same lookups as placeAndEmbedGraphicAI. */
+		var sizedArtLayer;
+		try { sizedArtLayer = sepDoc.layers.getByName("SIZED_ART"); } catch (e1) { out.error = "SIZED_ART layer not found in SEP document"; return out; }
+		var sizedGraphicsLayer;
+		try { sizedGraphicsLayer = sizedArtLayer.layers.getByName("SIZED_GRAPHICS"); }
+		catch (e2) { sizedGraphicsLayer = sizedArtLayer.layers.add(); sizedGraphicsLayer.name = "SIZED_GRAPHICS"; }
+		var sepArtGuide = findPageItemByName(sizedArtLayer, "SEP_ART") || findPageItemByName(sepDoc, "SEP_ART");
+		if (!sepArtGuide) { out.error = "SEP_ART guide not found in SEP document"; return out; }
+		var sepArtBounds = sepArtGuide.geometricBounds;
+
+		/* Select everything on GRAPHIC:<name> (unlock/show first so selection can reach it). */
+		app.activeDocument = versionDoc;
+		var wasLocked = graphicLayer.locked, wasHidden = !graphicLayer.visible;
+		try { graphicLayer.locked = false; graphicLayer.visible = true; } catch (eLk) { }
+		var liveWasLocked = liveArt.locked, liveWasHidden = !liveArt.visible;
+		try { liveArt.locked = false; liveArt.visible = true; } catch (eLk2) { }
+		versionDoc.selection = null;
+		var count = 0;
+		for (var p = 0; p < graphicLayer.pageItems.length; p++) {
+			try {
+				var it = graphicLayer.pageItems[p];
+				if (it.locked) it.locked = false;
+				if (it.hidden) it.hidden = false;
+				it.selected = true;
+				count++;
+			} catch (eSel) { }
+		}
+		if (count === 0) {
+			try { graphicLayer.locked = wasLocked; graphicLayer.visible = !wasHidden; liveArt.locked = liveWasLocked; liveArt.visible = !liveWasHidden; } catch (eR) { }
+			out.error = "GRAPHIC:" + graphicName + " has no artwork";
+			return out;
+		}
+		app.copy();
+		versionDoc.selection = null;
+		try { graphicLayer.locked = wasLocked; graphicLayer.visible = !wasHidden; liveArt.locked = liveWasLocked; liveArt.visible = !liveWasHidden; } catch (eR2) { }
+
+		/* Paste into the SEP doc exactly as the 02 GRAPHICS path does. */
+		app.activeDocument = sepDoc;
+		app.preferences.setBooleanPreference('layers/pastePreserve', false);
+		sepDoc.activeLayer = sizedGraphicsLayer;
+		app.paste();
+		if (sepDoc.selection.length > 0) {
+			app.executeMenuCommand("group");
+			var pastedGroup = sepDoc.selection && sepDoc.selection.length ? sepDoc.selection[0] : null;
+			if (!pastedGroup) {
+				/* Selection-free re-acquire (the same quirk splitColors guards against). */
+				try { pastedGroup = sizedGraphicsLayer.pageItems[0]; } catch (eTop) { pastedGroup = null; }
+			}
+			if (pastedGroup) {
+				pastedGroup.name = graphicName;
+				var currentBounds = pastedGroup.geometricBounds;
+				var currentCenterX = currentBounds[0] + ((currentBounds[2] - currentBounds[0]) / 2);
+				var sepArtWidth = sepArtBounds[2] - sepArtBounds[0];
+				var targetCenterX = sepArtBounds[0] + (sepArtWidth / 2);
+				var targetTop = sepArtBounds[1];
+				pastedGroup.translate(targetCenterX - currentCenterX, targetTop - currentBounds[1]);
+				prepareSizedArtGraphicForProcessing(sepDoc, pastedGroup);
+				setFillOverprintOnContainer(pastedGroup, false);
+			}
+		}
+		sepDoc.selection = null;
+		out.success = true;
+		out.itemCount = count;
+		return out;
+	} catch (e) {
+		out.error = e.message || String(e);
+		return out;
+	}
+}
+
+/* Two-stage separation status, stamped on the SEP document's XMP. */
+var SEP_STATUS_FIELD = "LEAPSeparationStatus";
+var SEP_STATUS_PREPARED = "preparedForSeps";
+var SEP_STATUS_SEPARATED = "separated";
+
+function setSeparationStatusOnDoc(doc, status) {
+	try {
+		var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
+		if (!xmp.isXmpCreated) return false;
+		xmp.setStructField(SEP_STATUS_FIELD, String(status), false, false);
+		xmp.commit();
+		return true;
+	} catch (e) { return false; }
+}
+
+function getSeparationStatusFromDoc(doc) {
+	try {
+		var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
+		if (xmp.isXmpCreated && xmp.doesStructFieldExist(SEP_STATUS_FIELD)) {
+			var v = xmp.getStructField(SEP_STATUS_FIELD, false);
+			return v == null ? "" : String(v).replace(/^\s+|\s+$/g, "");
+		}
+	} catch (e) { }
+	return "";
+}
+
 function deriveGraphicAiPathFromPngPath(pngPath) {
 	if (!pngPath) return "";
 	return String(pngPath).replace(/\/PNG\//i, "/AI/").replace(/\.png$/i, ".ai");
@@ -2141,283 +2271,30 @@ function renameFormattedInks(doc, profileMetadata) {
 	return applied;
 }
 
-function handlePerformSeparation(params_string) {
+/*
+ * Shared second half of a separation: from "art is in SIZED_GRAPHICS, document saved" through
+ * splitColors, underbase, second hits, ink renames, SeparatedLayerNames / profile XMP, C#/V#, the
+ * version document's LEAPSeparationProfileData, and the sidecar. Called by the legacy single-shot
+ * flow AND by Generate-from-prepared, so the two can never drift. `ctx` carries exactly the locals
+ * the original inline code used.
+ */
+function finishSeparationOnSepDoc(ctx) {
+	var sepDoc = ctx.sepDoc;
+	var graphicName = ctx.graphicName;
+	var profileMetadata = ctx.profileMetadata;
+	var rootFolder = ctx.rootFolder;
+	var teamOutsFolder = ctx.teamOutsFolder;
+	var originalDocFile = ctx.originalDocFile;
+	var league = ctx.league;
+	var teamCode = ctx.teamCode;
+	var teamJsonPath = ctx.teamJsonPath || "";
+	var nextSeparationVersion = ctx.nextSeparationVersion;
+	var createdAtConfiguredPath = !!ctx.createdAtConfiguredPath;
+	var aiFilePath = ctx.aiFilePath || "";
+	var sepDocPath = ctx.sepDocPath;
+	var graphicAssets = ctx.graphicAssets || { tried: [] };
+	var cadPlacementDebug = ctx.cadPlacementDebug || {};
 	try {
-		var params = JSON.parse(params_string);
-		var graphicName = params.graphicName;
-		var styleCodes = params.styleCodes || [];
-		var profileMetadata = params.profileMetadata || null;
-		var sepsTemplateFileName = params.sepsTemplateFileName || "SEP-GRID-TEMPLATE.ai";
-
-		if (!graphicName) {
-			return JSON.stringify({
-				success: false,
-				error: "Graphic name is required"
-			});
-		}
-		if (!app.documents.length) {
-			return JSON.stringify({
-				success: false,
-				error: "No active document found"
-			});
-		}
-		var activeDoc = app.activeDocument;
-
-		// Pull the Graphics-page "Underbase 2 Swatch" choice from this (version) document's XMP into
-		// profileMetadata so it carries into the separated document and drives the UB2+ plate color.
-		try {
-			if (profileMetadata) {
-				profileMetadata = enrichProfileMetadataWithUnderbase2(profileMetadata, activeDoc);
-			}
-		} catch (ub2ReadErr) { }
-
-		var docFile = new File(activeDoc.fullName);
-		var docName = docFile.name.replace(/\.[^\.]+$/, '');
-		var aiFolder = docFile.parent;
-		var leagueFolder = aiFolder.parent;
-		var teamOutsFolder = leagueFolder.parent;
-		var rootFolder = teamOutsFolder.parent;
-		var templateFile = getTemplateFile(sepsTemplateFileName);
-		if (!templateFile) {
-			var attemptedPath = getTemplateFile.lastAttemptedPath;
-			if (attemptedPath) {
-				return JSON.stringify({
-					success: false,
-					error: "Template file not found at: " + attemptedPath
-				});
-			}
-			return JSON.stringify({
-				success: false,
-				error: "Template file not found. Please verify basePath in logobaseDataPathSettings.json."
-			});
-		}
-		var jsonData = findAndReadJSONFile(docName, leagueFolder);
-		if (!jsonData) {
-			return JSON.stringify({
-				success: false,
-				error: "JSON file not found or invalid for document: " + docName
-			});
-		}
-		/* Captured immediately: later findAndReadJSONFile calls overwrite lastResolvedPath. Recorded in the
-			 sidecar so a reopened separation finds its team JSON without walking up from its own path. */
-		var teamJsonPath = findAndReadJSONFile.lastResolvedPath || "";
-		var league = findValueInJSON(jsonData, "League");
-		var teamCode = findValueInJSON(jsonData, "TeamCode");
-		if (!league || !teamCode) {
-			return JSON.stringify({
-				success: false,
-				error: "League or TeamCode not found in JSON file"
-			});
-		}
-		var originalDoc = activeDoc;
-		var originalDocFile = docFile;
-		if (!profileMetadata) {
-			profileMetadata = {};
-		}
-		var profileNameForVersion = profileMetadata.profileName != null
-			? String(profileMetadata.profileName)
-			: "";
-		/*
-		 * Version basis is the FLAT sidecar registry, max'd with the team document's XMP. The old
-		 * XMP-only basis was fine while every separation lived at a derived path, but a separation written
-		 * to an arbitrary Export-Settings location is no longer discoverable that way — without the
-		 * registry a re-separation would restart at V1 and overwrite the previous file.
-		 */
-		var nextSeparationVersion = getNextSeparationVersionFromRegistry(
-			rootFolder,
-			activeDoc,
-			league,
-			teamCode,
-			graphicName,
-			profileNameForVersion,
-			profileMetadata.profileCode
-		);
-		profileMetadata.separationVersion = nextSeparationVersion;
-		appendLeapSepLog(
-			"Separation version for this run: " + formatSeparationVersionLabel(nextSeparationVersion)
-		);
-		// Try BodyColor from active document XMP first (match React getBodyColor)
-		var bodyColorFromXMP = null;
-		try {
-			var origXmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", originalDoc);
-			if (origXmp.isXmpCreated && origXmp.doesStructFieldExist("BodyColor")) {
-				bodyColorFromXMP = origXmp.getStructField("BodyColor", true);
-			}
-		} catch (e) { }
-		/*
-		 * Separation output location. BOTH the folder and the name now come from the Export Settings
-		 * "Separation file path" pattern, so the separated .ai is created where the user configured it
-		 * and no duplicate copy is needed at export time.
-		 *
-		 * The legacy 09 SEPARATIONS/[League]/[Team]/[Graphic]/ tree is built LAZILY: only when a relative
-		 * pattern needs it as its base, or when folder resolution fails and we fall back to it. That keeps
-		 * empty derived folders from being created for jobs that write elsewhere.
-		 */
-		var legacyGraphicFolder = null;
-		function getLegacyGraphicFolder() {
-			if (!legacyGraphicFolder) {
-				legacyGraphicFolder = createSeparationsFolders(rootFolder, league, teamCode, graphicName);
-			}
-			return legacyGraphicFolder;
-		}
-
-		var separationFileName = "";
-		try {
-			if (profileMetadata && profileMetadata.separationFileNamePattern) {
-				separationFileName = resolveSeparationFileNameFromPattern(profileMetadata.separationFileNamePattern, jsonData, profileMetadata, docName);
-			}
-		} catch (eSepName) { separationFileName = ""; }
-
-		var separationTargetFolder = null;
-		try {
-			if (profileMetadata && profileMetadata.separationFileNamePattern) {
-				separationTargetFolder = resolveSeparationFolderFromPattern(
-					profileMetadata.separationFileNamePattern,
-					jsonData,
-					profileMetadata,
-					rootFolder,
-					getLegacyGraphicFolder,
-					docName
-				);
-			}
-		} catch (eSepFolder) { separationTargetFolder = null; }
-		/* Remembered so the sidecar can tell the export-time copy to stand down. */
-		var createdAtConfiguredPath = !!separationTargetFolder;
-		if (!separationTargetFolder) {
-			separationTargetFolder = getLegacyGraphicFolder();
-		}
-		appendLeapSepLog(
-			"Separation output folder: " + separationTargetFolder.fsName +
-			(createdAtConfiguredPath ? " (from Export Settings pattern)" : " (legacy structure)")
-		);
-
-		var sepDoc = copyAndPrepareSEPDocument(templateFile, separationTargetFolder, docName, jsonData, styleCodes, profileMetadata, bodyColorFromXMP, separationFileName);
-		if (!sepDoc) {
-			return JSON.stringify({
-				success: false,
-				error: "Failed to create SEP document"
-			});
-		}
-		var sepDocFile = new File(sepDoc.fullName);
-		var sepDocPath = sepDocFile.fsName;
-
-		/*
-		 * Record the reopen context NOW, not only on success.
-		 *
-		 * The full sidecar write happens at the end of this handler; a run that throws midway (plate
-		 * splitting, ink lookup, …) used to leave a saved separated .ai with NO context at all, and every
-		 * later lookup then fell back to counting parent folders — which is wrong for a separation written
-		 * to a configured path, and surfaced as "JSON folder not found: …/02 GRAPHICS/<job> ASSETS/CF/JSON".
-		 * This early write costs one small file; the write at the end overwrites it with the complete
-		 * descriptor (version, profile, …) once the separation actually finishes.
-		 */
-		try {
-			var earlyContext = writeSeparationSidecar({
-				jobRoot: rootFolder && rootFolder.fsName ? rootFolder.fsName : "",
-				teamoutsRoot: teamOutsFolder && teamOutsFolder.fsName ? teamOutsFolder.fsName : "",
-				separationsRoot: rootFolder && rootFolder.fsName ? (rootFolder.fsName + "/09 SEPARATIONS") : "",
-				teamJsonPath: teamJsonPath,
-				sourceDocumentPath: originalDocFile && originalDocFile.fsName ? originalDocFile.fsName : "",
-				league: league,
-				teamCode: teamCode,
-				graphicName: graphicName,
-				profileName: profileMetadata ? profileMetadata.profileName : "",
-				profileCode: profileMetadata ? profileMetadata.profileCode : "",
-				separationFilePath: sepDocPath,
-				createdAtConfiguredPath: createdAtConfiguredPath
-			});
-			if (earlyContext) {
-				persistSeparationSourceContextOnDoc(sepDoc, earlyContext.data);
-				appendLeapSepLog(
-					"Separation sidecar (early): beside=" + (earlyContext.besideWritten ? "ok" : "FAILED") +
-					" registry=" + (earlyContext.registryWritten ? "ok" : "FAILED")
-				);
-			}
-		} catch (eEarlySidecar) {
-			appendLeapSepLog("Separation sidecar (early) error: " + (eEarlySidecar.message || eEarlySidecar));
-		}
-
-		appendLeapSepLog(
-			"handlePerformSeparation: graphic=" +
-			graphicName +
-			" league=" +
-			league +
-			" team=" +
-			teamCode +
-			" doc=" +
-			docName
-		);
-
-		var graphicAssets = resolveGraphicAssetPaths(
-			rootFolder,
-			league,
-			graphicName,
-			docName,
-			profileMetadata,
-			jsonData
-		);
-		var aiFilePath = graphicAssets.aiFilePath;
-		var pngFilePath = graphicAssets.pngFilePath;
-		appendLeapSepLog(
-			"graphicAssets: ai=" +
-			(graphicAssets.aiFilePath ? "yes" : "no") +
-			" png=" +
-			(graphicAssets.pngFilePath ? "yes" : "no")
-		);
-
-		var cadPngResolved = resolveCadPngPath(
-			rootFolder,
-			docFile.parent,
-			docName,
-			league,
-			teamCode,
-			graphicName
-		);
-		var cadPngPath = cadPngResolved.path;
-		var cadPlacementDebug = placeCadPngInDocument(sepDoc, cadPngPath);
-		cadPlacementDebug.cadPngSource = cadPngResolved.source;
-		cadPlacementDebug.cadPngTriedPaths = cadPngResolved.triedPaths;
-
-		if (!aiFilePath) {
-			try {
-				unloadLEAPColorSepsActions();
-			} catch (unloadErr0) { }
-			var missingAiMsg =
-				"Graphic AI not found for \"" +
-				graphicName +
-				"\". Checked 02 GRAPHICS/" +
-				league +
-				"/ (folders: " +
-				getGraphicFolderNamesToTry(graphicName, profileMetadata, jsonData).join(", ") +
-				").";
-			appendLeapSepLog(missingAiMsg + " tried=" + graphicAssets.tried.join(" | "));
-			return JSON.stringify({
-				success: false,
-				error: missingAiMsg,
-				graphicAssets: graphicAssets,
-				cadPlacementDebug: cadPlacementDebug
-			});
-		}
-
-		unlockSizedGraphicsContents(sepDoc);
-		var pngPlaced = placeGraphicInDocument(sepDoc, pngFilePath, aiFilePath);
-		var aiPlaced = placeAndEmbedGraphicAI(sepDoc, aiFilePath, graphicName);
-		if (!aiPlaced) {
-			try {
-				unloadLEAPColorSepsActions();
-			} catch (unloadErr1) { }
-			appendLeapSepLog("placeAndEmbedGraphicAI failed: " + aiFilePath);
-			return JSON.stringify({
-				success: false,
-				error: "Graphic AI could not be placed: " + aiFilePath,
-				aiFilePath: aiFilePath,
-				pngFilePath: pngFilePath,
-				pngPlaced: pngPlaced,
-				graphicAssets: graphicAssets,
-				cadPlacementDebug: cadPlacementDebug
-			});
-		}
-
 		sepDoc.save();
 		loadLEAPColorSepsActions();
 		var splitColorsRaw = splitColors(graphicName);
@@ -2482,6 +2359,8 @@ function handlePerformSeparation(params_string) {
 			if (layerNames.length > 0) {
 				var sepXmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", sepDoc);
 				if (sepXmp.isXmpCreated) {
+					/* Both flows end here with plates on the page: mark the document separated. */
+					sepXmp.setStructField(SEP_STATUS_FIELD, SEP_STATUS_SEPARATED, false, false);
 					sepXmp.setStructField("SeparatedLayerNames", layerNames, true, false);
 					// Force UI to rebuild rows from live layer list (includes ink "… 2" second hits).
 					sepXmp.setStructField("LEAPSeparationColorsData", [], true, false);
@@ -2693,6 +2572,665 @@ function handlePerformSeparation(params_string) {
 			response.savePathsDebug = savePathsDebug;
 		}
 		return JSON.stringify(response);
+	} catch (e) {
+		return JSON.stringify({
+			success: false,
+			error: e.message || e.toString()
+		});
+	}
+}
+
+/*
+ * Flatten the user-edited art in SIZED_GRAPHICS right before splitting — the Generate-time
+ * equivalent of what the 02 GRAPHICS EXPORT pipeline used to do at export time
+ * (applyOutlineToTextFrame + expandObject), which is why art from 02 GRAPHICS always arrived
+ * outlined + expanded while LIVE art (and anything the user added while editing the prepared
+ * document) is raw: live text, appearances, live effects, strokes.
+ *
+ * Steps: outline text, expand appearance/object/strokes, then UNCONDITIONALLY consolidate whatever
+ * is left into ONE item named <graphicName>. The consolidate is what makes the full expand safe:
+ * Expand replaces items and drops names, and splitColors resolves its subject by name (falling back
+ * to pageItems[0], a SINGLE item) — regroup + rename hands it a deterministic subject either way.
+ * Mirrors the standalone flow's pre-split flatten, plus the full expandObject the old export did.
+ */
+/*
+ * Delete "Logo-Var-*" groups from a container (recursive, case-insensitive prefix). LIVE art carries
+ * logo VARIANT groups the artist keeps for reference; they are not part of the printed graphic and
+ * must not become plates. Removed at Generate time, right before outline/expand — so they are still
+ * visible while the user edits the prepared document, but never reach splitColors.
+ */
+function removeLogoVariantGroups(container) {
+	var removed = 0;
+	try {
+		if (!container || !container.pageItems) return 0;
+		for (var i = container.pageItems.length - 1; i >= 0; i--) {
+			var item = container.pageItems[i];
+			var name = "";
+			try { name = String(item.name || ""); } catch (eN) { name = ""; }
+			if (/^logo-var-/i.test(name)) {
+				try {
+					if (item.locked) item.locked = false;
+					if (item.hidden) item.hidden = false;
+					item.remove();
+					removed++;
+					continue;
+				} catch (eRm) { }
+			}
+			/* Recurse into groups the item may nest variants inside. */
+			try {
+				if (item.pageItems && item.pageItems.length > 0) {
+					removed += removeLogoVariantGroups(item);
+				}
+			} catch (eRec) { }
+		}
+	} catch (e) { }
+	return removed;
+}
+
+function expandPreparedArtForSeparation(sepDoc, graphicName) {
+	var report = { itemsBefore: -1, itemsAfter: -1, error: "" };
+	try {
+		app.activeDocument = sepDoc;
+		var sg = sepDoc.layers.getByName("SIZED_ART").layers.getByName("SIZED_GRAPHICS");
+		try { unlockSizedGraphicsContents(sepDoc); } catch (eUnl) { }
+		report.itemsBefore = sg.pageItems ? sg.pageItems.length : -1;
+		if (report.itemsBefore === 0) {
+			report.error = "SIZED_GRAPHICS is empty - nothing to expand";
+			return report;
+		}
+
+		/* Groups named Logo-Var-* are reference variants, not printable art — remove them. */
+		var variantsRemoved = removeLogoVariantGroups(sg);
+		if (variantsRemoved > 0) {
+			appendLeapSepLog("expandPreparedArt: removed " + variantsRemoved + " Logo-Var-* group(s)");
+			if (!sg.pageItems || sg.pageItems.length === 0) {
+				report.error = "SIZED_GRAPHICS is empty after removing Logo-Var-* groups - nothing to separate";
+				return report;
+			}
+		}
+
+		sepDoc.selection = null;
+		try { sg.hasSelectedArtwork = true; } catch (eSel) { }
+		if (sepDoc.selection && sepDoc.selection.length) {
+			/* Same sequence as utilities.jsx expandObject(), applied to the ORIGINAL art on purpose —
+			   the old export pipeline did exactly this to the 02 GRAPHICS file. */
+			try { app.executeMenuCommand("outline"); } catch (eOutline) { }
+			try { app.executeMenuCommand("Live Outline Object"); } catch (eLoo) { }
+			try { app.executeMenuCommand("Live Outline Stroke"); } catch (eLos) { }
+			try { app.executeMenuCommand("expandStyle"); } catch (eExp) { }
+		}
+		sepDoc.selection = null;
+		app.redraw();
+
+		/* Consolidate to one named item (see header comment). */
+		var sgFix = sepDoc.layers.getByName("SIZED_ART").layers.getByName("SIZED_GRAPHICS");
+		var count = sgFix.pageItems.length;
+		if (count === 0) {
+			report.error = "SIZED_GRAPHICS is empty after expand";
+			return report;
+		}
+		if (count > 1) {
+			sepDoc.selection = null;
+			sgFix.hasSelectedArtwork = true;
+			app.executeMenuCommand("group");
+			app.redraw();
+		}
+		sepDoc.selection = null;
+		if (sgFix.pageItems.length > 0) {
+			sgFix.pageItems[0].name = graphicName;
+		}
+		report.itemsAfter = sgFix.pageItems.length;
+		appendLeapSepLog(
+			"expandPreparedArt: " + report.itemsBefore + " item(s) outlined+expanded -> " +
+			report.itemsAfter + " named '" + graphicName + "'"
+		);
+		return report;
+	} catch (e) {
+		report.error = e.message || String(e);
+		appendLeapSepLog("expandPreparedArt error: " + report.error);
+		return report;
+	}
+}
+
+/*
+ * GENERATE stage: run on the PREPARED SEP document/*
+ * GENERATE stage: run on the PREPARED SEP document (the active document). Everything the shared tail
+ * needs was recorded by Prepare in LEAPPreparedContext + SeparationProfileMetadata, so no version
+ * document has to be open and nothing is derived from folder depth.
+ */
+function runGenerateOnPreparedDoc(sepDoc, params, profileMetadataFromPanel) {
+	var ctxXmp = null;
+	try {
+		var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", sepDoc);
+		if (xmp.isXmpCreated && xmp.doesStructFieldExist("LEAPPreparedContext")) {
+			ctxXmp = xmp.getStructField("LEAPPreparedContext", true);
+		}
+	} catch (eCtx) { ctxXmp = null; }
+	if (!ctxXmp || !ctxXmp.graphicName) {
+		return JSON.stringify({
+			success: false,
+			error: "Prepared context missing on this document. Run Prepare for Seps again from the version document."
+		});
+	}
+	/* Profile metadata: the document's own copy (stamped at Prepare, possibly edited since via the
+	   Plates UI) wins over what the panel re-sent, which may be stale for a reopened document. */
+	var profileMetadata = profileMetadataFromPanel || null;
+	try {
+		var metaXmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", sepDoc);
+		if (metaXmp.isXmpCreated && metaXmp.doesStructFieldExist("SeparationProfileMetadata")) {
+			var stamped = metaXmp.getStructField("SeparationProfileMetadata", true);
+			if (stamped && typeof stamped === "object") profileMetadata = stamped;
+		}
+	} catch (eMeta) { }
+	if (!profileMetadata) profileMetadata = {};
+	profileMetadata.separationVersion = ctxXmp.separationVersion || profileMetadata.separationVersion || 1;
+
+	var graphicName = String(ctxXmp.graphicName);
+	var sepDocFile = new File(sepDoc.fullName);
+	var sepDocPath = sepDocFile.fsName;
+	var originalDocFile = ctxXmp.sourceDocumentPath ? new File(String(ctxXmp.sourceDocumentPath)) : sepDocFile;
+	var rootFolder = ctxXmp.jobRoot ? new Folder(String(ctxXmp.jobRoot)) : sepDocFile.parent;
+	var teamOutsFolder = ctxXmp.teamoutsRoot ? new Folder(String(ctxXmp.teamoutsRoot)) : null;
+
+	appendLeapSepLog(
+		"Generate (from prepared): graphic=" + graphicName + " league=" + (ctxXmp.league || "") +
+		" team=" + (ctxXmp.teamCode || "") + " doc=" + sepDocFile.name
+	);
+
+	/* The art is whatever the user left in SIZED_GRAPHICS. Make sure it is unlocked and the document
+	   is saved, exactly as the single-shot flow does right before splitColors. */
+	try { app.activeDocument = sepDoc; } catch (eAct) { }
+	try { unlockSizedGraphicsContents(sepDoc); } catch (eUnlock) { }
+
+	/* Outline + expand the (possibly edited) live art — the 02 GRAPHICS export used to guarantee this
+	   shape at export time; prepared LIVE art must get the same treatment or plates come out wrong. */
+	var expandReport = expandPreparedArtForSeparation(sepDoc, graphicName);
+	if (expandReport.error) {
+		return JSON.stringify({
+			success: false,
+			error: "Could not expand the prepared art: " + expandReport.error,
+			graphicName: graphicName,
+			separatedDocumentPath: sepDocPath
+		});
+	}
+
+	var result = finishSeparationOnSepDoc({
+		sepDoc: sepDoc,
+		graphicName: graphicName,
+		profileMetadata: profileMetadata,
+		rootFolder: rootFolder,
+		teamOutsFolder: teamOutsFolder,
+		originalDocFile: originalDocFile,
+		league: ctxXmp.league || "",
+		teamCode: ctxXmp.teamCode || "",
+		teamJsonPath: ctxXmp.teamJsonPath || "",
+		nextSeparationVersion: profileMetadata.separationVersion,
+		createdAtConfiguredPath: !!ctxXmp.createdAtConfiguredPath,
+		aiFilePath: ctxXmp.aiFilePath || "",
+		sepDocPath: sepDocPath,
+		graphicAssets: { aiFilePath: ctxXmp.aiFilePath || "", pngFilePath: ctxXmp.pngFilePath || "", tried: [] },
+		cadPlacementDebug: {}
+	});
+
+	/* Flip the status only on success so a failed Generate can simply be retried. */
+	try {
+		var parsed = JSON.parse(result);
+		if (parsed && parsed.success) {
+			try { app.activeDocument = sepDoc; } catch (eAct2) { }
+			setSeparationStatusOnDoc(sepDoc, SEP_STATUS_SEPARATED);
+			try { sepDoc.save(); } catch (eSave) { }
+			parsed.stage = "separated";
+			return JSON.stringify(parsed);
+		}
+	} catch (eParse) { }
+	return result;
+}
+
+/*
+ * Two-stage separation.
+ *
+ *   Prepare for Seps  -> runSeparationStaged(params, "prepare")
+ *       On the VERSION document. Creates the SEP document from the template at the configured
+ *       path, places the graphic's LIVE art (LIVE_ART/GRAPHIC:<name>, not the 02 GRAPHICS .ai) into
+ *       SIZED_GRAPHICS named <name>, saves, stamps XMP LEAPSeparationStatus = "preparedForSeps",
+ *       and leaves the SEP document open so the user can edit the art.
+ *   Generate Separations -> runSeparationStaged(params, "generate")
+ *       On the PREPARED SEP document. Runs splitColors + underbase + second hits + grid + XMP/sidecar
+ *       finalisation on the art as the user left it, and flips the status to "separated".
+ *   "full" = the original single-shot flow (02 GRAPHICS art, no edit step). Kept intact for
+ *       reference; the panel no longer calls it — see handlePerformSeparation below.
+ */
+function handlePrepareForSeps(params_string) {
+	return runSeparationStaged(params_string, "prepare");
+}
+
+function handleGenerateFromPrepared(params_string) {
+	return runSeparationStaged(params_string, "generate");
+}
+
+/* Legacy single-shot entry point. NOT used by the panel any more (Generate requires Prepare first);
+   kept so the full flow remains runnable for comparison. */
+function handlePerformSeparation(params_string) {
+	return runSeparationStaged(params_string, "full");
+}
+
+function runSeparationStaged(params_string, stage) {
+	try {
+		var params = JSON.parse(params_string);
+		var graphicName = params.graphicName;
+		var styleCodes = params.styleCodes || [];
+		var profileMetadata = params.profileMetadata || null;
+		var sepsTemplateFileName = params.sepsTemplateFileName || "SEP-GRID-TEMPLATE.ai";
+		stage = stage || "full";
+		var isPrepare = stage === "prepare";
+		var isGenerate = stage === "generate";
+
+		if (!graphicName) {
+			return JSON.stringify({
+				success: false,
+				error: "Graphic name is required"
+			});
+		}
+		if (!app.documents.length) {
+			return JSON.stringify({
+				success: false,
+				error: "No active document found"
+			});
+		}
+		var activeDoc = app.activeDocument;
+
+		/*
+		 * GENERATE stage runs on the PREPARED SEP document, which must be the active document and must
+		 * carry the prepared status. Everything else (version doc, league, team, JSON, folders) is
+		 * recovered from what Prepare recorded on it — see the generate branch further down.
+		 */
+		if (isGenerate) {
+			var preStatus = getSeparationStatusFromDoc(activeDoc);
+			if (preStatus !== SEP_STATUS_PREPARED) {
+				return JSON.stringify({
+					success: false,
+					error: preStatus === SEP_STATUS_SEPARATED
+						? "This separation has already been generated. Use Prepare for Seps on the version document to start again."
+						: "Run Prepare for Seps first — the active document is not a prepared SEP document."
+				});
+			}
+		}
+
+		// Pull the Graphics-page "Underbase 2 Swatch" choice from this (version) document's XMP into
+		// profileMetadata so it carries into the separated document and drives the UB2+ plate color.
+		try {
+			if (profileMetadata && !isGenerate) {
+				profileMetadata = enrichProfileMetadataWithUnderbase2(profileMetadata, activeDoc);
+			}
+		} catch (ub2ReadErr) { }
+
+		if (isGenerate) {
+			return runGenerateOnPreparedDoc(activeDoc, params, profileMetadata);
+		}
+
+		var docFile = new File(activeDoc.fullName);
+		var docName = docFile.name.replace(/\.[^\.]+$/, '');
+		var aiFolder = docFile.parent;
+		var leagueFolder = aiFolder.parent;
+		var teamOutsFolder = leagueFolder.parent;
+		var rootFolder = teamOutsFolder.parent;
+		var templateFile = getTemplateFile(sepsTemplateFileName);
+		if (!templateFile) {
+			var attemptedPath = getTemplateFile.lastAttemptedPath;
+			if (attemptedPath) {
+				return JSON.stringify({
+					success: false,
+					error: "Template file not found at: " + attemptedPath
+				});
+			}
+			return JSON.stringify({
+				success: false,
+				error: "Template file not found. Please verify basePath in logobaseDataPathSettings.json."
+			});
+		}
+		var jsonData = findAndReadJSONFile(docName, leagueFolder);
+		if (!jsonData) {
+			return JSON.stringify({
+				success: false,
+				error: "JSON file not found or invalid for document: " + docName
+			});
+		}
+		/* Captured immediately: later findAndReadJSONFile calls overwrite lastResolvedPath. Recorded in the
+			 sidecar so a reopened separation finds its team JSON without walking up from its own path. */
+		var teamJsonPath = findAndReadJSONFile.lastResolvedPath || "";
+		var league = findValueInJSON(jsonData, "League");
+		var teamCode = findValueInJSON(jsonData, "TeamCode");
+		if (!league || !teamCode) {
+			return JSON.stringify({
+				success: false,
+				error: "League or TeamCode not found in JSON file"
+			});
+		}
+		var originalDoc = activeDoc;
+		var originalDocFile = docFile;
+		if (!profileMetadata) {
+			profileMetadata = {};
+		}
+		var profileNameForVersion = profileMetadata.profileName != null
+			? String(profileMetadata.profileName)
+			: "";
+		/*
+		 * Version basis is the FLAT sidecar registry, max'd with the team document's XMP. The old
+		 * XMP-only basis was fine while every separation lived at a derived path, but a separation written
+		 * to an arbitrary Export-Settings location is no longer discoverable that way — without the
+		 * registry a re-separation would restart at V1 and overwrite the previous file.
+		 */
+		var nextSeparationVersion = getNextSeparationVersionFromRegistry(
+			rootFolder,
+			activeDoc,
+			league,
+			teamCode,
+			graphicName,
+			profileNameForVersion,
+			profileMetadata.profileCode
+		);
+		profileMetadata.separationVersion = nextSeparationVersion;
+		appendLeapSepLog(
+			"Separation version for this run: " + formatSeparationVersionLabel(nextSeparationVersion)
+		);
+		// Try BodyColor from active document XMP first (match React getBodyColor)
+		var bodyColorFromXMP = null;
+		try {
+			var origXmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", originalDoc);
+			if (origXmp.isXmpCreated && origXmp.doesStructFieldExist("BodyColor")) {
+				bodyColorFromXMP = origXmp.getStructField("BodyColor", true);
+			}
+		} catch (e) { }
+		/*
+		 * Separation output location. BOTH the folder and the name now come from the Export Settings
+		 * "Separation file path" pattern, so the separated .ai is created where the user configured it
+		 * and no duplicate copy is needed at export time.
+		 *
+		 * The legacy 09 SEPARATIONS/[League]/[Team]/[Graphic]/ tree is built LAZILY: only when a relative
+		 * pattern needs it as its base, or when folder resolution fails and we fall back to it. That keeps
+		 * empty derived folders from being created for jobs that write elsewhere.
+		 */
+		var legacyGraphicFolder = null;
+		function getLegacyGraphicFolder() {
+			if (!legacyGraphicFolder) {
+				legacyGraphicFolder = createSeparationsFolders(rootFolder, league, teamCode, graphicName);
+			}
+			return legacyGraphicFolder;
+		}
+
+		var separationFileName = "";
+		try {
+			if (profileMetadata && profileMetadata.separationFileNamePattern) {
+				separationFileName = resolveSeparationFileNameFromPattern(profileMetadata.separationFileNamePattern, jsonData, profileMetadata, docName);
+			}
+		} catch (eSepName) { separationFileName = ""; }
+
+		var separationTargetFolder = null;
+		try {
+			if (profileMetadata && profileMetadata.separationFileNamePattern) {
+				separationTargetFolder = resolveSeparationFolderFromPattern(
+					profileMetadata.separationFileNamePattern,
+					jsonData,
+					profileMetadata,
+					rootFolder,
+					getLegacyGraphicFolder,
+					docName
+				);
+			}
+		} catch (eSepFolder) { separationTargetFolder = null; }
+		/* Remembered so the sidecar can tell the export-time copy to stand down. */
+		var createdAtConfiguredPath = !!separationTargetFolder;
+		if (!separationTargetFolder) {
+			separationTargetFolder = getLegacyGraphicFolder();
+		}
+		appendLeapSepLog(
+			"Separation output folder: " + separationTargetFolder.fsName +
+			(createdAtConfiguredPath ? " (from Export Settings pattern)" : " (legacy structure)")
+		);
+
+		/*
+		 * Re-Prepare OVERWRITES the previous SEP document for this graphic (user decision: going back to
+		 * the version file and preparing again replaces the earlier prepare/separation). The template
+		 * copy below overwrites on disk, but if that older SEP document is still OPEN in Illustrator the
+		 * window would be left pointing at a file that changed underneath it — so close it first,
+		 * discarding its changes (they are being replaced by design).
+		 */
+		if (isPrepare) {
+			try {
+				var targetName = "";
+				if (separationFileName && String(separationFileName).replace(/^\s+|\s+$/g, "") !== "") {
+					targetName = String(separationFileName).replace(/^\s+|\s+$/g, "");
+					if (!/\.ai$/i.test(targetName)) targetName += ".ai";
+				} else {
+					targetName = docName + "-SEP-" + (profileMetadata && profileMetadata.profileCode ? profileMetadata.profileCode : "") + ".ai";
+				}
+				var targetPathGuess = separationTargetFolder.fsName + "/" + targetName;
+				for (var od = app.documents.length - 1; od >= 0; od--) {
+					var openDoc = app.documents[od];
+					try {
+						if (openDoc.fullName && openDoc.fullName.fsName === targetPathGuess && openDoc !== activeDoc) {
+							appendLeapSepLog("Prepare for Seps: closing previously prepared document before overwrite: " + targetPathGuess);
+							openDoc.close(SaveOptions.DONOTSAVECHANGES);
+						}
+					} catch (eClose) { }
+				}
+			} catch (eOverwrite) { }
+		}
+
+		var sepDoc = copyAndPrepareSEPDocument(templateFile, separationTargetFolder, docName, jsonData, styleCodes, profileMetadata, bodyColorFromXMP, separationFileName);
+		if (!sepDoc) {
+			return JSON.stringify({
+				success: false,
+				error: "Failed to create SEP document"
+			});
+		}
+		var sepDocFile = new File(sepDoc.fullName);
+		var sepDocPath = sepDocFile.fsName;
+
+		/*
+		 * Record the reopen context NOW, not only on success.
+		 *
+		 * The full sidecar write happens at the end of this handler; a run that throws midway (plate
+		 * splitting, ink lookup, …) used to leave a saved separated .ai with NO context at all, and every
+		 * later lookup then fell back to counting parent folders — which is wrong for a separation written
+		 * to a configured path, and surfaced as "JSON folder not found: …/02 GRAPHICS/<job> ASSETS/CF/JSON".
+		 * This early write costs one small file; the write at the end overwrites it with the complete
+		 * descriptor (version, profile, …) once the separation actually finishes.
+		 */
+		try {
+			var earlyContext = writeSeparationSidecar({
+				jobRoot: rootFolder && rootFolder.fsName ? rootFolder.fsName : "",
+				teamoutsRoot: teamOutsFolder && teamOutsFolder.fsName ? teamOutsFolder.fsName : "",
+				separationsRoot: rootFolder && rootFolder.fsName ? (rootFolder.fsName + "/09 SEPARATIONS") : "",
+				teamJsonPath: teamJsonPath,
+				sourceDocumentPath: originalDocFile && originalDocFile.fsName ? originalDocFile.fsName : "",
+				league: league,
+				teamCode: teamCode,
+				graphicName: graphicName,
+				profileName: profileMetadata ? profileMetadata.profileName : "",
+				profileCode: profileMetadata ? profileMetadata.profileCode : "",
+				separationFilePath: sepDocPath,
+				createdAtConfiguredPath: createdAtConfiguredPath
+			});
+			if (earlyContext) {
+				persistSeparationSourceContextOnDoc(sepDoc, earlyContext.data);
+				appendLeapSepLog(
+					"Separation sidecar (early): beside=" + (earlyContext.besideWritten ? "ok" : "FAILED") +
+					" registry=" + (earlyContext.registryWritten ? "ok" : "FAILED")
+				);
+			}
+		} catch (eEarlySidecar) {
+			appendLeapSepLog("Separation sidecar (early) error: " + (eEarlySidecar.message || eEarlySidecar));
+		}
+
+		appendLeapSepLog(
+			"handlePerformSeparation: graphic=" +
+			graphicName +
+			" league=" +
+			league +
+			" team=" +
+			teamCode +
+			" doc=" +
+			docName
+		);
+
+		var graphicAssets = resolveGraphicAssetPaths(
+			rootFolder,
+			league,
+			graphicName,
+			docName,
+			profileMetadata,
+			jsonData
+		);
+		var aiFilePath = graphicAssets.aiFilePath;
+		var pngFilePath = graphicAssets.pngFilePath;
+		appendLeapSepLog(
+			"graphicAssets: ai=" +
+			(graphicAssets.aiFilePath ? "yes" : "no") +
+			" png=" +
+			(graphicAssets.pngFilePath ? "yes" : "no")
+		);
+
+		var cadPngResolved = resolveCadPngPath(
+			rootFolder,
+			docFile.parent,
+			docName,
+			league,
+			teamCode,
+			graphicName
+		);
+		var cadPngPath = cadPngResolved.path;
+		var cadPlacementDebug = placeCadPngInDocument(sepDoc, cadPngPath);
+		cadPlacementDebug.cadPngSource = cadPngResolved.source;
+		cadPlacementDebug.cadPngTriedPaths = cadPngResolved.triedPaths;
+
+		/* Prepare takes its art from LIVE_ART, so a missing 02 GRAPHICS .ai must not block it — the PNG /
+		   CAD lookups above are still useful when they exist. Only the full (legacy) flow requires it. */
+		if (!aiFilePath && !isPrepare) {
+			try {
+				unloadLEAPColorSepsActions();
+			} catch (unloadErr0) { }
+			var missingAiMsg =
+				"Graphic AI not found for \"" +
+				graphicName +
+				"\". Checked 02 GRAPHICS/" +
+				league +
+				"/ (folders: " +
+				getGraphicFolderNamesToTry(graphicName, profileMetadata, jsonData).join(", ") +
+				").";
+			appendLeapSepLog(missingAiMsg + " tried=" + graphicAssets.tried.join(" | "));
+			return JSON.stringify({
+				success: false,
+				error: missingAiMsg,
+				graphicAssets: graphicAssets,
+				cadPlacementDebug: cadPlacementDebug
+			});
+		}
+
+		unlockSizedGraphicsContents(sepDoc);
+
+		/*
+		 * PREPARE stage: the graphic comes from the version document's LIVE art, not 02 GRAPHICS. Place
+		 * it, stamp the prepared status, save, record context, and STOP — the user edits the art in the
+		 * open SEP document and runs Generate afterwards.
+		 */
+		if (isPrepare) {
+			var pngPlacedPrep = placeGraphicInDocument(sepDoc, pngFilePath, aiFilePath);
+			var livePlaced = placeLiveArtGraphicIntoSepDoc(originalDoc, sepDoc, graphicName);
+			if (!livePlaced.success) {
+				try { unloadLEAPColorSepsActions(); } catch (unloadErrPrep) { }
+				appendLeapSepLog("Prepare for Seps: live art placement failed: " + livePlaced.error);
+				return JSON.stringify({
+					success: false,
+					error: "Could not place live art for \"" + graphicName + "\": " + livePlaced.error,
+					graphicName: graphicName,
+					separatedDocumentPath: sepDocPath,
+					cadPlacementDebug: cadPlacementDebug
+				});
+			}
+			try { app.activeDocument = sepDoc; } catch (eActPrep) { }
+			/* Logo-Var-* groups are kept through Prepare (user decision: they stay visible/usable while
+			   editing) and are removed at GENERATE, in expandPreparedArtForSeparation. */
+			setSeparationStatusOnDoc(sepDoc, SEP_STATUS_PREPARED);
+			/* Carry what Generate will need later — it runs on THIS document with no version doc context. */
+			try {
+				var prepXmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", sepDoc);
+				if (prepXmp.isXmpCreated) {
+					prepXmp.setStructField("LEAPPreparedContext", {
+						graphicName: graphicName,
+						styleCodes: styleCodes,
+						league: league,
+						teamCode: teamCode,
+						docName: docName,
+						sourceDocumentPath: originalDocFile && originalDocFile.fsName ? originalDocFile.fsName : "",
+						jobRoot: rootFolder && rootFolder.fsName ? rootFolder.fsName : "",
+						teamoutsRoot: teamOutsFolder && teamOutsFolder.fsName ? teamOutsFolder.fsName : "",
+						teamJsonPath: teamJsonPath,
+						separationVersion: nextSeparationVersion,
+						createdAtConfiguredPath: createdAtConfiguredPath,
+						aiFilePath: aiFilePath || "",
+						pngFilePath: pngFilePath || ""
+					}, true, false);
+					if (profileMetadata) {
+						prepXmp.setStructField("SeparationProfileMetadata", profileMetadata, true, false);
+					}
+					prepXmp.commit();
+				}
+			} catch (ePrepCtx) {
+				appendLeapSepLog("Prepare for Seps: context XMP write error: " + (ePrepCtx.message || ePrepCtx));
+			}
+			sepDoc.save();
+			appendLeapSepLog(
+				"Prepare for Seps OK: graphic=" + graphicName + " liveItems=" + livePlaced.itemCount +
+				" -> " + sepDocPath
+			);
+			return JSON.stringify({
+				success: true,
+				stage: "prepared",
+				message: "Prepared for separation: " + graphicName + ". Edit the art in the SEP document, then Generate Separations.",
+				graphicName: graphicName,
+				separatedDocumentPath: sepDocPath,
+				liveArtItemCount: livePlaced.itemCount,
+				pngPlaced: pngPlacedPrep,
+				cadPlacementDebug: cadPlacementDebug
+			});
+		}
+
+		var pngPlaced = placeGraphicInDocument(sepDoc, pngFilePath, aiFilePath);
+		var aiPlaced = placeAndEmbedGraphicAI(sepDoc, aiFilePath, graphicName);
+		if (!aiPlaced) {
+			try {
+				unloadLEAPColorSepsActions();
+			} catch (unloadErr1) { }
+			appendLeapSepLog("placeAndEmbedGraphicAI failed: " + aiFilePath);
+			return JSON.stringify({
+				success: false,
+				error: "Graphic AI could not be placed: " + aiFilePath,
+				aiFilePath: aiFilePath,
+				pngFilePath: pngFilePath,
+				pngPlaced: pngPlaced,
+				graphicAssets: graphicAssets,
+				cadPlacementDebug: cadPlacementDebug
+			});
+		}
+
+		return finishSeparationOnSepDoc({
+			sepDoc: sepDoc,
+			graphicName: graphicName,
+			profileMetadata: profileMetadata,
+			rootFolder: rootFolder,
+			teamOutsFolder: teamOutsFolder,
+			originalDocFile: originalDocFile,
+			league: league,
+			teamCode: teamCode,
+			teamJsonPath: teamJsonPath,
+			nextSeparationVersion: nextSeparationVersion,
+			createdAtConfiguredPath: createdAtConfiguredPath,
+			aiFilePath: aiFilePath,
+			sepDocPath: sepDocPath,
+			graphicAssets: graphicAssets,
+			cadPlacementDebug: cadPlacementDebug
+		});
 	} catch (e) {
 		return JSON.stringify({
 			success: false,
@@ -4443,7 +4981,14 @@ function handleCheckSeparatedDocument(params_string) {
 			profileMetaData: null,
 			separatedLayerNames: [],
 			docName: docFile.name,
-			docPath: docPath
+			docPath: docPath,
+			/*
+			 * Two-stage flow: "preparedForSeps" = SEP document exists with live art but no plates yet
+			 * (Generate enabled, Prepare disabled); "separated" = plates generated; "" = not a SEP doc /
+			 * legacy single-shot separation. Drives the Separations-tab buttons.
+			 */
+			separationStatus: "",
+			preparedContext: null
 		};
 
 		try {
@@ -4452,6 +4997,12 @@ function handleCheckSeparatedDocument(params_string) {
 				var documentType = xmp.getStructField("DocumentType");
 				if (documentType && documentType.toString().trim() === "Separation Document") {
 					_dataFromXMP.isSeparatedDoc = true;
+					_dataFromXMP.separationStatus = getSeparationStatusFromDoc(activeDoc);
+					try {
+						if (xmp.doesStructFieldExist("LEAPPreparedContext")) {
+							_dataFromXMP.preparedContext = xmp.getStructField("LEAPPreparedContext", true) || null;
+						}
+					} catch (ePc) { _dataFromXMP.preparedContext = null; }
 
 					// Get profile metadata from XMP
 					var _profileMetaData = xmp.getStructField("SeparationProfileMetadata", true);

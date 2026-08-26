@@ -85,6 +85,29 @@
 			</div>
 		</div>
 
+		<!-- Profile mode maps exactly these styles (the graphic's missing-profile codes). -->
+		<div *ngIf="selectionMode === 'profile'" class="add-separation-modal-target-styles">
+			Styles: <strong>{{ targetStyleCodesClean.join(', ') || '—' }}</strong>
+		</div>
+
+		<!--
+		 TEAMOUT-SCOPE PERSISTENCE — parked (2026-08-25), see docs/TODO.md "Teamout profile overrides".
+		 The scope radios below let the user store a manual style->profile decision for the WHOLE
+		 teamout (style_profile_overrides.json at the job root) instead of only this file. Backend is
+		 built and kept (separations.component.ts: teamoutOverridesPath / read / write / apply — all
+		 commented out); re-enable by uncommenting this block and those methods.
+		<div class="add-separation-modal-scope">
+			<label class="add-separation-scope-option">
+				<input type="radio" name="add-sep-scope" [checked]="scope === 'file'" (change)="scope = 'file'" />
+				This file only
+			</label>
+			<label class="add-separation-scope-option">
+				<input type="radio" name="add-sep-scope" [checked]="scope === 'teamout'" (change)="scope = 'teamout'" />
+				Entire teamout
+			</label>
+		</div>
+		-->
+
 		<div class="add-separation-modal-footer">
 			<app-button variant="secondary" size="medium" (onClick)="cancelDialog()">Cancel</app-button>
 			<app-button variant="primary" size="medium" [disabled]="!canSubmit" (onClick)="confirmDialog()"

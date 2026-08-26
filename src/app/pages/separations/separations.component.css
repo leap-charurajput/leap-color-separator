@@ -1,5 +1,14 @@
 .graphic-separation-container {
 	padding: 0px;
+	/*
+	 * The tab shell (.settingsTabContent) clips overflow, so with several separation groups the list
+	 * ran past the panel and simply disappeared — no scrollbar, rows unreachable. Bound the container
+	 * to the panel height and scroll INSIDE it, the same pattern the Plates tab uses
+	 * (separation-colors: height calc(100vh - 100px) + inner overflow-y auto).
+	 */
+	height: calc(100vh - 100px);
+	overflow-y: auto;
+	overflow-x: hidden;
 }
 
 .section {
@@ -356,4 +365,26 @@
 	font-size: 11px;
 	font-style: italic;
 	color: rgba(214, 214, 214, 0.55);
+}
+
+/* Two-stage separation: Prepare + Generate side by side in the row / prepared block. */
+.two-stage-buttons,
+.prepared-sep-actions {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+	justify-content: flex-end;
+}
+
+.prepared-sep-block {
+	margin-top: 10px;
+	padding-top: 10px;
+	border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.prepared-sep-note {
+	font-size: 11px;
+	color: #d6d6d6;
+	margin-bottom: 8px;
+	line-height: 1.4;
 }

@@ -35,6 +35,28 @@
     Separated document is open. Team version and template links are not available.
    </div>
    <!--
+    PREPARED state: this SEP document has the live art placed but no plates yet. The user edits the
+    art here, then generates. Prepare is not offered (the active document is not a version file —
+    go back to it to re-prepare / overwrite); Generate is the only action.
+   -->
+   <div *ngIf="isPreparedSepDoc" class="prepared-sep-block">
+    <div class="prepared-sep-note">
+     Prepared for separation<span *ngIf="preparedGraphicName"> — graphic <strong>{{ preparedGraphicName }}</strong></span>.
+     Edit the art in SIZED_GRAPHICS if needed, then generate.
+    </div>
+    <div class="generate-button-section prepared-sep-actions">
+     <app-button variant="secondary" size="medium" [disabled]="true"
+      title="Prepare runs on the version document. Open it to prepare again (this will overwrite).">
+      Prepare for Seps
+     </app-button>
+     <app-button variant="primary" size="medium" (onClick)="handleGenerateFromPreparedDoc()"
+      [disabled]="isSeparationFilePathMissing">
+      Generate Separations
+     </app-button>
+    </div>
+   </div>
+
+   <!--
      Delete All Plates / Recreate All Plates buttons removed from the UI (not required).
      Preserved here (commented out) so the actions can be restored later if needed.
    <div class="current-sep-actions">
@@ -50,6 +72,12 @@
    -->
   </div>
  </div>
+
+ <app-confirm-dialog [isOpen]="!!separationDeleteTarget" title="Delete Separation"
+  [message]="separationDeleteMessage"
+  confirmText="Delete" cancelText="Cancel" confirmVariant="danger"
+  (confirm)="confirmDeleteSeparationGroup()" (cancel)="cancelDeleteSeparationGroup()">
+ </app-confirm-dialog>
 
  <app-confirm-dialog [isOpen]="showDeleteAllConfirm" title="Confirm"
   message="Are you sure you want to delete all separation plates from this document?" confirmText="Delete"
@@ -82,6 +110,7 @@
  [graphicName]="addSeparationDialogGraphicName"
  [isLoading]="isLoadingAddSeparationDialog"
  [styleOptions]="styleCatalogOptions"
+ [targetStyleCodes]="addSeparationTargetStyleCodes"
  (cancel)="cancelAddSeparationDialog()"
  (confirm)="confirmAddSeparationDialog($event)"
 ></app-add-separation-dialog>
@@ -122,9 +151,16 @@
        <div class="separation-profile-right">
         <div class="separation-profile-content">
          <div class="generate-button-section">
-          <app-button variant="primary" size="medium" (onClick)="generateStandaloneJob(job)">
-           Generate Separations
-          </app-button>
+          <!-- Two-stage (standalone): Prepare places the ASSETS art; Generate runs on the prepared doc. -->
+          <div class="two-stage-buttons">
+           <app-button variant="primary" size="medium" (onClick)="prepareStandaloneJob(job)">
+            Prepare for Seps
+           </app-button>
+           <app-button variant="secondary" size="medium" [disabled]="true"
+            title="Prepare for Seps first. Generate runs on the prepared SEP document.">
+            Generate Separations
+           </app-button>
+          </div>
          </div>
         </div>
        </div>
@@ -194,7 +230,7 @@
        </div>
        <div class="separation-profile-right">
         <!-- <div class="separation-profile-actions">
-									<app-sub-menu [items]="['Duplicate', 'Edit']"
+									<app-sub-menu [items]="getSeparationMenuItems(separation, graphic)"
 										(onItemClick)="handleSeparationMenuClick($event, separation.id, graphic)"
 										iconClass="openerImage icon-ellipsis"></app-sub-menu>
 								</div> -->
@@ -213,16 +249,29 @@
          <div *ngIf="!getSeparationPath(separation, graphic)" class="separation-profile-actions">
           <div class="separation-profile-actions">
            <div class="sep-not-created">Separation not created</div>
-           <app-sub-menu [items]="['Duplicate', 'Edit']"
+           <app-sub-menu [items]="getSeparationMenuItems(separation, graphic)"
             (onItemClick)="handleSeparationMenuClick($event, separation.id, graphic)"
             iconClass="openerImage icon-ellipsis"></app-sub-menu>
           </div>
          </div>
          <div class="generate-button-section">
-          <app-button (click)="handleGenerateSeparations(separation.id, graphic)" variant="primary" size="medium"
-           [disabled]="!getGraphicFolderStatus(graphic) || !getGraphicFileStatus(graphic) || isFolderChecking(graphic) || hasUnknownProfile(separation) || isProfileMissingInSettings(separation) || isInkInfoMissingForProfile(separation) || isSeparationFilePathMissing">
-           Generate Separations
-          </app-button>
+          <!--
+           Two-stage: on the VERSION document only Prepare is actionable. Generate stays visible but
+           disabled here — it becomes enabled once the prepared SEP document is the active document
+           (see the prepared-sep-block above). No Generate without Prepare.
+           Prepare does NOT require the 02 GRAPHICS export (art comes from LIVE_ART), so the
+           folder/file checks that gated the old Generate are not applied to it.
+          -->
+          <div class="two-stage-buttons">
+           <app-button (click)="handlePrepareForSeps(separation.id, graphic)" variant="primary" size="medium"
+            [disabled]="hasUnknownProfile(separation) || isProfileMissingInSettings(separation) || isInkInfoMissingForProfile(separation) || isSeparationFilePathMissing">
+            Prepare for Seps
+           </app-button>
+           <app-button variant="secondary" size="medium" [disabled]="true"
+            title="Prepare for Seps first. Generate runs on the prepared SEP document.">
+            Generate Separations
+           </app-button>
+          </div>
           <div *ngIf="isSeparationFilePathMissing" class="sep-path-missing-note">
            Set Separation path first in Export Settings.
           </div>

@@ -62,6 +62,8 @@ export interface StandaloneSeparationGroup {
  isGenerating: boolean;
  status: string;
  error: string;
+ /* Two-stage: set after Prepare succeeded in this session (host status is authoritative). */
+ prepared?: boolean;
 }
 
 /*
@@ -1505,7 +1507,21 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
   * the standalone separation (which reuses the real engine via the inline script), and on success
   * switches to the Plates tab to show the generated plates.
   */
+ /*
+  * Two-stage, same contract as the LEAP flow. The only difference: Prepare takes the art from the
+  * ASSETS export (exportedFilePath), not from LIVE_ART.
+  *   prepareGroup  -> SEP doc + art placed + status "preparedForSeps"; doc left open for editing
+  *   generateGroup -> runs on the open prepared SEP doc; status "separated"; Plates tab opens
+  */
+ prepareGroup(group: StandaloneSeparationGroup): void {
+  this.runGroupStage(group, 'prepare');
+ }
+
  generateGroup(group: StandaloneSeparationGroup): void {
+  this.runGroupStage(group, 'generate');
+ }
+
+ private runGroupStage(group: StandaloneSeparationGroup, stage: 'prepare' | 'generate'): void {
   if (!group || group.isGenerating) {
    return;
   }
@@ -1524,7 +1540,7 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
   }
 
   group.isGenerating = true;
-  group.status = 'Generating separations…';
+  group.status = stage === 'prepare' ? 'Preparing for seps…' : 'Generating separations…';
   this.cdr.detectChanges();
 
   this.buildStandaloneProfileMetadata(group)
@@ -1539,7 +1555,8 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
      jsonData: jsonData,
      sepsTemplateFileName: sepsTemplateFileName || undefined,
      exportedFilePath: this.exportedFilePath,
-     cadPngPath: this.resolveCadPngPath() || undefined
+     cadPngPath: this.resolveCadPngPath() || undefined,
+     stage: stage
     });
    })
    .then((result: any) => {
@@ -1555,15 +1572,25 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
      }
     }
     if (result && result.success) {
-     group.status = 'Separation generated. Opening Plates…';
-     /* The generated SEP doc is ours too — its activation must not reset this form. */
+     /* The SEP doc is ours too — its activation must not reset this form. */
      if (result.separatedDocumentPath) {
       this.sessionDocPaths.add(this.normalizeDocPath(String(result.separatedDocumentPath)));
      }
-     /* Switch to the Plates tab (index 2) to show the generated plates. */
-     const nav = (window as any).__LEAP_TAB_NAVIGATION__;
-     if (nav && typeof nav.navigateToTab === 'function') {
-      setTimeout(() => nav.navigateToTab(2), 300);
+     if (stage === 'prepare') {
+      group.status = 'Prepared. Edit the art in the SEP document, then Generate.';
+      group.prepared = true;
+      /* Stay on Separations so the row now offers Generate; refresh its doc-state. */
+      const navP = (window as any).__LEAP_TAB_NAVIGATION__;
+      if (navP && typeof navP.navigateToTab === 'function') {
+       setTimeout(() => navP.navigateToTab(1), 300);
+      }
+     } else {
+      group.status = 'Separation generated. Opening Plates…';
+      /* Switch to the Plates tab (index 2) to show the generated plates. */
+      const nav = (window as any).__LEAP_TAB_NAVIGATION__;
+      if (nav && typeof nav.navigateToTab === 'function') {
+       setTimeout(() => nav.navigateToTab(2), 300);
+      }
      }
     } else {
      group.error = (result && result.error) || 'Could not generate the separation.';
@@ -1745,6 +1772,12 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
    * user to press Generate again on a form they never asked to see. Deferred a tick so the group
    * above is bound first. generateGroup() navigates to Plates on success, as the LEAP flow does.
    */
+  if (job.autoStage && this.separationGroups.length > 0) {
+   /* Separations-tab row buttons: "prepare" or "generate" on the first (only) group. */
+   const stage = job.autoStage === 'generate' ? 'generate' : 'prepare';
+   setTimeout(() => this.runGroupStage(this.separationGroups[0], stage), 0);
+   return;
+  }
   if (job.autoGenerate && this.separationGroups.length > 0) {
    this.statusMessage = 'Generating separation…';
    setTimeout(() => this.generateGroup(this.separationGroups[0]), 0);
