@@ -5099,7 +5099,7 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
 		graphicName: string,
 		styleCodes: string[] = [],
 		profileMetadata: any = null,
-		options?: { sepsTemplateFileName?: string }
+		options?: { sepsTemplateFileName?: string; prepareFromSelection?: boolean }
 	): Promise<any> {
 		return this.runSeparationStage('handlePrepareForSeps', 'prepareForSeps', graphicName, styleCodes, profileMetadata, options);
 	}
@@ -5129,12 +5129,13 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
 		graphicName: string,
 		styleCodes: string[] = [],
 		profileMetadata: any = null,
-		options?: { recreateInActiveDoc?: boolean; sepsTemplateFileName?: string }
+		options?: { recreateInActiveDoc?: boolean; sepsTemplateFileName?: string; prepareFromSelection?: boolean }
 	): Promise<any> {
 		this.log(
 			label + ' called for: ' +
 			graphicName +
-			(options?.recreateInActiveDoc ? ' (recreate in active doc)' : '')
+			(options?.recreateInActiveDoc ? ' (recreate in active doc)' : '') +
+			(options?.prepareFromSelection ? ' (from selection)' : '')
 		);
 		this.leapSepsLog.logProcess(label + ' start', {
 			graphicName,
@@ -5154,6 +5155,9 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
 			}
 			if (options?.sepsTemplateFileName) {
 				params.sepsTemplateFileName = String(options.sepsTemplateFileName);
+			}
+			if (options?.prepareFromSelection === true) {
+				params.prepareFromSelection = true;
 			}
 
 			return this.evalWithTeamJsonFallback(handler, params, (r: any) =>

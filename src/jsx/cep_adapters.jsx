@@ -530,61 +530,118 @@ function placeAndEmbedGraphicAI(sepDoc, graphicAIPath, graphicName) {
 		return false;
 	}
 }
+
 /*
- * Place the version document's LIVE art for a graphic into the SEP document — the "Prepare for Seps"
+ * Place the version document's art for a graphic into the SEP document — the "Prepare for Seps"
  * source. Mirrors placeAndEmbedGraphicAI step for step (copy, paste into SIZED_GRAPHICS, group, name
  * = graphic, centre-top align to SEP_ART, prepare, overprint off) so Generate runs on an identical
- * structure; the ONLY difference is where the art comes from: LIVE_ART/GRAPHIC:<name> of the open
- * version document instead of the 02 GRAPHICS .ai on disk. BOUNDS:<name> stays behind — it is a
- * guide, not art.
+ * structure; the ONLY difference is where the art comes from:
+ *   - selectionItems given ("Prepare for Seps from Selection"): the items the user had selected in
+ *     the version document, captured by the caller BEFORE the SEP document was created;
+ *   - otherwise: the version document's SIZED_ART/SIZED_GRAPHICS item named <graphicName>
+ *     (e.g. group "CF"), falling back to the old LIVE_ART/GRAPHIC:<name> sublayer when no such
+ *     sized item exists (older documents).
+ * BOUNDS:<name> stays behind — it is a guide, not art.
  *
- * Returns { success, error?, itemCount }. Never closes or saves the version document.
+ * Returns { success, error?, itemCount, source }. Never closes or saves the version document.
  */
-function placeLiveArtGraphicIntoSepDoc(versionDoc, sepDoc, graphicName) {
-	var out = { success: false, error: "", itemCount: 0 };
+function placeLiveArtGraphicIntoSepDoc(versionDoc, sepDoc, graphicName, selectionItems) {
+	var out = { success: false, error: "", itemCount: 0, source: "" };
 	try {
 		if (!versionDoc || !sepDoc || !graphicName) {
 			out.error = "Missing document or graphic name";
 			return out;
 		}
-		var liveArt = null;
-		try { liveArt = versionDoc.layers.getByName("LIVE_ART"); } catch (eLa) { liveArt = null; }
-		if (!liveArt) {
-			out.error = "LIVE_ART layer not found in the version document";
-			return out;
+
+		/* Layers unlocked/shown to reach the source — restored (in reverse) after the copy. */
+		var touchedLayers = [];
+		function rememberLayer(layer) {
+			if (!layer) return;
+			touchedLayers.push({ layer: layer, locked: layer.locked, hidden: !layer.visible });
+			try { layer.locked = false; layer.visible = true; } catch (eL) { }
 		}
-		var graphicLayer = null;
-		var wanted = ("GRAPHIC:" + String(graphicName)).toUpperCase();
-		for (var i = 0; i < liveArt.layers.length; i++) {
-			var cand = liveArt.layers[i];
-			if (cand && cand.name && String(cand.name).toUpperCase() === wanted) { graphicLayer = cand; break; }
+		function restoreLayers() {
+			for (var r = touchedLayers.length - 1; r >= 0; r--) {
+				try {
+					touchedLayers[r].layer.locked = touchedLayers[r].locked;
+					touchedLayers[r].layer.visible = !touchedLayers[r].hidden;
+				} catch (eRl) { }
+			}
 		}
-		if (!graphicLayer) {
-			out.error = "GRAPHIC:" + graphicName + " sublayer not found under LIVE_ART";
-			return out;
+
+		/* Resolve which items to copy. */
+		var itemsToCopy = [];
+		if (selectionItems && selectionItems.length) {
+			out.source = "selection";
+			for (var s = 0; s < selectionItems.length; s++) {
+				if (selectionItems[s]) itemsToCopy.push(selectionItems[s]);
+			}
+			if (itemsToCopy.length === 0) {
+				out.error = "The captured selection is empty";
+				return out;
+			}
+		} else {
+			/* Default source: SIZED_ART/SIZED_GRAPHICS item named <graphicName> in the version doc. */
+			var vSizedArt = null, vSizedGraphics = null, sizedItem = null;
+			try { vSizedArt = versionDoc.layers.getByName("SIZED_ART"); } catch (eVsa) { vSizedArt = null; }
+			if (vSizedArt) {
+				try { vSizedGraphics = vSizedArt.layers.getByName("SIZED_GRAPHICS"); } catch (eVsg) { vSizedGraphics = null; }
+			}
+			if (vSizedGraphics) {
+				var wantedItem = String(graphicName).toUpperCase();
+				for (var q = 0; q < vSizedGraphics.pageItems.length; q++) {
+					var candItem = vSizedGraphics.pageItems[q];
+					if (candItem && candItem.name && String(candItem.name).toUpperCase() === wantedItem) { sizedItem = candItem; break; }
+				}
+			}
+			if (sizedItem) {
+				out.source = "sizedGraphics";
+				rememberLayer(vSizedArt);
+				rememberLayer(vSizedGraphics);
+				itemsToCopy.push(sizedItem);
+			} else {
+				/* Fallback for documents without the sized group: old LIVE_ART/GRAPHIC:<name> source. */
+				try { appendLeapSepLog("Prepare source: no SIZED_ART/SIZED_GRAPHICS item '" + graphicName + "' - falling back to LIVE_ART"); } catch (eLog) { }
+				var liveArt = null;
+				try { liveArt = versionDoc.layers.getByName("LIVE_ART"); } catch (eLa) { liveArt = null; }
+				if (!liveArt) {
+					out.error = "Neither SIZED_ART/SIZED_GRAPHICS item '" + graphicName + "' nor LIVE_ART layer found in the version document";
+					return out;
+				}
+				var graphicLayer = null;
+				var wanted = ("GRAPHIC:" + String(graphicName)).toUpperCase();
+				for (var i = 0; i < liveArt.layers.length; i++) {
+					var cand = liveArt.layers[i];
+					if (cand && cand.name && String(cand.name).toUpperCase() === wanted) { graphicLayer = cand; break; }
+				}
+				if (!graphicLayer) {
+					out.error = "SIZED_GRAPHICS item '" + graphicName + "' not found, and no GRAPHIC:" + graphicName + " sublayer under LIVE_ART";
+					return out;
+				}
+				out.source = "liveArt";
+				rememberLayer(liveArt);
+				rememberLayer(graphicLayer);
+				for (var p = 0; p < graphicLayer.pageItems.length; p++) itemsToCopy.push(graphicLayer.pageItems[p]);
+			}
 		}
 
 		/* SEP doc targets — same lookups as placeAndEmbedGraphicAI. */
 		var sizedArtLayer;
-		try { sizedArtLayer = sepDoc.layers.getByName("SIZED_ART"); } catch (e1) { out.error = "SIZED_ART layer not found in SEP document"; return out; }
+		try { sizedArtLayer = sepDoc.layers.getByName("SIZED_ART"); } catch (e1) { restoreLayers(); out.error = "SIZED_ART layer not found in SEP document"; return out; }
 		var sizedGraphicsLayer;
 		try { sizedGraphicsLayer = sizedArtLayer.layers.getByName("SIZED_GRAPHICS"); }
 		catch (e2) { sizedGraphicsLayer = sizedArtLayer.layers.add(); sizedGraphicsLayer.name = "SIZED_GRAPHICS"; }
 		var sepArtGuide = findPageItemByName(sizedArtLayer, "SEP_ART") || findPageItemByName(sepDoc, "SEP_ART");
-		if (!sepArtGuide) { out.error = "SEP_ART guide not found in SEP document"; return out; }
+		if (!sepArtGuide) { restoreLayers(); out.error = "SEP_ART guide not found in SEP document"; return out; }
 		var sepArtBounds = sepArtGuide.geometricBounds;
 
-		/* Select everything on GRAPHIC:<name> (unlock/show first so selection can reach it). */
+		/* Select the source items (unlock/show so selection can reach them). */
 		app.activeDocument = versionDoc;
-		var wasLocked = graphicLayer.locked, wasHidden = !graphicLayer.visible;
-		try { graphicLayer.locked = false; graphicLayer.visible = true; } catch (eLk) { }
-		var liveWasLocked = liveArt.locked, liveWasHidden = !liveArt.visible;
-		try { liveArt.locked = false; liveArt.visible = true; } catch (eLk2) { }
 		versionDoc.selection = null;
 		var count = 0;
-		for (var p = 0; p < graphicLayer.pageItems.length; p++) {
+		for (var p2 = 0; p2 < itemsToCopy.length; p2++) {
 			try {
-				var it = graphicLayer.pageItems[p];
+				var it = itemsToCopy[p2];
 				if (it.locked) it.locked = false;
 				if (it.hidden) it.hidden = false;
 				it.selected = true;
@@ -592,13 +649,15 @@ function placeLiveArtGraphicIntoSepDoc(versionDoc, sepDoc, graphicName) {
 			} catch (eSel) { }
 		}
 		if (count === 0) {
-			try { graphicLayer.locked = wasLocked; graphicLayer.visible = !wasHidden; liveArt.locked = liveWasLocked; liveArt.visible = !liveWasHidden; } catch (eR) { }
-			out.error = "GRAPHIC:" + graphicName + " has no artwork";
+			restoreLayers();
+			out.error = (out.source === "selection")
+				? "Could not re-select the selected artwork"
+				: "'" + graphicName + "' has no artwork";
 			return out;
 		}
 		app.copy();
 		versionDoc.selection = null;
-		try { graphicLayer.locked = wasLocked; graphicLayer.visible = !wasHidden; liveArt.locked = liveWasLocked; liveArt.visible = !liveWasHidden; } catch (eR2) { }
+		restoreLayers();
 
 		/* Paste into the SEP doc exactly as the 02 GRAPHICS path does. */
 		app.activeDocument = sepDoc;
@@ -2791,7 +2850,9 @@ function runGenerateOnPreparedDoc(sepDoc, params, profileMetadataFromPanel) {
  *
  *   Prepare for Seps  -> runSeparationStaged(params, "prepare")
  *       On the VERSION document. Creates the SEP document from the template at the configured
- *       path, places the graphic's LIVE art (LIVE_ART/GRAPHIC:<name>, not the 02 GRAPHICS .ai) into
+ *       path, places the version document's art — the current SELECTION when the panel sent
+ *       prepareFromSelection, else the SIZED_ART/SIZED_GRAPHICS item <name> (LIVE_ART/GRAPHIC:<name>
+ *       fallback for older docs; never the 02 GRAPHICS .ai) — into
  *       SIZED_GRAPHICS named <name>, saves, stamps XMP LEAPSeparationStatus = "preparedForSeps",
  *       and leaves the SEP document open so the user can edit the art.
  *   Generate Separations -> runSeparationStaged(params, "generate")
@@ -2908,6 +2969,29 @@ function runSeparationStaged(params_string, stage) {
 		}
 		var originalDoc = activeDoc;
 		var originalDocFile = docFile;
+		/*
+		 * "Prepare for Seps from Selection": capture the user's selection NOW, while the version
+		 * document is still active — creating the SEP document switches the active document, and the
+		 * item references must come from the version doc. The panel sends prepareFromSelection only
+		 * when something was selected at click time.
+		 */
+		var prepareSelectionItems = null;
+		if (isPrepare && params.prepareFromSelection) {
+			prepareSelectionItems = [];
+			try {
+				var liveSel = originalDoc.selection || [];
+				for (var psI = 0; psI < liveSel.length; psI++) {
+					if (liveSel[psI]) prepareSelectionItems.push(liveSel[psI]);
+				}
+			} catch (eSelCap) { prepareSelectionItems = []; }
+			if (prepareSelectionItems.length === 0) {
+				return JSON.stringify({
+					success: false,
+					error: "Nothing is selected in the version document. Select the artwork to prepare, or click again with nothing selected to use the sized graphic."
+				});
+			}
+			appendLeapSepLog("Prepare for Seps: from selection (" + prepareSelectionItems.length + " item(s))");
+		}
 		if (!profileMetadata) {
 			profileMetadata = {};
 		}
@@ -3104,7 +3188,7 @@ function runSeparationStaged(params_string, stage) {
 		cadPlacementDebug.cadPngSource = cadPngResolved.source;
 		cadPlacementDebug.cadPngTriedPaths = cadPngResolved.triedPaths;
 
-		/* Prepare takes its art from LIVE_ART, so a missing 02 GRAPHICS .ai must not block it — the PNG /
+		/* Prepare takes its art from the open version document, so a missing 02 GRAPHICS .ai must not block it — the PNG /
 		   CAD lookups above are still useful when they exist. Only the full (legacy) flow requires it. */
 		if (!aiFilePath && !isPrepare) {
 			try {
@@ -3130,19 +3214,20 @@ function runSeparationStaged(params_string, stage) {
 		unlockSizedGraphicsContents(sepDoc);
 
 		/*
-		 * PREPARE stage: the graphic comes from the version document's LIVE art, not 02 GRAPHICS. Place
+		 * PREPARE stage: the graphic comes from the version document (selection, or the sized graphic
+		 * — see placeLiveArtGraphicIntoSepDoc), not 02 GRAPHICS. Place
 		 * it, stamp the prepared status, save, record context, and STOP — the user edits the art in the
 		 * open SEP document and runs Generate afterwards.
 		 */
 		if (isPrepare) {
 			var pngPlacedPrep = placeGraphicInDocument(sepDoc, pngFilePath, aiFilePath);
-			var livePlaced = placeLiveArtGraphicIntoSepDoc(originalDoc, sepDoc, graphicName);
+			var livePlaced = placeLiveArtGraphicIntoSepDoc(originalDoc, sepDoc, graphicName, prepareSelectionItems);
 			if (!livePlaced.success) {
 				try { unloadLEAPColorSepsActions(); } catch (unloadErrPrep) { }
-				appendLeapSepLog("Prepare for Seps: live art placement failed: " + livePlaced.error);
+				appendLeapSepLog("Prepare for Seps: art placement failed: " + livePlaced.error);
 				return JSON.stringify({
 					success: false,
-					error: "Could not place live art for \"" + graphicName + "\": " + livePlaced.error,
+					error: "Could not place art for \"" + graphicName + "\": " + livePlaced.error,
 					graphicName: graphicName,
 					separatedDocumentPath: sepDocPath,
 					cadPlacementDebug: cadPlacementDebug
@@ -3181,8 +3266,8 @@ function runSeparationStaged(params_string, stage) {
 			}
 			sepDoc.save();
 			appendLeapSepLog(
-				"Prepare for Seps OK: graphic=" + graphicName + " liveItems=" + livePlaced.itemCount +
-				" -> " + sepDocPath
+				"Prepare for Seps OK: graphic=" + graphicName + " source=" + (livePlaced.source || "?") +
+				" items=" + livePlaced.itemCount + " -> " + sepDocPath
 			);
 			return JSON.stringify({
 				success: true,

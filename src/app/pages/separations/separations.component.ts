@@ -169,6 +169,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 		this.setupDocumentEventListener();
 		this.checkVersionDocument();
 		this.subscribeToGraphicsData();
+		this.startSelectionTracking();
 	}
 
 	private subscribeToGraphicsData(): void {
@@ -181,6 +182,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 
 	ngOnDestroy(): void {
 		this.removeDocumentEventListener();
+		this.stopSelectionTracking();
 		if (this.graphicsSubscription) {
 			this.graphicsSubscription.unsubscribe();
 		}
@@ -1037,6 +1039,124 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 
 	/* ----- Two-stage button state (see runSeparationStage) ----- */
 
+	/*
+	 * Illustrator selection state, so the Prepare button can read "Prepare for Seps from Selection"
+	 * while something is selected. EVENT-DRIVEN via AIEvent.ART_SELECTION_CHANGED (same
+	 * AIEventAdapter pattern as the Plates tab's swatch-change listener); the Graphics-tab 700ms
+	 * poll remains only as the fallback when the host adapter is unavailable. Either way the label
+	 * is cosmetic — the flag actually sent to the host is re-checked fresh at click time.
+	 */
+	hasIllustratorSelection = false;
+	private selectionPollInterval: any = null;
+	private selectionEventAdapter: any = null;
+	private selectionEventHandler: ((evt: any) => void) | null = null;
+	private selectionEventType: string | null = null;
+	private selectionRefreshDebounce: any = null;
+
+	private startSelectionTracking(): void {
+		if (this.isRunningInBrowser) return;
+		if (this.registerArtSelectionChangedListener()) {
+			this.refreshSelectionState();
+			return;
+		}
+		this.startSelectionPolling();
+	}
+
+	private registerArtSelectionChangedListener(): boolean {
+		try {
+			/* Same dual lookup as the Plates tab's swatch listener: the adapter script may land as a
+			   bare global rather than a window property depending on bundle evaluation. */
+			const resolveGlobal = (name: string): any => {
+				const w = window as any;
+				if (w[name]) { return w[name]; }
+				try {
+					// eslint-disable-next-line no-new-func
+					const v = Function('try{return typeof ' + name + '!=="undefined"?' + name + ':undefined}catch(e){return undefined}')();
+					return v || undefined;
+				} catch (e) {
+					return undefined;
+				}
+			};
+			const AIEventAdapterRef = resolveGlobal('AIEventAdapter');
+			const AIEventRef = resolveGlobal('AIEvent');
+			if (
+				!AIEventAdapterRef ||
+				!AIEventRef ||
+				typeof AIEventAdapterRef.getInstance !== 'function' ||
+				!AIEventRef.ART_SELECTION_CHANGED
+			) {
+				console.warn('[SEPARATIONS] AIEventAdapter unavailable; falling back to selection polling');
+				return false;
+			}
+			const handler = (_evt: any) => {
+				/* Marquee drags / multi-selects fire in bursts — collapse them into one count query. */
+				if (this.selectionRefreshDebounce) {
+					clearTimeout(this.selectionRefreshDebounce);
+				}
+				this.selectionRefreshDebounce = setTimeout(() => this.refreshSelectionState(), 150);
+			};
+			const adapter = AIEventAdapterRef.getInstance();
+			adapter.addEventListener(AIEventRef.ART_SELECTION_CHANGED, handler);
+			this.selectionEventAdapter = adapter;
+			this.selectionEventHandler = handler;
+			this.selectionEventType = AIEventRef.ART_SELECTION_CHANGED;
+			console.log('[SEPARATIONS] Subscribed to art selection event:', this.selectionEventType);
+			return true;
+		} catch (err) {
+			console.warn('[SEPARATIONS] Failed to subscribe to art selection event:', err);
+			return false;
+		}
+	}
+
+	private stopSelectionTracking(): void {
+		try {
+			if (
+				this.selectionEventAdapter &&
+				this.selectionEventHandler &&
+				this.selectionEventType &&
+				typeof this.selectionEventAdapter.removeEventListener === 'function'
+			) {
+				this.selectionEventAdapter.removeEventListener(this.selectionEventType, this.selectionEventHandler);
+			}
+		} catch (e) {
+			/* no-op */
+		}
+		this.selectionEventAdapter = null;
+		this.selectionEventHandler = null;
+		this.selectionEventType = null;
+		if (this.selectionRefreshDebounce) {
+			clearTimeout(this.selectionRefreshDebounce);
+			this.selectionRefreshDebounce = null;
+		}
+		this.stopSelectionPolling();
+	}
+
+	private startSelectionPolling(): void {
+		if (this.isRunningInBrowser || this.selectionPollInterval) return;
+		this.refreshSelectionState();
+		this.selectionPollInterval = setInterval(() => this.refreshSelectionState(), 700);
+	}
+
+	private stopSelectionPolling(): void {
+		if (this.selectionPollInterval) {
+			clearInterval(this.selectionPollInterval);
+			this.selectionPollInterval = null;
+		}
+	}
+
+	private refreshSelectionState(): void {
+		this.controller
+			.getSelectionCount()
+			.catch(() => 0)
+			.then((count) => {
+				const has = count > 0;
+				if (has !== this.hasIllustratorSelection) {
+					this.hasIllustratorSelection = has;
+					this.cdr.detectChanges();
+				}
+			});
+	}
+
 	/** "preparedForSeps" | "separated" | "" for the ACTIVE document, from checkSeparatedDocument. */
 	get separationStatus(): string {
 		return String((this.separatedDocInfo as any)?.separationStatus || '');
@@ -1230,14 +1350,24 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 	 * (controller.performSeparation) but is not invoked from here.
 	 */
 	handlePrepareForSeps(separationId: number, graphicName: string): void {
-		this.runSeparationStage('prepare', separationId, graphicName);
+		/*
+		 * Fresh selection check at click time (the polled hasIllustratorSelection only drives the
+		 * label): something selected -> Prepare from Selection; nothing -> Prepare from the version
+		 * document's SIZED_ART/SIZED_GRAPHICS/<graphic> item.
+		 */
+		const countPromise = this.isRunningInBrowser
+			? Promise.resolve(0)
+			: this.controller.getSelectionCount().catch(() => 0);
+		countPromise.then((count) => {
+			this.runSeparationStage('prepare', separationId, graphicName, count > 0);
+		});
 	}
 
 	handleGenerateSeparations(separationId: number, graphicName: string): void {
 		this.runSeparationStage('generate', separationId, graphicName);
 	}
 
-	private runSeparationStage(stage: 'prepare' | 'generate', separationId: number, graphicName: string): void {
+	private runSeparationStage(stage: 'prepare' | 'generate', separationId: number, graphicName: string, prepareFromSelection = false): void {
 		if (!graphicName) {
 			return;
 		}
@@ -1247,12 +1377,17 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 			return;
 		}
 
-		this.leapSepsLog.logClick(stage === 'prepare' ? 'Prepare for Seps' : 'Generate separation', {
-			separationId,
-			graphicName,
-			profile: separation.profile,
-			styles: separation.styles
-		});
+		this.leapSepsLog.logClick(
+			stage === 'prepare'
+				? (prepareFromSelection ? 'Prepare for Seps from Selection' : 'Prepare for Seps')
+				: 'Generate separation',
+			{
+				separationId,
+				graphicName,
+				profile: separation.profile,
+				styles: separation.styles
+			}
+		);
 
 		const styleCodes = separation.styles || [];
 		const profileName = separation.profile || '';
@@ -1487,7 +1622,10 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 			preparedProfileMetadata = profileMetadata;
 			console.log('[SEPARATIONS][UB_DEBUG] ' + stage + ' payload profileMetadata:', profileMetadata);
 			if (stage === 'prepare') {
-				return this.controller.prepareForSeps(graphicName, styleCodes, profileMetadata, { sepsTemplateFileName });
+				return this.controller.prepareForSeps(graphicName, styleCodes, profileMetadata, {
+					sepsTemplateFileName,
+					prepareFromSelection
+				});
 			}
 			/* Generate runs on the prepared SEP doc; the host reads profileMetadata back from that
 			   document's XMP (stamped at Prepare, possibly edited since), so what we pass is advisory. */
