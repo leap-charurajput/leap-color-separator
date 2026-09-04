@@ -285,8 +285,110 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 		} catch (err) { }
 	}
 
+	/*
+	 * ----- NN Pro product mode (docs/TODO.md "NN Pro separation support") -----
+	 * An NN Pro PRODUCT behaves like a version document on this tab. Sources differ:
+	 * graphic options = colorSepsConfig position artboards, style codes = the player row's
+	 * "Lineup Style Code", colors = its "Color Code", teamCode = "Team Org Code".
+	 * Everything downstream (profile lookup via Styles.xlsx, GraphicsOrganizationData,
+	 * separation groups) is the unchanged LEAP path.
+	 */
+	isNNProDoc = false;
+	private nnProContext: any = null;
+
+	private async detectNNPro(): Promise<boolean> {
+		try {
+			const context = await this.controller.resolveNNProContext();
+			if (!context || !context.isNNProProduct) {
+				return false;
+			}
+			/* No positions config = OLD product → standalone form/jobs path (mirror of the
+			   Graphics-tab gating), not the organize mode. */
+			const positions = context.colorSepsConfig?.positions;
+			const hasPositions =
+				Array.isArray(positions) && positions.some((p: any) => p && String(p.artboard || '').trim() !== '');
+			if (!hasPositions) {
+				return false;
+			}
+			this.nnProContext = context;
+			this.isNNProDoc = true;
+			this.hasVersionDocument = true;
+			this.versionDocumentPath = context.documentPath || null;
+			return true;
+		} catch (e) {
+			return false;
+		}
+	}
+
+	/** NN Pro style codes — the player row's "Lineup Style Code", comma/semicolon-split. */
+	private nnProStyleCodes(): string[] {
+		const raw = this.nnProContext?.playerRow ? this.nnProContext.playerRow['Lineup Style Code'] : null;
+		if (raw == null) return [];
+		return String(raw)
+			.split(/[,;]+/)
+			.map((code) => code.trim())
+			.filter((code) => code !== '');
+	}
+
+	/** NN Pro colorway list — the player row's "Color Code" (may be a NUMBER from Excel). */
+	private nnProColorList(): string[] {
+		const code = this.nnProContext?.playerRow ? this.nnProContext.playerRow['Color Code'] : null;
+		const text = code != null ? String(code).trim() : '';
+		return text !== '' ? [text] : [];
+	}
+
+	/*
+	 * NN Pro Prepare: open the STANDALONE form prefilled from the player row + this profile group.
+	 * The user selects the artwork on the product, Exports, and runs Prepare from the form — the
+	 * standard standalone flow from there (SEP doc lands in <product folder>/SEPS until the NN Pro
+	 * output folder is decided). Position prefills from this graphic's Organize Graphics row.
+	 */
+	private openStandaloneFormForNNProGroup(separationId: number, graphicName: string): void {
+		const separation = this.separations.find((s) => s.id === separationId);
+		const row = this.nnProContext?.playerRow || {};
+		const text = (key: string): string => (row && row[key] != null ? String(row[key]).trim() : '');
+		const graphicEntry = this.graphicsData.find((g: any) => g && g.name === graphicName);
+		const job = {
+			itemId: text('Item_ID'),
+			position: (graphicEntry && graphicEntry.position) || '',
+			teamCode: text('Team Org Code'),
+			league: text('League_desc'),
+			styleCode:
+				(separation?.styles && separation.styles[0]) ||
+				text('Lineup Style Code').split(/[,;]+/)[0].trim(),
+			profileName:
+				separation && separation.profile && separation.profile !== 'Unknown Profile'
+					? separation.profile
+					: '',
+			teamName: text('Graphic Org Name'),
+			concept: text('Graphic Concept Code'),
+			garmentColors: '',
+			garmentColorCode: text('Color Code'),
+			graphicName: text('Graphic_Name'),
+			graphicCode: text('Graphic_code'),
+			player: text('Player Full Name'),
+			season: text('Style Season'),
+			sourceDocumentPath: this.nnProContext?.documentPath || ''
+		};
+		this.leapSepsLog.logClick('Prepare for Seps (NN Pro -> standalone form)', {
+			separationId,
+			graphicName,
+			profile: job.profileName,
+			style: job.styleCode,
+			position: job.position
+		});
+		const nav = (window as any).__LEAP_TAB_NAVIGATION__;
+		if (nav && typeof nav.openStandalone === 'function') {
+			nav.openStandalone(job);
+		} else {
+			this.reportFailure('separation-generate', 'Could not open the standalone form for this NN Pro product.');
+		}
+	}
+
 	async checkVersionDocument(): Promise<void> {
 		this.isCheckingDocument = true;
+		this.isNNProDoc = false;
+		this.nnProContext = null;
 		try {
 			const separatedResult = await this.controller.checkSeparatedDocument();
 			// Debug: share this console output to inspect XMP/document detection
@@ -350,24 +452,25 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 				this.hasVersionDocument = !!isVersionFile;
 				this.versionDocumentPath = result.documentPath || null;
 
-				/*
-				 * Standalone (non-LEAP) jobs recorded on THIS document at Export. Only looked up when the
-				 * document is not a LEAP version document, so the LEAP path never pays for it and can never be
-				 * influenced by it.
-				 */
+				/* Not a LEAP version doc — an NN Pro PRODUCT drives this tab with NN Pro sources. */
 				if (!this.hasVersionDocument) {
+					await this.detectNNPro();
+				}
+
+				/*
+				 * Standalone (non-LEAP) jobs recorded on THIS document (at Export, or via the form's
+				 * Done). Looked up when the document is not a LEAP version document — and for NN Pro
+				 * organize-mode products, whose Done-recorded jobs are what actually run Prepare. The
+				 * LEAP path never pays for it and can never be influenced by it.
+				 */
+				if (!this.hasVersionDocument || this.isNNProDoc) {
 					await this.loadStandaloneJobs();
 				} else {
 					this.standaloneJobs = [];
 				}
 
 				if (this.hasVersionDocument) {
-					await this.loadProfileNamesFromSettings();
-					await this.loadInkInfoProfileCodes();
-					await this.loadGraphicsList();
-					await this.loadGraphicsData();
-					await this.loadSeparationPaths();
-					await this.loadTeamCode();
+					await this.loadVersionDocumentData();
 				}
 			} else {
 				this.hasVersionDocument = false;
@@ -379,11 +482,18 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 				this.separationPaths = {};
 				this.hasGraphicsPositions = false;
 				/*
-				 * getTemplateInfo FAILS for a non-LEAP document ("JSON file not found…") — which is exactly the
-				 * case where standalone jobs live. Clearing the list here made the tab fall back to
-				 * "Please open the version document" straight after an export, so load them in this branch too.
+				 * getTemplateInfo FAILS for a non-LEAP document ("JSON file not found…") — the NN Pro
+				 * product case lands here too (no team JSON next to it), so check NN Pro first.
 				 */
-				await this.loadStandaloneJobs();
+				if (await this.detectNNPro()) {
+					await this.loadStandaloneJobs();
+					await this.loadVersionDocumentData();
+				} else {
+					/* …and it is also exactly where standalone jobs live. Clearing the list here made the
+					   tab fall back to "Please open the version document" straight after an export, so load
+					   them in this branch too. */
+					await this.loadStandaloneJobs();
+				}
 			}
 		} catch (err) {
 			console.error('[Separations] checkVersionDocument error:', err);
@@ -501,7 +611,25 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 			});
 	}
 
+	/* The full load chain for a workable document (LEAP version doc or NN Pro product). */
+	private async loadVersionDocumentData(): Promise<void> {
+		await this.loadProfileNamesFromSettings();
+		await this.loadInkInfoProfileCodes();
+		await this.loadGraphicsList();
+		await this.loadGraphicsData();
+		await this.loadSeparationPaths();
+		await this.loadTeamCode();
+	}
+
 	async loadTeamCode(): Promise<void> {
+		if (this.isNNProDoc) {
+			/* NN Pro: teamCode = the player row's "Team Org Code"; document path is already set. */
+			const row = this.nnProContext?.playerRow;
+			this.teamCode = row && row['Team Org Code'] != null ? String(row['Team Org Code']) : '';
+			await this.loadAvailableColors();
+			await this.loadSeparations();
+			return;
+		}
 		try {
 			const result = await this.controller.getTemplateInfo();
 			if (result.success && result.data && result.data.teamCode) {
@@ -524,6 +652,11 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 	}
 
 	async loadAvailableColors(): Promise<void> {
+		if (this.isNNProDoc) {
+			/* NN Pro: the product carries ONE colorway — the player row's "Color Code". */
+			this.availableColors = this.nnProColorList();
+			return;
+		}
 		if (!this.teamCode || this.teamCode === '') {
 			return;
 		}
@@ -547,6 +680,25 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 
 	async loadGraphicsList(): Promise<void> {
 		if (this.isRunningInBrowser) {
+			return;
+		}
+
+		if (this.isNNProDoc) {
+			/*
+			 * NN Pro: graphics = colorSepsConfig position ARTBOARDS (same names the Graphics tab
+			 * rows use). No LIVE_ART layers and no 02 GRAPHICS folders to check.
+			 */
+			const positions = this.nnProContext?.colorSepsConfig?.positions;
+			this.graphicOptions = Array.isArray(positions)
+				? positions
+					.filter((p: any) => p && String(p.artboard || '').trim() !== '')
+					.map((p: any) => String(p.artboard).trim())
+				: [];
+			this.expandedGraphics.clear();
+			this.graphicOptions.forEach((g) => this.expandedGraphics.add(g));
+			await this.loadSeparationPaths();
+			await this.checkGraphicsPositions();
+			this.cdr.detectChanges();
 			return;
 		}
 
@@ -900,7 +1052,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 			}
 		});
 
-		if (!this.teamCode || this.teamCode === '') {
+		if (!this.isNNProDoc && (!this.teamCode || this.teamCode === '')) {
 			console.log(logPrefix, 'Skipped – missing teamCode:', this.teamCode || '(empty)');
 			this.separations = this.filterSuppressedGroups(this.buildSeparationsFromXmpGroups());
 			this.allTeamStyleCodes = [];
@@ -911,11 +1063,16 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 			return;
 		}
 
-		console.log(logPrefix, 'Inputs – teamCode:', this.teamCode, '| versionDocumentPath:', this.versionDocumentPath);
+		console.log(logPrefix, 'Inputs – teamCode:', this.teamCode, '| versionDocumentPath:', this.versionDocumentPath, this.isNNProDoc ? '| NN Pro (style codes from player row)' : '');
 		this.isLoadingSeparations = true;
 
-		this.controller
-			.getStyleCodesFromExcel(this.teamCode, this.versionDocumentPath || undefined)
+		/* NN Pro: style codes come straight from the product's player row, not the BATCH excel.
+		   The rest of the chain (Styles.xlsx profile lookup, grouping, XMP merge) is unchanged. */
+		const styleCodesSource: Promise<any> = this.isNNProDoc
+			? Promise.resolve({ success: true, styleCodes: this.nnProStyleCodes() })
+			: this.controller.getStyleCodesFromExcel(this.teamCode, this.versionDocumentPath || undefined);
+
+		styleCodesSource
 			.then((styleResult) => {
 				if (!styleResult.success || !styleResult.styleCodes || styleResult.styleCodes.length === 0) {
 					console.warn(logPrefix, 'Step 1 – Style codes: missing or failed. success:', styleResult?.success, '| count:', styleResult?.styleCodes?.length ?? 0, '| error:', styleResult?.error ?? 'none');
@@ -1351,6 +1508,15 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 	 */
 	handlePrepareForSeps(separationId: number, graphicName: string): void {
 		/*
+		 * NN Pro products go through the STANDALONE pipeline — the LEAP host prepare needs the
+		 * teamout folder tree + team JSON, which an NN Pro product does not have. The standalone
+		 * flow needs neither (Charu, 2026-09-02).
+		 */
+		if (this.isNNProDoc) {
+			this.openStandaloneFormForNNProGroup(separationId, graphicName);
+			return;
+		}
+		/*
 		 * Fresh selection check at click time (the polled hasIllustratorSelection only drives the
 		 * label): something selected -> Prepare from Selection; nothing -> Prepare from the version
 		 * document's SIZED_ART/SIZED_GRAPHICS/<graphic> item.
@@ -1470,9 +1636,39 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 				}
 			}
 
+			/*
+			 * Brand from the Styles.xlsx "Brand" column (first style that has one) — the host uses it
+			 * for the [Brand] file/folder token (first letter: F for Fanatics, N for Nike) and to show
+			 * the matching Footer sublayer in the SEP template at Prepare.
+			 */
+			let brandName = '';
+			if (!this.isRunningInBrowser && styleCodes.length > 0) {
+				try {
+					const styleInfoResult = await this.controller.getStyleInformation(styleCodes);
+					if (styleInfoResult?.success && styleInfoResult.styleInfoMap) {
+						for (const code of styleCodes) {
+							const info =
+								styleInfoResult.styleInfoMap[code] ||
+								styleInfoResult.styleInfoMap[String(code).trim()];
+							const value = info && (info['Brand'] || info['brand'] || info['BRAND']);
+							if (value && String(value).trim() !== '') {
+								brandName = String(value).trim();
+								break;
+							}
+						}
+					}
+					if (!brandName) {
+						console.warn('[SEPARATIONS] No Brand value in Styles.xlsx for styles:', styleCodes);
+					}
+				} catch (brandErr) {
+					console.warn('[SEPARATIONS] Brand lookup failed:', brandErr);
+				}
+			}
+
 			const profileMetadata: any = {
 				profileName: profileName,
 				profileCode: profileCode,
+				brand: brandName,
 				styleCodes: styleCodes,
 				colorCodes: graphicColors,
 				graphicName: graphicName,

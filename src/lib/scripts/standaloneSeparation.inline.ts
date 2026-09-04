@@ -56,27 +56,60 @@ function standaloneSeparationRun(params) {
 	var jsonData = params.jsonData || {};
 	var sepsTemplateFileName = params.sepsTemplateFileName || "SEP-GRID-TEMPLATE.ai";
 	var exportedFilePath = params.exportedFilePath ? String(params.exportedFilePath) : "";
+	var fromSelection = params.fromSelection === true;
+	var docBaseName = params.docBaseName ? String(params.docBaseName) : "";
 
 	if (!graphicName) return stdSepErr("Graphic name (position) is required");
-	if (!exportedFilePath) return stdSepErr("Exported graphic file path is required");
 
-	var aiFile = new File(exportedFilePath);
-	if (!aiFile.exists) return stdSepErr("Exported graphic file not found: " + exportedFilePath);
+	var rootFolder = null;
+	var docName = "";
+	var selectionItems = null;
+	var sourceDoc = null;
 
-	/*
-	 * Output: a flat SEPS folder at the SAME LEVEL as ASSETS (its sibling). A non-LEAP job has no
-	 * 09 SEPARATIONS tree to anchor to, so the separation sits next to the graphic it was made from.
-	 */
-	var assetsFolder = aiFile.parent;                 /* .../ASSETS */
-	if (!assetsFolder) return stdSepErr("Could not resolve the ASSETS folder from the exported file");
-	var rootFolder = assetsFolder.parent;             /* the document folder that holds ASSETS */
+	if (fromSelection) {
+		/*
+		 * "Done"-flow prepare (no ASSETS export step): the art is the CURRENT SELECTION in the
+		 * source document. Capture the item references NOW — copyAndPrepareSEPDocument switches the
+		 * active document, and the selection must come from the source doc. Output goes to a SEPS
+		 * folder NEXT TO THE SOURCE DOCUMENT (there is no ASSETS folder on this path).
+		 */
+		if (app.documents.length === 0) return stdSepErr("No document is open");
+		sourceDoc = app.activeDocument;
+		var srcFile = null;
+		try { srcFile = sourceDoc.fullName ? new File(sourceDoc.fullName) : null; } catch (eSrcF) { srcFile = null; }
+		if (!srcFile || !srcFile.exists) {
+			return stdSepErr("Save the document first so a SEPS folder can be created next to it");
+		}
+		selectionItems = [];
+		var liveSel = sourceDoc.selection || [];
+		for (var selI = 0; selI < liveSel.length; selI++) {
+			if (liveSel[selI]) selectionItems.push(liveSel[selI]);
+		}
+		if (selectionItems.length === 0) {
+			return stdSepErr("Nothing is selected. Select the artwork to separate, then Prepare.");
+		}
+		rootFolder = srcFile.parent;
+		docName = (docBaseName || graphicName).replace(/[^A-Za-z0-9._-]+/g, "_");
+		if (!docName) docName = "ASSET";
+		stdSepLog("prepare from selection: " + selectionItems.length + " item(s), doc=" + docName);
+	} else {
+		if (!exportedFilePath) return stdSepErr("Exported graphic file path is required");
+		var aiFile = new File(exportedFilePath);
+		if (!aiFile.exists) return stdSepErr("Exported graphic file not found: " + exportedFilePath);
+		/*
+		 * Output: a flat SEPS folder at the SAME LEVEL as ASSETS (its sibling). A non-LEAP job has no
+		 * 09 SEPARATIONS tree to anchor to, so the separation sits next to the graphic it was made from.
+		 */
+		var assetsFolder = aiFile.parent;                 /* .../ASSETS */
+		if (!assetsFolder) return stdSepErr("Could not resolve the ASSETS folder from the exported file");
+		rootFolder = assetsFolder.parent;                 /* the document folder that holds ASSETS */
+		/* Base name for the separated file (mirrors the exported name, e.g. 7G_FM01_Front). */
+		docName = aiFile.name.replace(/\\.[^\\.]+$/, "");
+	}
 	if (!rootFolder) return stdSepErr("Could not resolve the document folder");
 	var sepFolder = new Folder(rootFolder.fsName + "/SEPS");
 	if (!sepFolder.exists) sepFolder.create();
 	if (!sepFolder.exists) return stdSepErr("Could not create the SEPS folder");
-
-	/* Base name for the separated file (mirrors the exported name, e.g. 7G_FM01_Front). */
-	var docName = aiFile.name.replace(/\\.[^\\.]+$/, "");
 
 	var templateFile = getTemplateFile(sepsTemplateFileName);
 	if (!templateFile) {
@@ -115,12 +148,144 @@ function standaloneSeparationRun(params) {
 		try { placeCadPngInDocument(sepDoc, String(params.cadPngPath)); } catch (eCad) { }
 	}
 
-	/* 2) Place + embed the exported graphic onto the SEP_ART area. */
+	/* 2) Place the art onto the SEP_ART area. */
 	unlockSizedGraphicsContents(sepDoc);
-	try { placeGraphicInDocument(sepDoc, "", exportedFilePath); } catch (ePng) { }
-	var aiPlaced = placeAndEmbedGraphicAI(sepDoc, exportedFilePath, graphicName);
-	if (!aiPlaced) {
-		return stdSepErr("Graphic AI could not be placed: " + exportedFilePath, { separatedDocumentPath: sepDocPath });
+	if (fromSelection) {
+		/*
+		 * Copy the captured selection from the source document and paste it into SIZED_GRAPHICS —
+		 * the same tail the LEAP selection path uses (group, name = graphicName, centre-top align
+		 * to SEP_ART, prepare, overprint off).
+		 */
+		var selPlacedOk = false;
+		try {
+			var selSizedArt = sepDoc.layers.getByName("SIZED_ART");
+			var selSizedGraphics;
+			try { selSizedGraphics = selSizedArt.layers.getByName("SIZED_GRAPHICS"); }
+			catch (eSelSg) { selSizedGraphics = selSizedArt.layers.add(); selSizedGraphics.name = "SIZED_GRAPHICS"; }
+			var selSepArtGuide = findPageItemByName(selSizedArt, "SEP_ART") || findPageItemByName(sepDoc, "SEP_ART");
+
+			app.activeDocument = sourceDoc;
+			sourceDoc.selection = null;
+			var selCount = 0;
+			for (var selP = 0; selP < selectionItems.length; selP++) {
+				try {
+					var selIt = selectionItems[selP];
+					if (selIt.locked) selIt.locked = false;
+					if (selIt.hidden) selIt.hidden = false;
+					selIt.selected = true;
+					selCount++;
+				} catch (eSelOne) { }
+			}
+			if (selCount === 0) {
+				return stdSepErr("Could not re-select the artwork", { separatedDocumentPath: sepDocPath });
+			}
+			app.copy();
+			sourceDoc.selection = null;
+
+			app.activeDocument = sepDoc;
+			app.preferences.setBooleanPreference('layers/pastePreserve', false);
+			sepDoc.activeLayer = selSizedGraphics;
+			app.paste();
+			if (sepDoc.selection.length > 0) {
+				app.executeMenuCommand("group");
+				var selPasted = sepDoc.selection && sepDoc.selection.length ? sepDoc.selection[0] : null;
+				if (!selPasted) {
+					try { selPasted = selSizedGraphics.pageItems[0]; } catch (eSelTop) { selPasted = null; }
+				}
+				if (selPasted) {
+					selPasted.name = graphicName;
+					/*
+					 * EMBED any placed items inside the pasted selection FIRST. NN Pro products build
+					 * their art from PlacedItems (linked name/number PDFs) — left linked, the flatten
+					 * pass has no filled vector paths to work on and splitColors finds no ink colors
+					 * ("No ink colors found in the processed art"). embed() swaps each placed item for
+					 * native art in place, so collect the list first, then embed each.
+					 */
+					try {
+						var placedList = [];
+						(function collectPlaced(container) {
+							try {
+								if (container.typename === "PlacedItem") { placedList.push(container); return; }
+								if (container.pageItems) {
+									for (var cp = 0; cp < container.pageItems.length; cp++) {
+										collectPlaced(container.pageItems[cp]);
+									}
+								}
+							} catch (eWalk) { }
+						})(selPasted);
+						for (var pe = 0; pe < placedList.length; pe++) {
+							try { placedList[pe].embed(); } catch (eEmbed) { }
+						}
+						if (placedList.length) {
+							stdSepLog("embedded " + placedList.length + " placed item(s) from the selection");
+						}
+					} catch (eEmbedAll) { }
+					/* embed() can restructure the paste — re-resolve the group if the reference died. */
+					try {
+						var probeBounds = selPasted.geometricBounds;
+					} catch (eProbe) {
+						try { selPasted = selSizedGraphics.pageItems[0]; selPasted.name = graphicName; } catch (eReacq) { }
+					}
+					if (selSepArtGuide) {
+						var selGuideBounds = selSepArtGuide.geometricBounds;
+						var selCurBounds = selPasted.geometricBounds;
+						var selCurCenterX = selCurBounds[0] + ((selCurBounds[2] - selCurBounds[0]) / 2);
+						var selTargetCenterX = selGuideBounds[0] + ((selGuideBounds[2] - selGuideBounds[0]) / 2);
+						selPasted.translate(selTargetCenterX - selCurCenterX, selGuideBounds[1] - selCurBounds[1]);
+					}
+					prepareSizedArtGraphicForProcessing(sepDoc, selPasted);
+					setFillOverprintOnContainer(selPasted, false);
+					/*
+					 * Fill every [GRAPHIC] placeholder on SIZED_ART with a scaled duplicate of the same
+					 * art — the file-based flow put the exported .ai there (placeGraphicInDocument);
+					 * the selection flow has no file, so the pasted group itself is the source. Same
+					 * fit rule: uniform scale into the placeholder bounds, centred.
+					 */
+					try {
+						var gphCount = 0;
+						if (selSizedArt.pathItems && selSizedArt.pathItems.length > 0) {
+							for (var gp = 0; gp < selSizedArt.pathItems.length; gp++) {
+								var gphPath = selSizedArt.pathItems[gp];
+								if (!gphPath || gphPath.name !== "[GRAPHIC]") continue;
+								var gb = gphPath.geometricBounds;
+								var gbW = gb[2] - gb[0];
+								var gbH = gb[1] - gb[3];
+								if (gbW <= 0 || gbH <= 0) continue;
+								var gphDup = selPasted.duplicate(selSizedArt, ElementPlacement.PLACEATBEGINNING);
+								gphDup.name = "";
+								var dupW = gphDup.width;
+								var dupH = gphDup.height;
+								if (dupW > 0 && dupH > 0) {
+									var fitPct = Math.min(gbW / dupW, gbH / dupH) * 100;
+									gphDup.resize(fitPct, fitPct);
+								}
+								var newW = gphDup.width;
+								var newH = gphDup.height;
+								gphDup.left = gb[0] + ((gbW - newW) / 2);
+								gphDup.top = gb[3] + gbH - ((gbH - newH) / 2);
+								gphCount++;
+							}
+						}
+						if (gphCount) {
+							stdSepLog("placed a selection copy into " + gphCount + " [GRAPHIC] placeholder(s)");
+						}
+					} catch (eGph) { stdSepLog("[GRAPHIC] preview error: " + (eGph.message || eGph)); }
+					selPlacedOk = true;
+				}
+			}
+			sepDoc.selection = null;
+		} catch (eSelPlace) {
+			return stdSepErr("Selected artwork could not be placed: " + (eSelPlace.message || eSelPlace), { separatedDocumentPath: sepDocPath });
+		}
+		if (!selPlacedOk) {
+			return stdSepErr("Selected artwork could not be placed into the SEP document", { separatedDocumentPath: sepDocPath });
+		}
+	} else {
+		try { placeGraphicInDocument(sepDoc, "", exportedFilePath); } catch (ePng) { }
+		var aiPlaced = placeAndEmbedGraphicAI(sepDoc, exportedFilePath, graphicName);
+		if (!aiPlaced) {
+			return stdSepErr("Graphic AI could not be placed: " + exportedFilePath, { separatedDocumentPath: sepDocPath });
+		}
 	}
 	sepDoc.save();
 
@@ -209,6 +374,7 @@ function standaloneSeparationRun(params) {
 					graphicName: graphicName,
 					styleCodes: styleCodes,
 					standalone: true,
+					fromSelection: fromSelection,
 					exportedFilePath: exportedFilePath,
 					separationVersion: profileMetadata.separationVersion || 1
 				}, true, false);

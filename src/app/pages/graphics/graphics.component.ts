@@ -107,6 +107,19 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
 
  isRunningInBrowser = false;
 
+ /*
+  * ----- NN Pro product mode (docs/TODO.md "NN Pro separation support") -----
+  * An NN Pro PRODUCT (XMP LEAP_XMP_META Document_Type "NN Pro Product") uses this SAME page —
+  * only the sources differ: graphics rows come from XMP colorSepsConfig positions
+  * ({artboard, position, abbv}; Metadata/template_color_seps.json fallback for old products),
+  * colors come from the player row (XMP LEAP_PLAYER_META first, Metadata/<product>.json
+  * fallback — its "Color Code"). Done writes the same GraphicsOrganizationData XMP, so the
+  * downstream flow is unchanged.
+  */
+ isNNProDoc = false;
+ private nnProDocInfo: any = null;
+ private nnProPlayerRow: any = null;
+
  constructor(
   private controller: ControllerService,
   private cdr: ChangeDetectorRef,
@@ -122,7 +135,10 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
    */
   (window as any).__LEAP_GRAPHICS_STANDALONE__ = {
    open: (job: any) => this.openStandaloneForm(job),
-   close: () => this.closeStandaloneForm()
+   close: () => this.closeStandaloneForm(),
+   /* Tab re-activation: reopen the form from the newest recorded job when appropriate (the form
+      closes itself on Done/Export, which otherwise left this tab blank on non-LEAP docs). */
+   refresh: () => this.maybeAutoOpenStandaloneForm()
   };
   this.startSelectionPolling();
   this.checkVersionDocument().then(() => {
@@ -183,6 +199,12 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
   * Build per-graphic option lists for Underbase 2–4 from each graphic's own art whites.
   */
  loadUnderbaseSwatchOptionsForAllGraphics(): void {
+  /* NN Pro docs have no LIVE_ART/GRAPHIC:* layers — the host art-white scan would just error. */
+  if (this.isNNProDoc) {
+   this.underbaseSwatchOptionsByGraphic = {};
+   this.cdr.detectChanges();
+   return;
+  }
   const individualGraphics = this.graphics.filter((g) => g.id !== 'all');
   if (individualGraphics.length === 0) {
    this.underbaseSwatchOptionsByGraphic = {};
@@ -350,8 +372,54 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
   return this.performVersionDocumentCheck();
  }
 
+ /*
+  * Detect an NN Pro product and resolve its data sources (XMP first, Metadata sidecars as the
+  * old-product fallback). Returns true when the active doc is an NN Pro product.
+  */
+ private detectNNProDocument(): Promise<boolean> {
+  return this.controller
+   .resolveNNProContext()
+   .then((context: any) => {
+    if (!context || !context.isNNProProduct) {
+     return false;
+    }
+    /*
+     * OLD products carry no positions config (neither XMP colorSepsConfig nor
+     * Metadata/template_color_seps.json). Those are handled by the STANDALONE form instead
+     * (auto-opens because hasVersionDocument stays false; prefills itself from the NN Pro
+     * player row — see standalone-separation tryPrefillFromNNPro). Only a product WITH
+     * positions gets the organize-graphics mode.
+     */
+    const positions = context.colorSepsConfig?.positions;
+    const hasPositions =
+     Array.isArray(positions) && positions.some((p: any) => p && String(p.artboard || '').trim() !== '');
+    if (!hasPositions) {
+     console.log('[GRAPHICS] NN Pro product without positions config — standalone form path');
+     return false;
+    }
+    this.nnProDocInfo = context;
+    this.nnProPlayerRow = context.playerRow;
+    this.isNNProDoc = true;
+    console.log('[GRAPHICS] NN Pro product detected:', {
+     positions: context.colorSepsConfig?.positions?.length || 0
+    });
+    return true;
+   })
+   .catch(() => false);
+ }
+
+ /** NN Pro colorway list — the player row's "Color Code" (may arrive as a NUMBER from Excel). */
+ private nnProColorList(): string[] {
+  const code = this.nnProPlayerRow ? this.nnProPlayerRow['Color Code'] : null;
+  const text = code != null ? String(code).trim() : '';
+  return text !== '' ? [text] : [];
+ }
+
  private performVersionDocumentCheck(): Promise<void> {
   this.isCheckingDocument = true;
+  this.isNNProDoc = false;
+  this.nnProDocInfo = null;
+  this.nnProPlayerRow = null;
   return this.controller
    .checkSeparatedDocument()
    .then((separatedResult) => {
@@ -377,8 +445,19 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
      } else {
       this.hasVersionDocument = false;
      }
+     /* Not a LEAP version doc — an NN Pro PRODUCT uses this same page with NN Pro sources. */
+     if (!this.hasVersionDocument && hasDoc) {
+      return this.detectNNProDocument().then((isNNPro) => {
+       if (isNNPro) {
+        this.hasVersionDocument = true;
+       }
+       this.isCheckingDocument = false;
+       this.cdr.detectChanges();
+      });
+     }
      this.isCheckingDocument = false;
      this.cdr.detectChanges();
+     return;
     });
    })
    .catch((err) => {
@@ -422,6 +501,13 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
  }
 
  loadTeamCode(): void {
+  if (this.isNNProDoc) {
+   /* NN Pro: the player row's "Team Org Code" stands in for the LEAP teamCode. */
+   const row = this.nnProPlayerRow;
+   this.teamCode = row && row['Team Org Code'] != null ? String(row['Team Org Code']) : '';
+   this.loadPositionOptions();
+   return;
+  }
   this.controller
    .getTemplateInfo()
    .then((result) => {
@@ -435,6 +521,12 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
  }
 
  loadAvailableColors(): void {
+  if (this.isNNProDoc) {
+   /* NN Pro: the product carries ONE colorway — the player row's "Color Code". */
+   this.availableColors = this.nnProColorList();
+   this.cdr.detectChanges();
+   return;
+  }
   if (!this.teamCode || this.teamCode === '') {
    return;
   }
@@ -537,8 +629,47 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
    .catch((err) => {});
  }
 
+ /*
+  * NN Pro graphics rows — one per colorSepsConfig position ({artboard, position, abbv}). The
+  * row NAME is the ARTBOARD (unique + 1:1 with positions; the later separation stage will pull
+  * art per artboard), and the Position column prefills with the saved DESC — the same
+  * graphic_positions.json vocabulary the LEAP dropdown uses. Saved GraphicsOrganizationData
+  * (XMP) overlays on top via loadGraphicsDataFromXMP, exactly like the LEAP path.
+  */
+ private loadNNProGraphicsList(): void {
+  const positions = this.nnProDocInfo?.colorSepsConfig?.positions;
+  const entries = Array.isArray(positions)
+   ? positions.filter((p: any) => p && String(p.artboard || '').trim() !== '')
+   : [];
+  this.graphicNames = entries.map((p: any) => String(p.artboard).trim());
+  this.graphics = [
+   { id: 'all', name: 'All graphics', position: '', samePlates: '', colors: null, distress: false },
+   ...entries.map((p: any, index: number) => ({
+    id: `graphic-${index}`,
+    name: String(p.artboard).trim(),
+    position: p.position != null ? String(p.position) : '',
+    samePlates: '',
+    colors: null,
+    distress: false
+   }))
+  ];
+  this.samePlatesOptions = [...this.graphicNames, 'None'];
+  this.availableColors = this.nnProColorList();
+  this.loadTeamCode();
+  setTimeout(() => {
+   this.loadGraphicsDataFromXMP();
+  }, 100);
+  this.isLoadingGraphics = false;
+  this.cdr.detectChanges();
+ }
+
  loadGraphicsList(): void {
   this.isLoadingGraphics = true;
+
+  if (this.isNNProDoc) {
+   this.loadNNProGraphicsList();
+   return;
+  }
 
   this.controller
    .getGraphicsList()
@@ -667,6 +798,23 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
    isLoadingColors: true
   };
   this.cdr.detectChanges(); // Ensure graphic name displays immediately
+
+  if (this.isNNProDoc) {
+   /* NN Pro: no BATCH excel — the one colorway comes from the player row's "Color Code". */
+   const nnColors = this.nnProColorList();
+   const nnGraphic = this.graphics.find((g) => g.id === graphicId);
+   this.modalState = {
+    isOpen: true,
+    graphicId,
+    graphicName,
+    availableColors: nnColors,
+    selectedColors:
+     nnGraphic?.colors === null ? nnColors : (nnGraphic?.colors && nnGraphic.colors.length > 0 ? nnGraphic.colors : []),
+    isLoadingColors: false
+   };
+   this.cdr.detectChanges();
+   return;
+  }
 
   this.controller
    .getColorCodesFromExcel(this.teamCode)
@@ -1016,6 +1164,9 @@ export class GraphicsComponent implements OnInit, OnChanges, AfterViewInit, OnDe
   this.standaloneFormOpen = false;
   this.standalonePresetJob = null;
   this.standaloneFormDocKey = null;
+  /* Allow a later auto-reopen (tab return, refresh) — the once-per-doc memo protected against
+     reopening OVER a live form, not against reopening after the form closed itself. */
+  this.autoOpenedForDocKey = null;
   this.cdr.detectChanges();
  }
 

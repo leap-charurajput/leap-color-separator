@@ -96,6 +96,8 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 	private swatchListAdapter: any = null;
 	/** Snapshot of per-plate grid values carried over across a refresh-triggered reload. */
 	private carryOverRowValues: { [normName: string]: Partial<ColorRow> } | null = null;
+	/** Plates-UI row order (normalized names) captured before a refresh reload — see applyCarryOverRowOrder. */
+	private carryOverRowOrder: string[] | null = null;
 	documentProfileMetadata: any = null;
 	/** Saved LEAPSeparationColorsData rows — merged into layer-based rows for mesh/flash metadata. */
 	private xmpColorDataForMerge: any[] | null = null;
@@ -301,6 +303,34 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 				removed: prev.removed != null ? prev.removed : row.removed
 			};
 		});
+	}
+
+	/*
+	 * Re-apply the user's Plates-UI row order captured before a refresh reload. Since reordering
+	 * became UI-only (2026-08-28, no SEPARATED_ART move), a reload rebuilds rows in DOCUMENT order —
+	 * without this, clicking Refresh after a drag would push the OLD sequence into PG Ink Data /
+	 * GRID DATA. Surviving plates keep the user's order (overriding the default Blocker→UB→inks
+	 * sort); plates not in the snapshot (newly added) append at the end in their default-sorted
+	 * relative order. One-shot: the snapshot is consumed after use.
+	 */
+	private applyCarryOverRowOrder(rows: ColorRow[]): ColorRow[] {
+		const order = this.carryOverRowOrder;
+		this.carryOverRowOrder = null;
+		if (!order || order.length === 0) {
+			return rows;
+		}
+		const pos = new Map<string, number>();
+		order.forEach((key, index) => {
+			if (!pos.has(key)) pos.set(key, index);
+		});
+		const rankOf = (row: ColorRow, index: number): number => {
+			const saved = pos.get(this.normalizePlateKey(row.colorName));
+			return saved != null ? saved : order.length + index;
+		};
+		return rows
+			.map((row, index) => ({ row, index }))
+			.sort((a, b) => rankOf(a.row, a.index) - rankOf(b.row, b.index) || a.index - b.index)
+			.map((x) => x.row);
 	}
 
 	ngAfterViewInit(): void {
@@ -864,7 +894,10 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 					// (mesh/micron/flash/cool/wb/color) so a swatch merge doesn't reset the plates that
 					// remain. Plates whose swatch was removed simply don't appear here, so they drop.
 					const carriedColorRows = this.applyCarryOverRowValues(mergedColorRows);
-					const sortedColorRows = this.sortColorRowsWithWhiteUBAtBottom(carriedColorRows);
+					/* Default sort first, then the user's pre-refresh UI order wins for surviving plates. */
+					const sortedColorRows = this.applyCarryOverRowOrder(
+						this.sortColorRowsWithWhiteUBAtBottom(carriedColorRows)
+					);
 					console.log(
 						'[SEPARATION] Color rows loaded from SeparatedLayerNames + Excel:',
 						sortedColorRows.length,
@@ -1468,8 +1501,11 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 			return;
 		}
 
-		// Snapshot current grid values so surviving plates keep them across the reload.
+		// Snapshot current grid values AND row order so surviving plates keep both across the reload
+		// (order matters since 2026-08-28: dragging no longer reorders SEPARATED_ART, so the reload
+		// would otherwise come back in document order and Refresh would push the old sequence).
 		this.carryOverRowValues = this.snapshotRowValues();
+		this.carryOverRowOrder = this.colorRows.map((row) => this.normalizePlateKey(row.colorName));
 
 		this.loadColorRowsFromSeparatedLayerNames()
 			.then(() => {
@@ -2421,31 +2457,12 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 			event.currentIndex
 		);
 
-		// In CEP, always ask Illustrator to reorder — do not gate on isSeparatedDoc (it can be false while
-		// the table still shows rows). ExtendScript returns a clear error if SEPARATED_ART is missing.
-		if (!this.isRunningInBrowser) {
-			const orderedNames = this.colorRows
-				.filter((row) => !row.removed)
-				.map((row) => this.hostLayerName(row));
-			this.controller
-				.reorderSeparatedArtLayers(orderedNames)
-				.then((result) => {
-					if (result && result.success) {
-						console.log('[SEPARATION] SEPARATED_ART layers reordered in document:', {
-							movedCount: result.movedCount,
-							isSeparatedDoc: this.isSeparatedDoc
-						});
-					} else {
-						console.error(
-							'[SEPARATION] Failed to reorder SEPARATED_ART sublayers:',
-							result && result.error
-						);
-					}
-				})
-				.catch((err) => {
-					console.error('[SEPARATION] reorderSeparatedArtLayers error:', err);
-				});
-		}
+		/*
+		 * UI-ONLY reorder (user decision 2026-08-28): the SEPARATED_ART sublayers keep their document
+		 * order — dragging rows here changes the table/print sequence (seq numbers, PG Ink table)
+		 * but never moves layers in Illustrator. The old behavior called
+		 * controller.reorderSeparatedArtLayers here.
+		 */
 	}
 
 	getSequenceNumber(index: number): string {

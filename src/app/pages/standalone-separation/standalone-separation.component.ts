@@ -562,15 +562,138 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
     if (this.tryRestoreFromSidecar(String(path || '').trim())) {
      return;
     }
-    this.prefillFromLicensing();
+    this.prefillFromDocumentSources();
    })
    .catch(() => {
     /* Could not resolve the document; on a forced entry still prefill best-effort. */
     if (force) {
      this.resetExportState();
-     this.prefillFromLicensing();
+     this.prefillFromDocumentSources();
     }
    });
+ }
+
+ /*
+  * NN Pro product? Prefill from its PLAYER ROW (XMP LEAP_PLAYER_META, or Metadata/<product>.json
+  * for old products) instead of the LICENSING sheet — an NN Pro product has no LICENSING artboard,
+  * and the frame heuristics would guess wrong. Every other document takes the normal LICENSING
+  * prefill (which also applies the file-name fallbacks — deliberately SKIPPED for NN Pro: the
+  * product file name does not follow the LEAP pattern and would inject a bogus teamCode).
+  */
+ private prefillFromDocumentSources(): void {
+  this.controller
+   .resolveNNProContext()
+   .then((context: any) => {
+    if (context && context.isNNProProduct) {
+     if (context.playerRow) {
+      this.applyNNProPlayerRow(context.playerRow);
+      return;
+     }
+     /*
+      * NN Pro product with NO player row anywhere — a LOOSE file (copied/downloaded without its
+      * Metadata folder) from before LEAP_PLAYER_META existed. The product FILE NAME is the last
+      * remaining source. Never fall through to the LICENSING heuristics for an NN Pro product:
+      * there is no LICENSING sheet, and the frame/file-name guessing maps NN text into the
+      * wrong fields.
+      */
+     if (this.applyNNProFilenameFallback()) {
+      return;
+     }
+     console.log('[STANDALONE] NN Pro product without player row or parsable file name — fill the form manually');
+     return;
+    }
+    this.prefillFromLicensing();
+   })
+   .catch(() => {
+    this.prefillFromLicensing();
+   });
+ }
+
+ /*
+  * Loose-NN-Pro-product prefill from the FILE NAME, best effort. NN Pro names the product from
+  * the export pattern — in production:
+  *   [Graphic Concept]_[League]_[Fan Code]_[Style]_[Color]_[TeamOrg+GraphicCode]_[Player]_[Number]
+  *   e.g. 0IPX_NFL_WRE_SSLM_2BA_F3Y7RA_TUNSIL_78, 0RAX_NMLB_ATB_FM01_4506_6AW3XD_ACUNA JR_13
+  * Anchored on the LEAGUE segment (the one unambiguous token); Team Org Code + Graphic_code are
+  * concatenated 3+rest by convention (6AW3XD, F3Y7RA). Everything stays editable on the form —
+  * this only fills a fresh form that would otherwise be blank.
+  */
+ private applyNNProFilenameFallback(): boolean {
+  try {
+   const src = String(this.sourceDocumentPath || '').trim();
+   if (!src) return false;
+   const base = (src.split('\\').join('/').split('/').pop() || '').replace(/\.[^.]+$/, '');
+   const segs = base.split('_').map((s) => s.trim()).filter((s) => s.length > 0);
+   if (segs.length < 6) return false;
+   const leagues = ['WNBA', 'NCAA', 'MILB', 'NMLB', 'MLB', 'NFL', 'NBA', 'NHL', 'MLS', 'USFL', 'XFL'];
+   let leagueIndex = -1;
+   for (let i = 0; i < segs.length; i++) {
+    if (leagues.indexOf(segs[i].toUpperCase()) !== -1) {
+     leagueIndex = i;
+     break;
+    }
+   }
+   if (leagueIndex === -1 || leagueIndex + 4 >= segs.length) return false;
+
+   this.concept = leagueIndex > 0 ? segs[leagueIndex - 1] : '';
+   this.league = segs[leagueIndex].toUpperCase();
+   /* segs[leagueIndex+1] is the FAN code (WRE/ATB) — not the Team Org Code; not mapped. */
+   this.styleCode = segs[leagueIndex + 2];
+   this.garmentColorCode = segs[leagueIndex + 3];
+   const orgGraphic = segs[leagueIndex + 4];
+   if (orgGraphic.length >= 4) {
+    this.teamCode = orgGraphic.substring(0, 3);
+    this.graphicCode = orgGraphic.substring(3);
+   } else {
+    this.teamCode = orgGraphic;
+   }
+   const tail = segs.slice(leagueIndex + 5);
+   if (tail.length && /^\d+$/.test(tail[tail.length - 1])) {
+    tail.pop(); /* trailing jersey number — the form has no field for it */
+   }
+   this.player = tail.join(' ');
+
+   console.log('[STANDALONE] Prefilled from NN Pro product file name (best effort):', {
+    concept: this.concept,
+    league: this.league,
+    styleCode: this.styleCode,
+    colorCode: this.garmentColorCode,
+    teamCode: this.teamCode,
+    graphicCode: this.graphicCode,
+    player: this.player
+   });
+   this.resolveProfileFromStyle();
+   this.cdr.detectChanges();
+   return true;
+  } catch (e) {
+   return false;
+  }
+ }
+
+ private applyNNProPlayerRow(row: any): void {
+  const text = (key: string): string => (row && row[key] != null ? String(row[key]).trim() : '');
+  this.itemId = text('Item_ID');
+  /* Multi-code style cells ("N199, FM01") — the FIRST code represents the product. */
+  this.styleCode = text('Lineup Style Code').split(/[,;]+/)[0].trim();
+  this.garmentColorCode = text('Color Code');
+  this.teamCode = text('Team Org Code');
+  this.league = text('League_desc');
+  this.graphicName = text('Graphic_Name');
+  this.teamName = text('Graphic Org Name');
+  this.concept = text('Graphic Concept Code');
+  this.graphicCode = text('Graphic_code');
+  this.player = text('Player Full Name');
+  this.season = text('Style Season');
+  /* Position deliberately left empty — old NN Pro products carry no positions config; the user
+     picks it here (that is the point of the form on this path). */
+  console.log('[STANDALONE] Prefilled from NN Pro player row:', {
+   itemId: this.itemId,
+   styleCode: this.styleCode,
+   teamCode: this.teamCode,
+   league: this.league
+  });
+  this.resolveProfileFromStyle();
+  this.cdr.detectChanges();
  }
 
  /*
@@ -1241,6 +1364,12 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
    const src = String(this.sourceDocumentPath || '').trim();
    if (!src) return '';
 
+   /* NN Pro products: the CAD exports live in <productFolder>/Assets (sibling of Metadata/). */
+   const nnProCad = this.resolveNNProCadPngPath(fs, path, src);
+   if (nnProCad) {
+    return nnProCad;
+   }
+
    const base = src.split('\\').join('/').split('/').pop() || '';
    const name = base.replace(/\.[^.]+$/, '');
    const segs = name.split('_').map((s) => s.trim()).filter((s) => s.length > 0);
@@ -1304,6 +1433,28 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
   return /\.[a-z0-9]{1,5}$/i.test(String(this.sourceDocumentPath || '').trim());
  }
 
+ /*
+  * "Done" gate. Unlike canGenerate it does NOT require a selection or an export — the art is
+  * picked at PREPARE time on the Separations tab (two-stage flow made the Export step redundant,
+  * user decision 2026-09-02) — but the source document must be saved, because Done stamps the job
+  * into its XMP.
+  */
+ get canFinish(): boolean {
+  if (this.isGenerating || this.isExporting || this.isRunningInBrowser || this.isResolvingProfile) {
+   return false;
+  }
+  if (!this.isSourceDocSaved) {
+   return false;
+  }
+  return (
+   !!this.position.trim() &&
+   !!this.teamCode.trim() &&
+   !!this.league.trim() &&
+   !!this.styleCode.trim() &&
+   !!this.profileName.trim()
+  );
+ }
+
  get canGenerate(): boolean {
   if (this.isGenerating || this.isRunningInBrowser || this.isResolvingProfile) {
    return false;
@@ -1328,6 +1479,76 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
    !!this.styleCode.trim() &&
    !!this.profileName.trim()
   );
+ }
+
+ /*
+  * NN Pro CAD lookup: <productFolder>/Assets holds the CAD PNGs exported by the NN Pro run.
+  * The authoritative list is Metadata/data.json (assets whose artboardName starts "CAD:");
+  * fallbacks are <Item ID>.png and any style-code-prefixed png. "_R" (reverse) files rank last.
+  * Returns '' when the folder does not exist — every other document type falls through to the
+  * LEAP PNG-folder lookup unchanged.
+  */
+ private resolveNNProCadPngPath(fs: any, path: any, src: string): string {
+  try {
+   const dir = path.dirname(src);
+   const assetsDir = path.join(dir, 'Assets');
+   if (!fs.existsSync(assetsDir)) return '';
+
+   const candidates: string[] = [];
+   try {
+    const dataJsonPath = path.join(dir, 'Metadata', 'data.json');
+    if (fs.existsSync(dataJsonPath)) {
+     const data = JSON.parse(fs.readFileSync(dataJsonPath, 'utf8'));
+     const assets = Array.isArray(data?.assets) ? data.assets : [];
+     for (const asset of assets) {
+      const artboard = String(asset?.artboardName || '');
+      const fileName = String(asset?.fileName || '').trim();
+      const fileType = String(asset?.fileType || '').toLowerCase();
+      if (artboard.indexOf('CAD:') === 0 && fileName && (fileType === 'png' || fileType === '')) {
+       candidates.push(fileName + '.png');
+      }
+     }
+    }
+   } catch (e) {
+    /* data.json is optional */
+   }
+   if (this.itemId.trim()) {
+    candidates.push(this.itemId.trim() + '.png');
+   }
+
+   const style = this.styleCode.trim().toUpperCase();
+   const rank = (name: string): number =>
+    (/_R\.png$/i.test(name) ? 1 : 0) + (style && name.toUpperCase().indexOf(style) === 0 ? 0 : 2);
+   const ordered = candidates
+    .filter((c, i) => candidates.indexOf(c) === i)
+    .sort((a, b) => rank(a) - rank(b));
+   for (const candidate of ordered) {
+    const full = path.join(assetsDir, candidate);
+    if (fs.existsSync(full)) return full;
+   }
+
+   /* Last resort: any non-"_R" png in Assets, style-code-prefixed when one is known. */
+   try {
+    const files: string[] = fs.readdirSync(assetsDir);
+    const match = files.find(
+     (f) => /\.png$/i.test(f) && !/_R\.png$/i.test(f) && (!style || f.toUpperCase().indexOf(style) === 0)
+    );
+    if (match) return path.join(assetsDir, match);
+   } catch (e) { }
+   return '';
+  } catch (e) {
+   return '';
+  }
+ }
+
+ /*
+  * SEP doc base name on the selection path — same naming the ASSETS export used
+  * (<teamCode>_<styleCode>_<position>, sanitized), so files look identical either way.
+  */
+ private buildSelectionDocBaseName(): string {
+  const sanitize = (value: string): string => String(value || '').trim().replace(/[^A-Za-z0-9._-]+/g, '_');
+  const parts = [this.teamCode, this.styleCode, this.position].map(sanitize).filter((p) => p.length > 0);
+  return parts.join('_');
  }
 
  /* Base payload built from the current form values (shared by export + generate). */
@@ -1378,9 +1599,69 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
  }
 
  /*
+  * DONE — replaces Export (user decision 2026-09-02: the two-stage Prepare/Generate flow made a
+  * separate Export step redundant). Records the job on the source document's XMP
+  * (LEAPStandaloneJobs, WITHOUT an exportedFilePath) and hands over to the Separations tab, where
+  * the user selects the artwork and runs Prepare — the art is taken from that selection.
+  */
+ onDone(): void {
+  if (!this.canFinish) {
+   return;
+  }
+  this.warningMessage = '';
+  this.statusMessage = '';
+  this.isExporting = true; /* reused as the generic busy flag for the primary button */
+  this.cdr.detectChanges();
+
+  const job = {
+   itemId: this.effectiveItemId,
+   position: this.position.trim(),
+   teamCode: this.teamCode.trim(),
+   league: this.league.trim(),
+   styleCode: this.styleCode.trim(),
+   profileName: this.profileName.trim(),
+   teamName: this.teamName.trim(),
+   concept: this.concept.trim(),
+   garmentColors: this.garmentColors.trim(),
+   garmentColorCode: this.garmentColorCode.trim(),
+   graphicName: this.graphicName.trim(),
+   graphicCode: this.graphicCode.trim(),
+   player: this.player.trim(),
+   productLine: this.productLine.trim(),
+   season: this.season.trim(),
+   artRevisions: this.artRevisions.trim(),
+   exportedFileName: '',
+   exportedFilePath: '',
+   colors: [],
+   sourceDocumentPath: this.sourceDocumentPath
+  };
+
+  this.controller
+   .writeStandaloneJobToXmp(job, this.sourceDocumentPath)
+   .then((res: any) => {
+    if (!res || !res.success) {
+     this.warningMessage = res && res.unsaved
+      ? 'Save the document first, then click Done.'
+      : (res && res.error) || 'Could not record the job on the document.';
+     return;
+    }
+    console.log('[STANDALONE] Done — job recorded on source XMP (' + res.jobCount + ' job(s))');
+    this.finishAndShowSeparations();
+   })
+   .catch((err: any) => {
+    this.warningMessage = (err && err.message) || 'Could not record the job on the document.';
+   })
+   .finally(() => {
+    this.isExporting = false;
+    this.cdr.detectChanges();
+   });
+ }
+
+ /*
   * Export: export the current selection to <activeDocFolder>/ASSETS/<name>.ai (leaving that file
   * open), then reveal the Separations view grouped by profile — the same shape the Separations tab
-  * shows. Generation happens per group from that view.
+  * shows. Generation happens per group from that view. KEPT for the restore/sidecar path and as a
+  * fallback; the primary button is now Done (onDone).
   */
  onExport(): void {
   if (!this.canGenerate || this.isExporting) {
@@ -1533,17 +1814,31 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
    this.cdr.detectChanges();
    return;
   }
-  if (!this.exportedFilePath) {
-   group.error = 'Export the selection first, then generate.';
-   this.cdr.detectChanges();
-   return;
-  }
+  /*
+   * No exported .ai (the "Done" flow) -> Prepare takes the art from the CURRENT SELECTION in the
+   * source document. Generate never needs the export either way — it runs on the prepared SEP doc.
+   */
+  const fromSelection = !this.exportedFilePath;
 
   group.isGenerating = true;
   group.status = stage === 'prepare' ? 'Preparing for seps…' : 'Generating separations…';
   this.cdr.detectChanges();
 
-  this.buildStandaloneProfileMetadata(group)
+  const artCheck: Promise<boolean> =
+   fromSelection && stage === 'prepare'
+    ? this.controller
+      .getSelectionCount()
+      .catch(() => 0)
+      .then((count: number) => count > 0)
+    : Promise.resolve(true);
+
+  artCheck
+   .then((hasArt) => {
+    if (!hasArt) {
+     throw new Error('Nothing is selected. Select the artwork in the document, then Prepare.');
+    }
+    return this.buildStandaloneProfileMetadata(group);
+   })
    .then(({ meta, sepsTemplateFileName }) => {
     const jsonData = this.buildJsonData();
     /* Fallback source for any SEP token not explicitly handled. */
@@ -1554,7 +1849,9 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
      profileMetadata: meta,
      jsonData: jsonData,
      sepsTemplateFileName: sepsTemplateFileName || undefined,
-     exportedFilePath: this.exportedFilePath,
+     exportedFilePath: this.exportedFilePath || undefined,
+     fromSelection: fromSelection && stage === 'prepare' ? true : undefined,
+     docBaseName: fromSelection && stage === 'prepare' ? this.buildSelectionDocBaseName() : undefined,
      cadPngPath: this.resolveCadPngPath() || undefined,
      stage: stage
     });

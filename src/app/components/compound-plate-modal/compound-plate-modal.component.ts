@@ -48,7 +48,11 @@ export class CompoundPlateModalComponent implements OnInit, OnChanges {
   this.controller
    .getSpotColorSwatches()
    .then((swatchNames) => {
-    this.fillColors = swatchNames;
+    /* [Registration] reports itself as a SpotColor but is not a real spot ink — drop every
+       bracketed built-in ([Registration], [None]) from the offered lists. */
+    this.fillColors = (swatchNames || []).filter(
+     (name) => !String(name || '').trim().startsWith('[')
+    );
    })
    .catch((err) => {
     console.error('[COMPOUND-MODAL] Error loading spot colors:', err);
@@ -59,6 +63,12 @@ export class CompoundPlateModalComponent implements OnInit, OnChanges {
  ngOnChanges(changes: SimpleChanges): void {
   if (changes['editData'] || changes['isOpen']) {
    this.initializeForm();
+  }
+  /* Re-fetch the document's spot swatches each time the modal opens — the one-time ngOnInit load
+     goes stale when swatches are added/removed while the panel stays mounted. Feeds BOTH the
+     Fill Color and the Generate-choke-path color dropdowns. */
+  if (changes['isOpen'] && this.isOpen) {
+   this.loadSpotColors();
   }
  }
 

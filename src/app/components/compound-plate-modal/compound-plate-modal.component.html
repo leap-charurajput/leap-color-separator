@@ -99,6 +99,8 @@
      />
      <label for="generate-choke">Generate choke path</label>
     </div>
+    <!-- Choke color offers ALL spot colors present in the document (user spec 2026-08-28),
+         not just the plate rows — same source as Fill Color (getSpotColorSwatches). -->
     <select
      class="form-select"
      [value]="chokeColor"
@@ -106,7 +108,7 @@
      [disabled]="!generateChoke"
     >
      <option value="">Choose color...</option>
-     <option *ngFor="let color of availableColors" [value]="color">{{ color }}</option>
+     <option *ngFor="let color of fillColors" [value]="color">{{ color }}</option>
     </select>
    </div>
   </div>

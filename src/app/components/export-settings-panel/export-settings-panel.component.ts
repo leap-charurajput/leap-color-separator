@@ -76,7 +76,13 @@ export class ExportSettingsPanelComponent {
 
  get displayedExcelColumns(): string[] {
   const columns = this.uniqueNonEmpty(this.excelColumns);
-  return columns.length > 0 ? columns : [...FALLBACK_EXCEL_COLUMNS];
+  const base = columns.length > 0 ? columns : [...FALLBACK_EXCEL_COLUMNS];
+  /*
+   * [Brand] is NOT a batch-Excel column — it resolves from the Styles.xlsx "Brand" column and
+   * yields the brand's first letter (F for Fanatics, N for Nike) in separation file/folder
+   * patterns. Offered as a chip alongside the batch columns.
+   */
+  return base.some((c) => c.toLowerCase() === 'brand') ? base : [...base, 'Brand'];
  }
 
  get displayedGraphicPositions(): GraphicPositionChip[] {

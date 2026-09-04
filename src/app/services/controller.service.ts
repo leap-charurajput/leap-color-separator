@@ -10,6 +10,12 @@ import { exportSelectionToAssets } from '../../lib/scripts/exportSelectionToAsse
 import { runStandaloneSeparation } from '../../lib/scripts/standaloneSeparation.script';
 import { hasActiveDocument as hasHostActiveDocument } from '../../lib/scripts/hasActiveDocument.script';
 import { getSelectionCount as getHostSelectionCount } from '../../lib/scripts/getSelectionCount.script';
+/* NN Pro product detection: LEAP_XMP_META / colorSepsConfig read from the active doc's XMP. */
+import { getNNProDocInfo as getHostNNProDocInfo } from '../../lib/scripts/getNNProDocInfo.script';
+/* Restores NN Pro's raw XMP elements after our commits re-serialize them into attribute form. */
+import { restoreNNProXmpElements } from '../../lib/scripts/restoreNNProXmpElements.script';
+/* Inline standalone-job writer with the fixed upsert identity (Done-flow jobs deduped). */
+import { writeStandaloneJobDedup } from '../../lib/scripts/writeStandaloneJob.script';
 import { LeapSepsLogService } from './leap-seps-log.service';
 
 @Injectable({
@@ -203,7 +209,12 @@ export class ControllerService {
 		profileMetadata: any;
 		jsonData: any;
 		sepsTemplateFileName?: string;
-		exportedFilePath: string;
+		/* ASSETS-export path; empty/omitted on the "Done" flow (fromSelection). */
+		exportedFilePath?: string;
+		/* "Done" flow: Prepare takes the art from the current SELECTION in the source document. */
+		fromSelection?: boolean;
+		/* SEP doc base name for the fromSelection path (e.g. "7G_FM01_Front"). */
+		docBaseName?: string;
 		cadPngPath?: string;
 		/* Two-stage: "prepare" | "generate". The panel always sends one of these now. */
 		stage?: 'prepare' | 'generate' | 'full';
@@ -1907,6 +1918,100 @@ export class ControllerService {
 
 	private graphicPositionLookup: Array<{ desc: string; abbv: string }> = [];
 
+	/*
+	 * ---------- NN Pro mode (see docs/TODO.md "NN Pro separation support") ----------
+	 * An NN Pro PRODUCT document is detected by its XMP LEAP_XMP_META (Document_Type
+	 * "NN Pro Product"). Positions come from XMP colorSepsConfig; for old products the
+	 * fallback is the Metadata folder NN Pro creates next to the product:
+	 *   <folder>/Metadata/<product>.json            — the raw Excel row (Lineup Style Code, Color Code…)
+	 *   <folder>/Metadata/template_color_seps.json  — {"positions":[{artboard,position,abbv}...]}
+	 */
+
+	getNNProDocInfo(): Promise<any> {
+		if (!(window as any).__adobe_cep__ && !(window as any).leap) {
+			return Promise.resolve({ success: true, hasDocument: false, isNNProProduct: false });
+		}
+		return this.ensureSession()
+			.then(() => getHostNNProDocInfo())
+			.catch((err: any) => ({ success: false, error: err?.message || String(err) }));
+	}
+
+	/*
+	 * Read the NN Pro Metadata sidecars for a product document. Panel-side (cep.fs) — the
+	 * files sit next to the OPEN document, no host round-trip needed.
+	 */
+	readNNProMetadata(documentPath: string): {
+		success: boolean;
+		playerRow: any | null;
+		colorSepsFile: any | null;
+		error?: string;
+	} {
+		const empty = { success: false, playerRow: null, colorSepsFile: null };
+		try {
+			const cep = (window as any).cep;
+			if (!cep || !cep.fs || !documentPath) {
+				return { ...empty, error: 'No document path or cep.fs unavailable' };
+			}
+			const path = (window as any).cep_node.require('path');
+			const folder = path.dirname(documentPath);
+			const baseName = path.basename(documentPath).replace(/\.[^.]+$/, '');
+			const readJson = (filePath: string): any | null => {
+				try {
+					const result = cep.fs.readFile(filePath);
+					if (result.err !== 0 || !result.data) return null;
+					return JSON.parse(result.data);
+				} catch (e) {
+					return null;
+				}
+			};
+			const playerRow = readJson(path.join(folder, 'Metadata', baseName + '.json'));
+			const colorSepsFile = readJson(path.join(folder, 'Metadata', 'template_color_seps.json'));
+			return { success: !!(playerRow || colorSepsFile), playerRow, colorSepsFile };
+		} catch (e: any) {
+			return { ...empty, error: e?.message || String(e) };
+		}
+	}
+
+	/*
+	 * One-call NN Pro context: detection + sources resolved with the old-product fallbacks.
+	 *   colorSepsConfig: XMP colorSepsConfig, else Metadata/template_color_seps.json
+	 *   playerRow:       XMP LEAP_PLAYER_META,  else Metadata/<product>.json
+	 */
+	resolveNNProContext(): Promise<{
+		isNNProProduct: boolean;
+		colorSepsConfig: any | null;
+		playerRow: any | null;
+		documentPath: string;
+		meta: any | null;
+	}> {
+		const empty = { isNNProProduct: false, colorSepsConfig: null, playerRow: null, documentPath: '', meta: null };
+		return this.getNNProDocInfo()
+			.then((info: any) => {
+				if (!info || !info.success || !info.isNNProProduct) {
+					return empty;
+				}
+				const sidecars = info.documentPath
+					? this.readNNProMetadata(info.documentPath)
+					: { success: false, playerRow: null, colorSepsFile: null };
+				const context = {
+					isNNProProduct: true,
+					colorSepsConfig: info.colorSepsConfig || sidecars.colorSepsFile || null,
+					playerRow: info.playerMeta || sidecars.playerRow || null,
+					documentPath: info.documentPath || '',
+					meta: info.meta || null
+				};
+				this.leapSepsLog.logInfo(
+					'NNPro',
+					'NN Pro product detected: positions=' +
+					(context.colorSepsConfig?.positions?.length || 0) +
+					' (' + (info.colorSepsConfig ? 'XMP' : (sidecars.colorSepsFile ? 'Metadata file' : 'none')) + ')' +
+					' playerRow=' + (info.playerMeta ? 'XMP' : (sidecars.playerRow ? 'Metadata file' : 'none'))
+				);
+				return context;
+			})
+			.catch(() => empty);
+	}
+
 	getGraphicPositionOptionsFromJson(): Promise<{
 		success: boolean;
 		placements: string[];
@@ -2017,13 +2122,28 @@ export class ControllerService {
 				.evalScript('handleSaveGraphicsData', params)
 				.then((res: string) => {
 					const result = JSON.parse(res);
-
-					return result;
+					/*
+					 * Our commit re-serializes the whole XMP packet, which flips NN Pro's raw elements
+					 * into attribute form — invisible to NN Pro's reader AND our detection regex (the
+					 * "Graphics tab went blank after Done" bug). Restore them; no-op on LEAP docs.
+					 */
+					return this.repairNNProXmpAfterWrite().then(() => result);
 				})
 				.catch((err: any) => {
 					throw err;
 				});
 		});
+	}
+
+	/* Best-effort NN Pro XMP element restore after one of our XMP writes (see the inline script). */
+	private repairNNProXmpAfterWrite(): Promise<void> {
+		return restoreNNProXmpElements()
+			.then((res: any) => {
+				if (res && res.changed) {
+					this.log('NN Pro XMP elements restored: ' + (res.restored || []).join(', '));
+				}
+			})
+			.catch(() => undefined);
 	}
 
 	loadGraphicsData(): Promise<any> {
@@ -2446,11 +2566,14 @@ export class ControllerService {
 	writeStandaloneJobToXmp(job: any, documentPath?: string): Promise<any> {
 		this.log('writeStandaloneJobToXmp called');
 		return this.ensureSession().then(() => {
-			const params = { job: job, documentPath: documentPath || '' };
-			return (window as any).leap
-				.scriptLoader()
-				.evalScript('handleWriteStandaloneJobToXmp', params)
-				.then((res: string) => JSON.parse(res));
+			/*
+			 * INLINE writer, not the JSX handler: the shipped handleWriteStandaloneJobToXmp only
+			 * dedupes by exportedFilePath, so Done-flow jobs (no export) duplicated on every Done.
+			 * The inline version upserts by position+profile for those — see writeStandaloneJob.script.
+			 */
+			return writeStandaloneJobDedup(job, documentPath)
+				/* Same NN Pro element restore as saveGraphicsData — this write also re-serializes. */
+				.then((result: any) => this.repairNNProXmpAfterWrite().then(() => result));
 		});
 	}
 
@@ -2812,6 +2935,33 @@ function getStyleCodesExportText(meta) {
  }
 }
 
+/*
+ * FIRST style code for export names. A multi-style separation ("N199, N1897") shares ONE
+ * profile, so file/folder names carry a single representative code — the first one — instead
+ * of the whole comma list. Sources: profileMetadata.styleCodes, else the raw batch cell.
+ */
+function getFirstExportStyleCode(meta, batch) {
+ try {
+  var codes = meta ? meta.styleCodes : null;
+  var raw = "";
+  if (codes instanceof Array) {
+   for (var i = 0; i < codes.length; i++) {
+    if (codes[i] != null && String(codes[i]).trim() !== "") { raw = String(codes[i]); break; }
+   }
+  } else if (codes != null) {
+   raw = String(codes);
+  }
+  if (!raw && batch) {
+   raw = String(findExportValueInObject(batch, "Lineup Style Code") || "");
+  }
+  if (!raw) return null;
+  var first = raw.split(/[,;]/)[0].trim();
+  return first !== "" ? first : null;
+ } catch (e) {
+  return null;
+ }
+}
+
 function getExportControlVersionValues(doc) {
  var out = { control: "", version: "" };
  try {
@@ -2888,6 +3038,37 @@ function getExportVariableContext(doc) {
   if (batch.hasOwnProperty(batchKey)) {
    setExportAlias(aliases, batchKey, batch[batchKey]);
   }
+ }
+ /*
+  * Style tokens resolve to the FIRST style code (see getFirstExportStyleCode) — set AFTER the
+  * batch loop so the raw multi-code batch cell ("N199, N1897") cannot win over the single code.
+  */
+ var firstStyleForExport = getFirstExportStyleCode(meta, batch);
+ if (firstStyleForExport) {
+  setExportAlias(aliases, "Style", firstStyleForExport);
+  setExportAlias(aliases, "Style#", firstStyleForExport);
+  setExportAlias(aliases, "Style Code", firstStyleForExport);
+  setExportAlias(aliases, "style_code", firstStyleForExport);
+  setExportAlias(aliases, "STYLE_CODE", firstStyleForExport);
+  setExportAlias(aliases, "Lineup Style Code", firstStyleForExport);
+ }
+ /*
+  * [Brand] resolves to the brand's FIRST letter (F for Fanatics, N for Nike) — the SAME rule the
+  * separation-time resolver applies. Without this alias the lookup fell through to the raw
+  * profileMetadata/styleInfo value and exports got the full brand name. Sources: the brand
+  * stamped at Prepare (meta.brand), else the Styles.xlsx row's Brand column (meta.styleInfo).
+  */
+ var brandFullForExport = "";
+ if (meta && meta.brand != null && String(meta.brand).replace(/^\s+|\s+$/g, "") !== "") {
+  brandFullForExport = String(meta.brand).replace(/^\s+|\s+$/g, "");
+ } else {
+  var styleInfoBrand = findExportValueInObject(meta && meta.styleInfo ? meta.styleInfo : {}, "Brand");
+  if (styleInfoBrand != null && String(styleInfoBrand).replace(/^\s+|\s+$/g, "") !== "") {
+   brandFullForExport = String(styleInfoBrand).replace(/^\s+|\s+$/g, "");
+  }
+ }
+ if (brandFullForExport) {
+  setExportAlias(aliases, "Brand", brandFullForExport.charAt(0).toUpperCase());
  }
  setExportAlias(aliases, "Team Code", findExportValueInObject(jsonData, "TeamCode") || teamCodeFromPath || findExportValueInObject(batch, "Team Code") || findExportValueInObject(batch, "Lineup Org Code"));
  setExportAlias(aliases, "League", findExportValueInObject(jsonData, "League") || leagueFromPath || findExportValueInObject(batch, "League_desc") || findExportValueInObject(batch, "League"));

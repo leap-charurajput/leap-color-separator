@@ -153,21 +153,29 @@
   <div *ngIf="warningMessage" class="standalone-warning">{{ warningMessage }}</div>
   <div *ngIf="statusMessage" class="standalone-status">{{ statusMessage }}</div>
 
+  <!--
+   DONE replaces Export (2026-09-02): the two-stage Prepare/Generate flow made a separate Export
+   step redundant. Done records the job on the document's XMP and hands over to the Separations
+   tab, where the user selects the artwork and runs Prepare (art comes from that selection).
+  -->
   <div class="standalone-footer">
    <app-button
     variant="primary"
     size="medium"
-    [disabled]="!canGenerate"
-    (onClick)="onExport()"
+    [disabled]="!canFinish"
+    (onClick)="onDone()"
    >
-    {{ isExporting ? 'Exporting…' : 'Export' }}
+    {{ isExporting ? 'Saving…' : 'Done' }}
    </app-button>
    <!-- Say WHY the button is disabled, rather than leaving the user guessing. -->
-   <div *ngIf="!exported && !hasSelection && !isRunningInBrowser" class="standalone-hint">
-    Select the artwork to export.
-   </div>
-   <div *ngIf="!exported && hasSelection && !isSourceDocSaved && !isRunningInBrowser" class="standalone-hint">
+   <div *ngIf="!isSourceDocSaved && !isRunningInBrowser" class="standalone-hint">
     Save the document first.
+   </div>
+   <div *ngIf="isSourceDocSaved && !canFinish && !isExporting && !isRunningInBrowser" class="standalone-hint">
+    Fill Position, Team / Org Code, League and Style Code (the profile resolves from the style).
+   </div>
+   <div *ngIf="canFinish && !isRunningInBrowser" class="standalone-hint">
+    Done saves this info on the document. Select the artwork on the Separations tab, then Prepare.
    </div>
   </div>
 

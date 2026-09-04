@@ -8,7 +8,13 @@ export interface StandaloneSeparationRunInput {
 	profileMetadata: any;
 	jsonData: any;
 	sepsTemplateFileName?: string;
-	exportedFilePath: string;
+	/* ASSETS-export path. Empty/omitted when fromSelection is true (the "Done" flow). */
+	exportedFilePath?: string;
+	/* "Done" flow: take the art from the CURRENT SELECTION in the source document (no ASSETS export).
+	   The SEP doc then lands in a SEPS folder next to the source document. */
+	fromSelection?: boolean;
+	/* Base file name for the SEP doc on the fromSelection path (e.g. "7G_FM01_Front"). */
+	docBaseName?: string;
 	/* CAD reference PNG resolved panel-side (PNG folder near the source doc); placed on the SEP doc. */
 	cadPngPath?: string;
 	/* Two-stage flow: "prepare" | "generate". Omitted = legacy single-shot (no longer used by the panel). */

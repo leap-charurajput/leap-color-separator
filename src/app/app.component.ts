@@ -15,7 +15,7 @@ import { flareInit } from './services/flare';
 export class AppComponent implements OnInit, OnDestroy {
  private readonly panelVersion = '1.0.2';
  /** Bump this string when you ship a new build (same format as before: "Mon DD, YYYY"). */
- private readonly panelDeployDate = 'August 26, 2026';
+ private readonly panelDeployDate = 'September 04, 2026';
  activeTab: number | null = 0;
  selectedMenuOption: string | null = null;
  documentRefreshKey = 0;
@@ -78,9 +78,9 @@ export class AppComponent implements OnInit, OnDestroy {
      navigateToTab: (index: number) => {
       this.onTabChange(index);
      },
-     /* Opens the standalone form modal (used by the Graphics "+" button). */
-     openStandalone: () => {
-      this.openStandaloneSeparation();
+     /* Opens the standalone form modal (Graphics "+" button; NN Pro group Prepare passes a job). */
+     openStandalone: (job?: any) => {
+      this.openStandaloneSeparation(job);
      }
     };
     /* Opens the standalone form pre-filled from a job already recorded on the document — used by
@@ -101,9 +101,9 @@ export class AppComponent implements OnInit, OnDestroy {
      navigateToTab: (index: number) => {
       this.onTabChange(index);
      },
-     /* Opens the standalone form modal (used by the Graphics "+" button). */
-     openStandalone: () => {
-      this.openStandaloneSeparation();
+     /* Opens the standalone form modal (Graphics "+" button; NN Pro group Prepare passes a job). */
+     openStandalone: (job?: any) => {
+      this.openStandaloneSeparation(job);
      }
     };
     /* Opens the standalone form pre-filled from a job already recorded on the document — used by
@@ -198,6 +198,18 @@ export class AppComponent implements OnInit, OnDestroy {
   if (index === 1 || index === 2) {
    this.documentRefreshKey++;
    this.cdr.detectChanges();
+  }
+  /*
+   * Returning to Graphics on a non-LEAP document after the form closed itself (Done/Export hand
+   * over to Separations) left the tab BLANK — nothing re-opened the form. Ask the Graphics tab to
+   * re-evaluate (it reopens the form from the newest recorded job when appropriate; no-op on LEAP
+   * docs and while a form is already open).
+   */
+  if (index === 0) {
+   const bridge = (window as any).__LEAP_GRAPHICS_STANDALONE__;
+   if (bridge && typeof bridge.refresh === 'function') {
+    setTimeout(() => bridge.refresh(), 0);
+   }
   }
  }
 

@@ -1343,7 +1343,8 @@ function generateChoke(sourceLayer, separatedArtLayer, profileMetadata) {
 
 
 	applyChokeStroke(app.activeDocument, CONSTANTS.STYLES.CHOKE_STROKE_WIDTH);
-	setStrokeOverprintOnContainer(chokeLayer, true);
+	/* Overprint Stroke OFF on the Choke plate (user decision 2026-09-04; was true before). */
+	setStrokeOverprintOnContainer(chokeLayer, false);
 }
 
 /**

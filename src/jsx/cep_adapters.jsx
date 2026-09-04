@@ -693,6 +693,66 @@ function placeLiveArtGraphicIntoSepDoc(versionDoc, sepDoc, graphicName, selectio
 	}
 }
 
+/*
+ * Show only the brand's footer in the SEP document. The template's "Footer" layer holds one
+ * sublayer per brand ("Footer Nike", "Footer Fanatics", ...). The sublayer matching
+ * profileMetadata.brand is made visible and every OTHER "Footer *" sublayer is hidden. If the
+ * brand is empty, or no sublayer matches it, the template is left untouched (logged) — hiding
+ * everything on a bad match would silently drop the footer from the printed sheet.
+ * Runs at Prepare (the user sees/edits the prepared doc, footer state included).
+ */
+function applyBrandFooterVisibility(sepDoc, brand) {
+	var report = { applied: false, shown: "", hidden: [] };
+	try {
+		var brandName = String(brand == null ? "" : brand).replace(/^\s+|\s+$/g, "");
+		if (!brandName) return report;
+		var footerLayer = null;
+		try { footerLayer = sepDoc.layers.getByName("Footer"); } catch (eF) { footerLayer = null; }
+		if (!footerLayer) {
+			appendLeapSepLog("Footer visibility: no 'Footer' layer in SEP document - skipped");
+			return report;
+		}
+		var targetExact = ("footer " + brandName).toLowerCase();
+		var brandLower = brandName.toLowerCase();
+		/* Find the matching sublayer first: exact "Footer <brand>", else name contains the brand. */
+		var match = null;
+		for (var i = 0; i < footerLayer.layers.length; i++) {
+			var cand = footerLayer.layers[i];
+			var nm = String(cand.name || "").toLowerCase();
+			if (nm === targetExact) { match = cand; break; }
+			if (!match && nm.indexOf("footer") === 0 && nm.indexOf(brandLower) !== -1) { match = cand; }
+		}
+		if (!match) {
+			appendLeapSepLog("Footer visibility: no Footer sublayer for brand '" + brandName + "' - left as-is");
+			return report;
+		}
+		var footerWasLocked = footerLayer.locked;
+		try { footerLayer.locked = false; footerLayer.visible = true; } catch (eUl) { }
+		for (var j = 0; j < footerLayer.layers.length; j++) {
+			var sub = footerLayer.layers[j];
+			var subWasLocked = sub.locked;
+			try { sub.locked = false; } catch (eSl) { }
+			if (sub === match) {
+				sub.visible = true;
+				report.shown = sub.name;
+			} else if (String(sub.name || "").toLowerCase().indexOf("footer") === 0) {
+				sub.visible = false;
+				report.hidden.push(sub.name);
+			}
+			try { sub.locked = subWasLocked; } catch (eSl2) { }
+		}
+		try { footerLayer.locked = footerWasLocked; } catch (eRl) { }
+		report.applied = true;
+		appendLeapSepLog(
+			"Footer visibility: brand=" + brandName + " shown='" + report.shown +
+			"' hidden=[" + report.hidden.join(", ") + "]"
+		);
+	} catch (e) {
+		appendLeapSepLog("Footer visibility error: " + (e.message || e));
+	}
+	return report;
+}
+
 /* Two-stage separation status, stamped on the SEP document's XMP. */
 var SEP_STATUS_FIELD = "LEAPSeparationStatus";
 var SEP_STATUS_PREPARED = "preparedForSeps";
@@ -1900,6 +1960,43 @@ function buildSeparationTokenLookup(jsonData, profileMetadata, docName) {
 		"graphic name": meta.graphicName != null ? String(meta.graphicName) : "",
 		"art code": meta.graphicName != null ? String(meta.graphicName) : ""
 	};
+
+	/* [Brand] resolves to the brand's FIRST letter — F for Fanatics, N for Nike (user spec). The
+	   panel sends profileMetadata.brand from the Styles.xlsx "Brand" column. */
+	try {
+		var brandFull = meta.brand != null ? String(meta.brand).replace(/^\s+|\s+$/g, "") : "";
+		if (brandFull) {
+			extra["brand"] = brandFull.charAt(0).toUpperCase();
+		}
+	} catch (eBrand) { }
+
+	/*
+	 * Style tokens resolve to the FIRST style code of the separation group. A multi-style cell
+	 * ("N199, N1897") shares ONE profile, so file/folder names carry a single representative code
+	 * instead of the whole comma list. These extra keys win over the raw batch cell in
+	 * lookupSepToken (extra is checked first).
+	 */
+	try {
+		var firstStyle = "";
+		var scArr = meta.styleCodes;
+		if (scArr && scArr.length) {
+			for (var scI = 0; scI < scArr.length; scI++) {
+				var scV = scArr[scI] != null ? String(scArr[scI]).replace(/^\s+|\s+$/g, "") : "";
+				if (scV) { firstStyle = scV.split(/[,;]/)[0].replace(/^\s+|\s+$/g, ""); break; }
+			}
+		}
+		if (!firstStyle) {
+			var rawStyleCell = batch["Lineup Style Code"] || batch["Style Code"] || batch["Style#"] || "";
+			if (rawStyleCell) firstStyle = String(rawStyleCell).split(/[,;]/)[0].replace(/^\s+|\s+$/g, "");
+		}
+		if (firstStyle) {
+			extra["style"] = firstStyle;
+			extra["style#"] = firstStyle;
+			extra["style code"] = firstStyle;
+			extra["style_code"] = firstStyle;
+			extra["lineup style code"] = firstStyle;
+		}
+	} catch (eStyleTok) { }
 
 	/*
 	 * League / Team Code / document-name aliases, mirroring the panel's getExportVariableContext (which
@@ -3234,6 +3331,9 @@ function runSeparationStaged(params_string, stage) {
 				});
 			}
 			try { app.activeDocument = sepDoc; } catch (eActPrep) { }
+			/* Brand footer: show "Footer <brand>", hide the other Footer sublayers (brand comes from
+			   the Styles.xlsx Brand column via profileMetadata.brand). */
+			try { applyBrandFooterVisibility(sepDoc, profileMetadata ? profileMetadata.brand : ""); } catch (eFoot) { }
 			/* Logo-Var-* groups are kept through Prepare (user decision: they stay visible/usable while
 			   editing) and are removed at GENERATE, in expandPreparedArtForSeparation. */
 			setSeparationStatusOnDoc(sepDoc, SEP_STATUS_PREPARED);

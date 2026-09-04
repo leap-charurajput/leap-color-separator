@@ -116,11 +116,13 @@
 ></app-add-separation-dialog>
 
  <!--
-  Standalone (non-LEAP) jobs recorded on THIS document at Export. One row per job, because a document
-  can hold several (one per exported selection/position) — the same shape the LEAP list uses above.
-  Rendered only when the document is not a LEAP version document, so the two lists never mix.
+  Standalone (non-LEAP) jobs recorded on THIS document (at Export, or via the form's Done). One row
+  per job, because a document can hold several (one per selection/position) — the same shape the
+  LEAP list uses above. Rendered when the document is not a LEAP version document — AND for NN Pro
+  organize-mode products, where Done records standalone jobs while the profile groups stay visible
+  (the job rows are what actually run Prepare there).
  -->
- <div *ngIf="!hasVersionDocument && !isSeparatedDoc && !isCheckingDocument && standaloneJobs.length > 0"
+ <div *ngIf="(!hasVersionDocument || isNNProDoc) && !isSeparatedDoc && !isCheckingDocument && standaloneJobs.length > 0"
   class="organize-graphics-content">
   <!--
    Same structure as the LEAP list above: one graphic-section-wrapper per exported graphic, with the
@@ -151,10 +153,15 @@
        <div class="separation-profile-right">
         <div class="separation-profile-content">
          <div class="generate-button-section">
-          <!-- Two-stage (standalone): Prepare places the ASSETS art; Generate runs on the prepared doc. -->
+          <!--
+           Two-stage (standalone). A job WITH an exported .ai (legacy Export flow) prepares from
+           that file; a job WITHOUT one (the Done flow) prepares from the CURRENT SELECTION —
+           the label follows the live selection for those, same as the LEAP rows.
+          -->
           <div class="two-stage-buttons">
-           <app-button variant="primary" size="medium" (onClick)="prepareStandaloneJob(job)">
-            Prepare for Seps
+           <app-button variant="primary" size="medium" (onClick)="prepareStandaloneJob(job)"
+            [title]="job.exportedFilePath ? 'Prepare using the exported artwork' : (hasIllustratorSelection ? 'Prepare using the current Illustrator selection' : 'Select the artwork in the document first')">
+            {{ !job.exportedFilePath && hasIllustratorSelection ? 'Prepare for Seps from Selection' : 'Prepare for Seps' }}
            </app-button>
            <app-button variant="secondary" size="medium" [disabled]="true"
             title="Prepare for Seps first. Generate runs on the prepared SEP document.">
@@ -266,8 +273,8 @@
           <div class="two-stage-buttons">
            <app-button (click)="handlePrepareForSeps(separation.id, graphic)" variant="primary" size="medium"
             [disabled]="hasUnknownProfile(separation) || isProfileMissingInSettings(separation) || isInkInfoMissingForProfile(separation) || isSeparationFilePathMissing"
-            [title]="hasIllustratorSelection ? 'Prepare using the current Illustrator selection' : 'Prepare using the sized graphic (SIZED_GRAPHICS)'">
-            {{ hasIllustratorSelection ? 'Prepare for Seps from Selection' : 'Prepare for Seps' }}
+            [title]="isNNProDoc ? 'Opens the separation form for this profile group' : (hasIllustratorSelection ? 'Prepare using the current Illustrator selection' : 'Prepare using the sized graphic (SIZED_GRAPHICS)')">
+            {{ !isNNProDoc && hasIllustratorSelection ? 'Prepare for Seps from Selection' : 'Prepare for Seps' }}
            </app-button>
            <app-button variant="secondary" size="medium" [disabled]="true"
             title="Prepare for Seps first. Generate runs on the prepared SEP document.">
