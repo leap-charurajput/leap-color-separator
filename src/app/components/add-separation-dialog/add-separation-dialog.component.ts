@@ -149,7 +149,10 @@ export class AddSeparationDialogComponent implements OnChanges {
 	onModeChange(mode: 'style' | 'profile'): void {
 		this.selectionMode = mode;
 		this.query = '';
+		this.showStyleList = mode === 'style';
+		this.showProfileList = mode === 'profile';
 		this.updateFilteredResults();
+		this.cdr.detectChanges();
 	}
 
 	onStyleInput(ev: Event): void {

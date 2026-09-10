@@ -14,7 +14,7 @@
 						label="Style Code"
 					></app-radio>
 				</div>
-				<div class="add-separation-modal-input-wrap">
+				<div class="add-separation-modal-input-wrap" [class.is-open]="selectionMode === 'style' && showStyleList">
 					<input
 						type="text"
 						[value]="selectionMode === 'style' ? (query || selectedStyleCode) : selectedStyleCode"
@@ -56,7 +56,7 @@
 						label="Profile"
 					></app-radio>
 				</div>
-				<div class="add-separation-modal-input-wrap">
+				<div class="add-separation-modal-input-wrap" [class.is-open]="selectionMode === 'profile' && showProfileList">
 					<input
 						type="text"
 						[value]="selectionMode === 'profile' ? (query || selectedProfileName) : selectedProfileName"

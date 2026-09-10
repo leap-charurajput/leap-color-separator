@@ -978,20 +978,22 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 	}
 
 	/*
-	 * Standalone jobs grouped by exported GRAPHIC, mirroring the LEAP list's shape: a graphic section
-	 * header (carrying one "Add Separation..." link) with its profile rows underneath. Grouping by
-	 * exportedFilePath because that is the graphic — several jobs can share one exported .ai when the
-	 * same artwork is separated under more than one profile.
+	 * Standalone jobs grouped by GRAPHIC, mirroring the LEAP list: one section header (and one
+	 * "Add Separation..." link) with profile rows underneath.
+	 *
+	 * Do NOT key on exportedFilePath first. Done-flow jobs have an empty path, while Export / Add
+	 * Separation clones keep a path — the same FRONT then became two sections and two links. Position
+	 * (then graphic name, then exported file basename) is the graphic identity both flows share.
 	 */
 	get standaloneJobGroups(): Array<{ key: string; title: string; jobs: any[] }> {
 		const groups: Array<{ key: string; title: string; jobs: any[] }> = [];
 		const byKey: { [key: string]: { key: string; title: string; jobs: any[] } } = {};
 		for (const job of this.standaloneJobs) {
-			const key = String((job && job.exportedFilePath) || (job && job.position) || '').trim() || '(unknown)';
+			const key = this.standaloneJobGroupKey(job);
 			if (!byKey[key]) {
 				byKey[key] = {
 					key,
-					title: String((job && job.exportedFileName) || this.getStandaloneJobTitle(job) || 'Graphic'),
+					title: this.getStandaloneJobTitle(job) || String((job && job.graphicName) || 'Graphic'),
 					jobs: []
 				};
 				groups.push(byKey[key]);
@@ -999,6 +1001,21 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 			byKey[key].jobs.push(job);
 		}
 		return groups;
+	}
+
+	private standaloneJobGroupKey(job: any): string {
+		const position = String((job && job.position) || '').trim().toUpperCase();
+		if (position) return 'pos:' + position;
+		const graphicName = String((job && job.graphicName) || '').trim().toUpperCase();
+		if (graphicName) return 'name:' + graphicName;
+		const fileName = String((job && job.exportedFileName) || '').trim();
+		if (fileName) return 'file:' + fileName.toUpperCase();
+		const path = String((job && job.exportedFilePath) || '').trim();
+		if (path) {
+			const base = path.split(/[/\\]/).pop() || path;
+			return 'file:' + base.toUpperCase();
+		}
+		return '(unknown)';
 	}
 
 	/** Row label for a standalone job: the position is its identity, as in the LEAP flow. */
@@ -2085,11 +2102,20 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 	}
 
 	/*
-	 * Styles a manual profile-add is FOR: the codes currently showing "Unknown Profile" on this
-	 * graphic. Falls back to the graphic's full style set when nothing is missing (adding a second
-	 * profile on purpose) — never the whole Styles.xlsx catalog.
+	 * Styles a manual profile-add is FOR.
+	 *
+	 * Standalone: the job row's own styleCode (comma/semicolon list). That is a different field from
+	 * LEAP `this.separations[].styles`, so reading only the LEAP list left Profile-mode submit disabled
+	 * even when the row clearly showed Styles: NKAC.
+	 *
+	 * LEAP: the codes currently showing "Unknown Profile" on this graphic. Falls back to the graphic's
+	 * full style set when nothing is missing (adding a second profile on purpose) — never the whole
+	 * Styles.xlsx catalog.
 	 */
 	get addSeparationTargetStyleCodes(): string[] {
+		if (this.addSeparationStandaloneJob) {
+			return this.parseStandaloneJobStyleCodes(this.addSeparationStandaloneJob);
+		}
 		const missing = new Set<string>();
 		const all = new Set<string>();
 		for (const sep of this.separations) {
@@ -2103,6 +2129,18 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 			}
 		}
 		return Array.from(missing.size > 0 ? missing : all);
+	}
+
+	private parseStandaloneJobStyleCodes(job: any): string[] {
+		const raw = job && job.styleCode != null ? String(job.styleCode) : '';
+		return Array.from(
+			new Set(
+				raw
+					.split(/[,;]+/)
+					.map((code) => code.trim())
+					.filter(Boolean)
+			)
+		);
 	}
 
 	async handleAddSeparation(graphicName: string): Promise<void> {

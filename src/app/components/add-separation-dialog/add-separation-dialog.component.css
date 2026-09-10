@@ -20,6 +20,7 @@
 	padding: 10px 12px;
 	display: flex;
 	flex-direction: column;
+	overflow: visible;
 }
 
 .add-separation-modal-title {
@@ -71,6 +72,11 @@
 .add-separation-modal-input-wrap {
 	width: 100%;
 	position: relative;
+	z-index: 1;
+}
+
+.add-separation-modal-input-wrap.is-open {
+	z-index: 20;
 }
 
 .add-separation-modal-input:focus {
@@ -88,7 +94,7 @@
 	border: 1px solid #555;
 	border-radius: 4px;
 	background: #2f2f2f;
-	z-index: 5;
+	z-index: 21;
 }
 
 .add-separation-modal-list-item {

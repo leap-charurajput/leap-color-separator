@@ -5021,7 +5021,7 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
                 var sc = { ca: ca };
                 var chg = false;
                 if (!colorIsPlateInk(ca.fillColor)) { sc.fill = ca.fillColor; ca.fillColor = new NoColor(); chg = true; }
-                if (!colorIsPlateInk(ca.strokeColor)) { sc.stroke = ca.strokeColor; ca.strokeColor = new NoColor(); chg = true; }
+                // if (!colorIsPlateInk(ca.strokeColor)) { sc.stroke = ca.strokeColor; ca.strokeColor = new NoColor(); chg = true; }
                 if (chg) { savedChars.push(sc); }
               } catch (cErr) {}
             }
@@ -5030,7 +5030,7 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
             var entry = { kind: "path", item: pit };
             var chg2 = false;
             if (pit.filled === true && !colorIsPlateInk(pit.fillColor)) { entry.fill = pit.fillColor; pit.fillColor = new NoColor(); chg2 = true; }
-            if (pit.stroked === true && !colorIsPlateInk(pit.strokeColor)) { entry.stroke = pit.strokeColor; pit.strokeColor = new NoColor(); chg2 = true; }
+            // if (pit.stroked === true && !colorIsPlateInk(pit.strokeColor)) { entry.stroke = pit.strokeColor; pit.strokeColor = new NoColor(); chg2 = true; }
             if (chg2) { hiddenRestore.push(entry); }
           }
         } catch (hpErr) {}

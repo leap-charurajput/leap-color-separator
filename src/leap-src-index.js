@@ -206,6 +206,15 @@ function findExcelFileInBatchFolder(documentPath) {
    const files = fs
     .readdirSync(batchFolderPath)
     .filter((file) => {
+     /*
+      * Skip Excel OWNER/LOCK temp files ("~$Name.xlsx" — left behind while the workbook is open
+      * in Excel, or after a crash) and hidden files. The lock file sorted FIRST and was picked
+      * as "the batch excel"; reading it fails with "Required columns not found", which emptied
+      * the Link-colors modal and the style-code list whenever the real workbook was open.
+      */
+     if (file.indexOf('~$') === 0 || file.indexOf('.') === 0) {
+      return false;
+     }
      const filePath = path.join(batchFolderPath, file);
      return fs.statSync(filePath).isFile() && file.toLowerCase().endsWith('.xlsx');
     })
@@ -681,10 +690,8 @@ async function getColorCodesFromExcel(teamCode, documentPath) {
     if (rowTeamCode === String(teamCode).trim()) {
      const colorValue = rowData[colorCodeColIndex];
      if (colorValue) {
-      const colorStr = String(colorValue).trim();
-      if (colorStr !== '') {
-       colorSet.add(colorStr);
-      }
+      /* "3EY, 00A" in one cell = two colorways (same rule as style codes — splitCodeCellValue). */
+      splitCodeCellValue(colorValue).forEach((code) => colorSet.add(code));
      }
     }
    }
