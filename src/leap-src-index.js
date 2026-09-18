@@ -776,7 +776,7 @@ async function getStyleCodesFromExcel(teamCode, documentPath) {
    }
   }
 
-  const styleCodes = Array.from(styleSet).sort();
+  const styleCodes = Array.from(styleSet);
   console.log(
    '[Separations] getStyleCodesFromExcel – teamCode:',
    teamCode,

@@ -2628,8 +2628,11 @@ export class ControllerService {
 		 * path the export writes to — same helpers, same overrides, same code.
 		 */
 		const overridesLiteral = JSON.stringify(this.exportTokenOverrides || {});
+		const forcedLiteral = JSON.stringify(this.exportTokenForcedOverrides || {});
 		return `
 var EXPORT_TOKEN_OVERRIDES = ${overridesLiteral};
+/* Control / Version typed in the Export window: these outrank the document (see getExportTemplateValue). */
+var EXPORT_TOKEN_FORCED = ${forcedLiteral};
 /* Preview runs the real resolver but must not create folders on disk. */
 var EXPORT_PREVIEW_MODE = false;
 
@@ -3096,10 +3099,8 @@ function getExportVariableContext(doc) {
  };
 }
 
-function getExportTemplateValue(token, context) {
- /* A user-supplied override wins over every document source — it exists because they were empty. */
- var override = findExportValueInObject(EXPORT_TOKEN_OVERRIDES, token);
- if (override !== null && override !== undefined && override !== "") return sanitizeExportPathValue(override);
+/* Everything the DOCUMENT can supply for a token — Styles.xlsx, batch row, XMP metadata. */
+function getExportDocumentValue(token, context) {
  var value = findExportValueInObject(context.aliases, token);
  if (value !== null && value !== undefined && value !== "") return sanitizeExportPathValue(value);
  value = findExportValueInObject(context.jsonData, token);
@@ -3111,6 +3112,36 @@ function getExportTemplateValue(token, context) {
  value = findExportValueInObject(context.styleInfo, token);
  if (value !== null && value !== undefined && value !== "") return sanitizeExportPathValue(value);
  return null;
+}
+
+/*
+ * Resolution order: Control/Version typed in the Export window, then the document, then the value
+ * the user typed for an unresolved token.
+ *
+ * The document comes BEFORE the typed value on purpose: [Brand] and friends belong to the prepared
+ * job (Styles.xlsx / the metadata stamped at Prepare), and that is the value the rest of the job
+ * already uses. A typed value is a FALLBACK for tokens nothing can supply — so a token the document
+ * resolves never reaches the Export window at all, and one that is typed cannot silently override
+ * the prepared job on a later export.
+ *
+ * Control/Version are the exception: their text frames are written at export time, so on a repeat
+ * export the document still holds the PREVIOUS numbers and the newly typed ones must win.
+ */
+function getExportTemplateValue(token, context) {
+ var forced = findExportValueInObject(EXPORT_TOKEN_FORCED, token);
+ if (forced !== null && forced !== undefined && forced !== "") return sanitizeExportPathValue(forced);
+ var documentValue = getExportDocumentValue(token, context);
+ if (documentValue !== null && documentValue !== undefined && documentValue !== "") return documentValue;
+ var override = findExportValueInObject(EXPORT_TOKEN_OVERRIDES, token);
+ if (override !== null && override !== undefined && override !== "") return sanitizeExportPathValue(override);
+ return null;
+}
+
+/* What the token resolves to WITHOUT the user's typed value — drives the Export window's input list. */
+function getExportValueWithoutTypedOverride(token, context) {
+ var forced = findExportValueInObject(EXPORT_TOKEN_FORCED, token);
+ if (forced !== null && forced !== undefined && forced !== "") return sanitizeExportPathValue(forced);
+ return getExportDocumentValue(token, context);
 }
 
 function ensureExportFolder(folder) {
@@ -3338,7 +3369,12 @@ function resolveExportFilePathFromTokens(template, defaultFile, extension, conte
  return buildExportDestinationFromResolvedPath(reconstructed, defaultFile, extension);
 }
 
-/* Tokens in a template that resolve to nothing — what the Export window asks the user to fill in. */
+/*
+ * Tokens in a template the DOCUMENT cannot supply — what the Export window asks the user to fill in.
+ * Deliberately ignores the typed values: a token stays in this list while the user is filling it
+ * (so the field does not vanish mid-edit and the value survives to the export), and a token the
+ * Styles.xlsx / prepared metadata resolves is never asked for in the first place.
+ */
 function collectUnresolvedExportTokens(template, context) {
  var out = [];
  var seen = {};
@@ -3351,7 +3387,7 @@ function collectUnresolvedExportTokens(template, context) {
   var key = token.toLowerCase();
   if (seen[key]) continue;
   seen[key] = true;
-  var value = getExportTemplateValue(token, context);
+  var value = getExportValueWithoutTypedOverride(token, context);
   if (value === null || value === undefined || String(value) === "") out.push(token);
  }
  return out;
@@ -3578,8 +3614,14 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
 	 * can inject them into EVERY export script — preview and real export resolve identically.
 	 */
 	private exportTokenOverrides: { [token: string]: string } = {};
+	/*
+	 * Control / Version typed in the Export window. Separate bucket because these OUTRANK the
+	 * document: their text frames are only written at export time, so on a repeat export the
+	 * document still holds the previous numbers. Everything else is a fallback (see below).
+	 */
+	private exportTokenForcedOverrides: { [token: string]: string } = {};
 
-	setExportTokenOverrides(overrides: { [token: string]: string } | null | undefined): void {
+	private static cleanTokenOverrides(overrides: { [token: string]: string } | null | undefined): { [token: string]: string } {
 		const clean: { [token: string]: string } = {};
 		if (overrides) {
 			Object.keys(overrides).forEach((key) => {
@@ -3587,12 +3629,29 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
 				if (key && value !== '') clean[key] = value;
 			});
 		}
+		return clean;
+	}
+
+	/*
+	 * Values the user typed for tokens the document could not supply. These are a FALLBACK — the
+	 * Styles.xlsx / prepared-job value wins when there is one, so a typed value can never silently
+	 * replace the prepared job's own [Brand], [League], … on a later export.
+	 */
+	setExportTokenOverrides(overrides: { [token: string]: string } | null | undefined): void {
+		const clean = ControllerService.cleanTokenOverrides(overrides);
 		this.exportTokenOverrides = clean;
 		this.log('setExportTokenOverrides: ' + Object.keys(clean).length + ' override(s)');
 	}
 
+	setExportTokenForcedOverrides(overrides: { [token: string]: string } | null | undefined): void {
+		const clean = ControllerService.cleanTokenOverrides(overrides);
+		this.exportTokenForcedOverrides = clean;
+		this.log('setExportTokenForcedOverrides: ' + Object.keys(clean).length + ' override(s)');
+	}
+
 	clearExportTokenOverrides(): void {
 		this.exportTokenOverrides = {};
+		this.exportTokenForcedOverrides = {};
 	}
 
 	/*

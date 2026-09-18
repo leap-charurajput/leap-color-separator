@@ -758,7 +758,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 				});
 				this.xmpSeparationGroups = Object.keys(grouped).map((profile) => ({
 					profile,
-					styles: Array.from(grouped[profile]).sort()
+					styles: Array.from(grouped[profile])
 				}));
 				if (!skipRefreshSeparations && this.hasVersionDocument && this.teamCode) {
 					this.loadSeparations();
@@ -856,7 +856,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 		if (existingIndex >= 0) {
 			return list.map((item, idx) => {
 				if (idx !== existingIndex) return item;
-				const nextStyles = Array.from(new Set([...(item.styles || []), normalizedStyle])).sort();
+				const nextStyles = Array.from(new Set([...(item.styles || []), normalizedStyle]));
 				return { ...item, styles: nextStyles };
 			});
 		}
@@ -1161,7 +1161,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 					const separationsList = Object.keys(profileGroups).map((profileName, index) => ({
 						id: index + 1,
 						profile: profileName,
-						styles: profileGroups[profileName].sort(),
+						styles: profileGroups[profileName],
 						colors: [],
 						sepFileName: '',
 						isCreated: false

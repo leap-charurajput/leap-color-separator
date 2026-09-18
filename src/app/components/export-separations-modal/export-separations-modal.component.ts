@@ -55,6 +55,12 @@ export class ExportSeparationsModalComponent implements OnInit, OnChanges {
 	destinationsError = '';
 	/** One entry per distinct unresolved token across all enabled destinations; edited by the user. */
 	tokenInputs: ExportTokenInput[] = [];
+	/*
+	 * Values typed for [Token]s this session. Kept separately from tokenInputs because a successful
+	 * preview DROPS a token from that list (it is no longer unresolved) — Export then rebuilt
+	 * overrides from the empty list and the file was written with the literal "[Brand]" again.
+	 */
+	private tokenValues: { [normalizedToken: string]: { token: string; value: string } } = {};
 	private previewRequestId = 0;
 	private previewDebounceTimer: any = null;
 
@@ -80,6 +86,7 @@ export class ExportSeparationsModalComponent implements OnInit, OnChanges {
 		this.destinations = [];
 		this.destinationsError = '';
 		this.tokenInputs = [];
+		this.tokenValues = {};
 		this.controller.clearExportTokenOverrides();
 	}
 
@@ -177,6 +184,18 @@ export class ExportSeparationsModalComponent implements OnInit, OnChanges {
 		const value = (event.target as HTMLInputElement).value;
 		const entry = this.tokenInputs.find((t) => t.token === token);
 		if (entry) entry.value = value;
+		this.rememberTokenValue(token, value);
+	}
+
+	private rememberTokenValue(token: string, value: string): void {
+		const key = String(token || '').toLowerCase();
+		if (!key) return;
+		const trimmed = (value || '').trim();
+		if (trimmed === '') {
+			delete this.tokenValues[key];
+			return;
+		}
+		this.tokenValues[key] = { token, value: trimmed };
 	}
 
 	/** Re-resolve with what the user has typed so far. */
@@ -202,8 +221,8 @@ export class ExportSeparationsModalComponent implements OnInit, OnChanges {
 	}
 
 	private runDestinationPreview(): void {
-		const overrides = this.buildOverrides();
-		this.controller.setExportTokenOverrides(overrides);
+		if (!this.isOpen) return;
+		this.pushOverridesToController();
 
 		const requestId = ++this.previewRequestId;
 		this.destinationsLoading = true;
@@ -243,11 +262,20 @@ export class ExportSeparationsModalComponent implements OnInit, OnChanges {
 	}
 
 	/*
-	 * One input per distinct unresolved token across the ENABLED destinations, preserving anything
-	 * already typed — the list is rebuilt on every re-resolve and must not wipe the user's entry.
+	 * One input per token the ENABLED destinations could not resolve — whatever it is called. Nothing
+	 * here (or in the host's collectUnresolvedExportTokens) knows about a particular token: a field
+	 * appears for any [Something] the document cannot supply, and a token the Styles.xlsx / prepared
+	 * metadata resolves never gets a field at all.
+	 *
+	 * The host list ignores what the user typed, so a token being filled in stays in it and this
+	 * rebuild keeps the field (and its value) instead of pulling it out from under the cursor.
 	 */
 	private syncTokenInputs(): void {
-		const previous = new Map(this.tokenInputs.map((t) => [t.token.toLowerCase(), t.value]));
+		const previous = new Map<string, string>();
+		Object.keys(this.tokenValues).forEach((key) => {
+			previous.set(key, this.tokenValues[key].value);
+		});
+		this.tokenInputs.forEach((t) => previous.set(t.token.toLowerCase(), t.value));
 		const seen = new Set<string>();
 		const next: ExportTokenInput[] = [];
 		for (const dest of this.visibleDestinations) {
@@ -261,13 +289,33 @@ export class ExportSeparationsModalComponent implements OnInit, OnChanges {
 		this.tokenInputs = next;
 	}
 
+	/*
+	 * Every value typed this session, not just the fields currently on screen: unticking an export
+	 * removes its tokens from the list, and re-ticking it must not come back blank. Unused entries
+	 * cost nothing — the host only reads the tokens its own template contains.
+	 */
 	private buildOverrides(): { [token: string]: string } {
 		const overrides: { [token: string]: string } = {};
+		Object.keys(this.tokenValues).forEach((key) => {
+			const stored = this.tokenValues[key];
+			const value = stored && stored.value ? String(stored.value).trim() : '';
+			if (stored && stored.token && value !== '') overrides[stored.token] = value;
+		});
 		for (const entry of this.tokenInputs) {
 			const value = (entry.value || '').trim();
 			if (value !== '') overrides[entry.token] = value;
 		}
-		/* Same aliases getExportVariableContext sets from the document's frames. */
+		return overrides;
+	}
+
+	/*
+	 * Control / Version go in a separate bucket that OUTRANKS the document: they are written to the
+	 * CONTROL_NUMBER / VERSION_NUMBER frames at export time, so on a repeat export the document
+	 * still holds the previous numbers and the newly typed ones must win. Same aliases
+	 * getExportVariableContext sets from those frames.
+	 */
+	private buildForcedOverrides(): { [token: string]: string } {
+		const overrides: { [token: string]: string } = {};
 		const control = (this.controlNumber || '').trim();
 		if (control !== '') {
 			overrides['Control'] = control;
@@ -283,12 +331,17 @@ export class ExportSeparationsModalComponent implements OnInit, OnChanges {
 		return overrides;
 	}
 
+	private pushOverridesToController(): void {
+		this.controller.setExportTokenOverrides(this.buildOverrides());
+		this.controller.setExportTokenForcedOverrides(this.buildForcedOverrides());
+	}
+
 	onExport(): void {
 		if (!this.canExport) {
 			return;
 		}
 		/* The export scripts read these from the service, so set them BEFORE emitting. */
-		this.controller.setExportTokenOverrides(this.buildOverrides());
+		this.pushOverridesToController();
 		const exportOptions = {
 			exportPrintGuide: this.exportPrintGuide,
 			exportPostscript: this.postscriptReady ? this.exportPostscript : false,
