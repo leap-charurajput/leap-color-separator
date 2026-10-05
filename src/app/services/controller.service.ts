@@ -14,6 +14,12 @@ import { getSelectionCount as getHostSelectionCount } from '../../lib/scripts/ge
 import { getNNProDocInfo as getHostNNProDocInfo } from '../../lib/scripts/getNNProDocInfo.script';
 /* Restores NN Pro's raw XMP elements after our commits re-serialize them into attribute form. */
 import { restoreNNProXmpElements } from '../../lib/scripts/restoreNNProXmpElements.script';
+/* Edit dialog "Scale graphic to … %": read the saved scale, apply it to the art Prepare placed. */
+import {
+	SeparationEntrySettings,
+	readSeparationEntries as readHostSeparationEntries,
+	scalePreparedGraphic as scaleHostPreparedGraphic
+} from '../../lib/scripts/separationScale.script';
 /* Inline standalone-job writer with the fixed upsert identity (Done-flow jobs deduped). */
 import { writeStandaloneJobDedup } from '../../lib/scripts/writeStandaloneJob.script';
 import { LeapSepsLogService } from './leap-seps-log.service';
@@ -185,6 +191,41 @@ export class ControllerService {
 	}): Promise<any> {
 		this.log('exportSelectionToAssets called');
 		return this.ensureSession().then(() => exportSelectionToAssets(payload));
+	}
+
+	/*
+	 * True when the INSTALLED JSX can store separate same-profile groups. The panel is served from the
+	 * web and can be newer than the JSX on a machine; an older JSX would merge the new group into the
+	 * existing one and let Prepare overwrite its file. So "Create a separate group" is only offered once
+	 * the JSX that defines leapSeparationGroupsSupported() is installed. Cached for the session.
+	 */
+	private separationGroupsSupportedCache: Promise<boolean> | null = null;
+	separationGroupsSupported(): Promise<boolean> {
+		if (!this.separationGroupsSupportedCache) {
+			this.separationGroupsSupportedCache = this.ensureSession()
+				.then(() => evalScript('typeof leapSeparationGroupsSupported === "function" ? "yes" : "no"'))
+				.then((res: any) => String(res || '').trim() === 'yes')
+				.catch(() => false);
+			/* A failed probe must not stick for the whole session — retry next time. */
+			this.separationGroupsSupportedCache.then((ok) => {
+				if (!ok) this.separationGroupsSupportedCache = null;
+			});
+		}
+		return this.separationGroupsSupportedCache;
+	}
+
+	/*
+	 * Saved settings of every separation group on the active version document (scale today). Read
+	 * through inline host code because handleLoadSeparationPaths does not return profileMetadata.
+	 */
+	readSeparationEntries(): Promise<SeparationEntrySettings[]> {
+		return this.ensureSession().then(() => readHostSeparationEntries());
+	}
+
+	/** Scale the graphic Prepare placed in the active prepared SEP document (percent of original). */
+	scalePreparedGraphic(graphicName: string, percent: number): Promise<any> {
+		this.log('scalePreparedGraphic called: ' + graphicName + ' -> ' + percent + '%');
+		return this.ensureSession().then(() => scaleHostPreparedGraphic(graphicName, percent));
 	}
 
 	/*
@@ -2186,6 +2227,8 @@ export class ControllerService {
 		graphicName: string;
 		profileName: string;
 		filePath?: string;
+		/* Separate same-profile group id; omitted = the primary group. */
+		groupId?: string;
 	}): Promise<any> {
 		this.log('deleteSeparationFile called');
 
@@ -2205,6 +2248,8 @@ export class ControllerService {
 	updateSeparationProfileDataEntry(params: {
 		graphicName: string;
 		matchProfileName: string;
+		/* Separate same-profile group id to match; omitted = the primary group. */
+		matchGroupId?: string;
 		profileName: string;
 		styleCodes: string[];
 		profileCode?: string | null;
@@ -2349,7 +2394,10 @@ export class ControllerService {
 		var next = [];
 		for (var i = 0; i < list.length; i++) {
 			var name = list[i] != null ? String(list[i]) : "";
-			if (name.replace(/^\s+|\s+$/g, "").toUpperCase() !== target) next.push(name);
+			/* The regex needs a DOUBLE backslash in this file: inside a template literal a single one is
+			   dropped, so the trim used to strip the LETTER s and a profile ending in s could never be
+			   un-suppressed (2026-10-02). */
+			if (name.replace(/^\\s+|\\s+$/g, "").toUpperCase() !== target) next.push(name);
 		}
 		if (suppress) next.push(profileName);
 		xmp.setStructField("LEAPSuppressedSeparationProfiles", next, true, false);
@@ -2372,15 +2420,18 @@ export class ControllerService {
 	 * needed; it rides with the panel and uses the already-loaded xmpModifier global, the same way
 	 * the other lib/scripts inline host code does. Excel-derived groups never live in this array.
 	 */
-	removeSeparationProfileDataEntry(params: { graphicName: string; profileName: string }): Promise<any> {
+	removeSeparationProfileDataEntry(params: { graphicName: string; profileName: string; groupId?: string }): Promise<any> {
 		this.log('removeSeparationProfileDataEntry called');
 		const graphicLiteral = JSON.stringify(String(params?.graphicName || '').trim());
 		const profileLiteral = JSON.stringify(String(params?.profileName || '').trim());
+		const groupLiteral = JSON.stringify(String(params?.groupId || '').trim());
 		const script = `
 (function() {
 	try {
 		var graphicName = ${graphicLiteral};
 		var profileName = ${profileLiteral};
+		/* Set only when deleting a SEPARATE same-profile group: then exactly that group's entry goes. */
+		var groupId = ${groupLiteral};
 		if (!graphicName || !profileName) {
 			return JSON.stringify({ success: false, error: "graphicName and profileName are required" });
 		}
@@ -2417,6 +2468,21 @@ export class ControllerService {
 		var removed = 0;
 		for (var i = 0; i < entries.length; i++) {
 			var e = entries[i];
+			/*
+			 * Separate same-profile groups (2026-10-02). They are scoped to ONE graphic and identified by
+			 * profileMetadata.separationGroupId. Deleting one removes only its own entry; deleting a
+			 * normal profile group must leave every separate group alone — matching by profile only
+			 * would otherwise wipe them on every graphic.
+			 */
+			var eg = (e && e.profileMetadata && e.profileMetadata.separationGroupId != null)
+				? String(e.profileMetadata.separationGroupId).replace(/^\\s+|\\s+$/g, "")
+				: "";
+			if (groupId) {
+				var eGraphic = e && e.graphicName != null ? String(e.graphicName) : "";
+				if (eg === groupId && eGraphic === graphicName) { removed++; } else { kept.push(e); }
+				continue;
+			}
+			if (eg) { kept.push(e); continue; }
 			/* The profile lives NESTED at entry.profileMetadata.profileName (that is what
 			   handleLoadSeparationPaths reads too); older/manual entries may carry it flat. Reading
 			   only the flat key matched nothing — the second cause of "Nothing happening on Delete". */
@@ -2426,7 +2492,8 @@ export class ControllerService {
 			} else if (e && e.profileName != null) {
 				rawName = String(e.profileName);
 			}
-			var ep = rawName.replace(/^\s+|\s+$/g, "").toUpperCase();
+			/* Double backslash on purpose — see the un-suppress fix: a single one stripped the letter s. */
+			var ep = rawName.replace(/^\\s+|\\s+$/g, "").toUpperCase();
 			if (ep === pr) { removed++; } else { kept.push(e); }
 		}
 		if (removed > 0) {
@@ -2450,6 +2517,8 @@ export class ControllerService {
 		profileName: string;
 		styleCodes: string[];
 		profileCode?: string | null;
+		/* Set to create a SEPARATE group with this profile instead of merging into the existing one. */
+		separationGroupId?: string;
 	}): Promise<any> {
 		this.log('addSeparationProfileDataEntry called');
 

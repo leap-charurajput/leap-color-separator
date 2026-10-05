@@ -85,6 +85,26 @@
 			</div>
 		</div>
 
+		<!--
+		 The profile already has a group on this graphic: add to it, or make a separate separation with the
+		 same profile (its own SEP file and settings, e.g. a scaled graphic for a different garment).
+		-->
+		<div *ngIf="showGroupChoice" class="add-separation-modal-group-choice">
+			<div class="add-separation-modal-group-choice-label">{{ effectiveProfileName }} already has a group on this graphic.</div>
+			<app-radio
+				name="add-separation-group-mode"
+				[checked]="groupMode === 'existing'"
+				(change)="setGroupMode('existing')"
+				label="Add to the existing group"
+			></app-radio>
+			<app-radio
+				name="add-separation-group-mode"
+				[checked]="groupMode === 'separate'"
+				(change)="setGroupMode('separate')"
+				label="Create a separate group (its own separation file)"
+			></app-radio>
+		</div>
+
 		<!-- Profile mode maps exactly these styles (the graphic's missing-profile codes). -->
 		<div *ngIf="selectionMode === 'profile'" class="add-separation-modal-target-styles">
 			Styles: <strong>{{ targetStyleCodesClean.join(', ') || '—' }}</strong>

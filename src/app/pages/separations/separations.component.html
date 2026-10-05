@@ -111,6 +111,8 @@
  [isLoading]="isLoadingAddSeparationDialog"
  [styleOptions]="styleCatalogOptions"
  [targetStyleCodes]="addSeparationTargetStyleCodes"
+ [existingProfiles]="addSeparationExistingProfiles"
+ [separateGroupsSupported]="separateGroupsSupported"
  (cancel)="cancelAddSeparationDialog()"
  (confirm)="confirmAddSeparationDialog($event)"
 ></app-add-separation-dialog>
@@ -225,14 +227,16 @@
    <div class="graphic-content" *ngIf="isGraphicExpanded(graphic)">
     <div class="separations-list">
      <div *ngIf="isLoadingSeparations" class="no-separations-message">Loading separations...</div>
-     <div *ngIf="!isLoadingSeparations && separations.length === 0" class="no-separations-message">No
+     <div *ngIf="!isLoadingSeparations && separationsFor(graphic).length === 0" class="no-separations-message">No
       separations
       found.</div>
-     <div *ngFor="let separation of separations" class="separation-profile">
+     <!-- separationsFor(): the document-wide groups plus THIS graphic's separate same-profile groups. -->
+     <div *ngFor="let separation of separationsFor(graphic)" class="separation-profile">
       <div class="separation-profile-header">
        <div class="separation-profile-info">
         <div class="profile-name">Profile: {{ separation.profile }}</div>
-        <div class="profile-styles">Styles: {{ separation.styles.join(', ') }}</div>
+        <!-- Per-graphic: this graphic's recorded styles, not the shared group list (see stylesFor). -->
+        <div class="profile-styles">Styles: {{ stylesFor(separation, graphic).join(', ') }}</div>
         <div class="profile-colors">Colors: {{ getGraphicColors(graphic).join(', ') }}</div>
        </div>
        <div class="separation-profile-right">
@@ -286,8 +290,8 @@
           </div>
           <div *ngIf="hasUnknownProfile(separation)" class="folder-check-note">
            Please add profile information for the missing style code{{
-           getMissingStyleCodes(separation).length
-           > 1 ? 's' : '' }}: {{ getMissingStyleCodes(separation).join(', ') }}
+           getMissingStyleCodes(separation, graphic).length
+           > 1 ? 's' : '' }}: {{ getMissingStyleCodes(separation, graphic).join(', ') }}
           </div>
           <div *ngIf="isProfileMissingInSettings(separation)" class="folder-check-note">
            Profile missing. Please add from Separation Profile Settings.

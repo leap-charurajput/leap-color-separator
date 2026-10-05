@@ -44,6 +44,14 @@ export class SeparationProfileActionDialogComponent implements OnChanges {
  duplicateAiFile = true;
  scaleEnabled = false;
  scalePercentStr = '100';
+ /*
+  * Graphic scale is a percent OF THE ORIGINAL SIZE: 100 = unchanged, 120 = 20% larger, 80 = 20%
+  * smaller (same as Illustrator's Object > Transform > Scale). The label used to read "Scale graphic
+  * BY", which made 20 look like the way to ask for +20% (2026-10-02). The bounds only catch typos —
+  * 1000 for 100, 2 for 120 — not a design limit.
+  */
+ readonly minScalePercent = 10;
+ readonly maxScalePercent = 400;
 
  ngOnChanges(changes: SimpleChanges): void {
   if (changes['isOpen'] && this.isOpen) {
@@ -59,16 +67,37 @@ export class SeparationProfileActionDialogComponent implements OnChanges {
   ) {
    this.resetFromInputs();
   }
+  /*
+   * The saved scale arrives a moment AFTER the dialog opens (it is read from the document), so it
+   * gets its own path: update only the scale fields, and only while the user has not touched them —
+   * a full reset here would also wipe any style boxes they already ticked.
+   */
+  if (
+   this.isOpen &&
+   !changes['isOpen'] &&
+   !this.scaleTouched &&
+   (changes['initialScaleEnabled'] || changes['initialScalePercent'])
+  ) {
+   this.applyInitialScale();
+  }
+ }
+
+ /** True once the user changes the scale checkbox or value — late inputs must not overwrite that. */
+ private scaleTouched = false;
+
+ private applyInitialScale(): void {
+  this.scaleEnabled = this.initialScaleEnabled;
+  this.scalePercentStr =
+   this.initialScalePercent != null && !isNaN(Number(this.initialScalePercent))
+    ? String(Math.round(Number(this.initialScalePercent) * 10) / 10)
+    : '100';
  }
 
  private resetFromInputs(): void {
   this.selectedProfileName = this.initialProfileName || '';
   this.duplicateAiFile = this.hasSeparationFile ? this.initialDuplicateAiFile : false;
-  this.scaleEnabled = this.initialScaleEnabled;
-  this.scalePercentStr =
-   this.initialScalePercent != null && !isNaN(Number(this.initialScalePercent))
-    ? String(Math.round(Number(this.initialScalePercent)))
-    : '100';
+  this.scaleTouched = false;
+  this.applyInitialScale();
 
   const next: Record<string, boolean> = {};
   const opts = this.styleCodeOptions || [];
@@ -116,6 +145,7 @@ export class SeparationProfileActionDialogComponent implements OnChanges {
  }
 
  onScalePercentInput(ev: Event): void {
+  this.scaleTouched = true;
   const v = (ev.target as HTMLInputElement).value;
   if (v === '' || /^\d*\.?\d*$/.test(v)) {
    this.scalePercentStr = v;
@@ -130,7 +160,36 @@ export class SeparationProfileActionDialogComponent implements OnChanges {
   }
  }
 
+ /** Why the scale value cannot be used, or '' when it is fine. Edit/New only — Duplicate is unchanged. */
+ get scaleError(): string {
+  if (this.mode !== 'edit-new' || !this.scaleEnabled) {
+   return '';
+  }
+  const n = parseFloat(this.scalePercentStr);
+  if (isNaN(n)) {
+   return 'Enter a size, e.g. 120 for 20% larger.';
+  }
+  if (n < this.minScalePercent || n > this.maxScalePercent) {
+   return 'Use ' + this.minScalePercent + '–' + this.maxScalePercent + '%. 100% is the original size.';
+  }
+  return '';
+ }
+
+ /** Plain-language reading of the value, so 120 vs 20 is never a guess. */
+ get scaleHint(): string {
+  const n = parseFloat(this.scalePercentStr);
+  if (!this.scaleEnabled || isNaN(n) || this.scaleError) {
+   return '100% = original size';
+  }
+  if (n === 100) {
+   return 'Original size';
+  }
+  const diff = Math.round(Math.abs(n - 100) * 10) / 10;
+  return diff + '% ' + (n > 100 ? 'larger' : 'smaller') + ' than the original';
+ }
+
  onScaleEnabledToggle(ev: Event): void {
+  this.scaleTouched = true;
   const t = ev.target as HTMLInputElement;
   this.scaleEnabled = t.checked;
  }
@@ -167,6 +226,9 @@ export class SeparationProfileActionDialogComponent implements OnChanges {
  get canSubmit(): boolean {
   const opts = this.styleCodeOptions || [];
   if (!this.selectedProfileName?.trim()) {
+   return false;
+  }
+  if (this.scaleError) {
    return false;
   }
   if (this.mode === 'duplicate') {

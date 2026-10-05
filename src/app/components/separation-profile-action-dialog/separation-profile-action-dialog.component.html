@@ -68,8 +68,9 @@
 
    <ng-container *ngIf="mode === 'edit-new'">
     <div class="form-block">
+     <!-- "to", not "by": the value is the target size, so 120 = 20% larger (see scaleHint). -->
      <div class="dup-row scale-row scale-row-inline">
-      <app-checkbox label="Scale graphic by" [checked]="scaleEnabled" (change)="onScaleEnabledToggle($event)"></app-checkbox>
+      <app-checkbox label="Scale graphic to" [checked]="scaleEnabled" (change)="onScaleEnabledToggle($event)"></app-checkbox>
       <input
        type="text"
        class="scale-input"
@@ -79,6 +80,8 @@
       />
       <span class="pct">%</span>
      </div>
+     <div class="scale-hint" [class.scale-hint--error]="!!scaleError">{{ scaleError || scaleHint }}</div>
+     <div *ngIf="scaleEnabled && !scaleError" class="scale-hint">Applied when you next Prepare this separation.</div>
     </div>
    </ng-container>
   </div>

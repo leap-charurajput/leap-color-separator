@@ -185,3 +185,14 @@
 .pct {
  color: #ccc;
 }
+
+/* Plain-language reading of the scale value ("20% larger than the original"), or why it is invalid. */
+.scale-hint {
+ margin-top: 4px;
+ font-size: 11px;
+ color: #aaa;
+}
+
+.scale-hint--error {
+ color: #e06c6c;
+}

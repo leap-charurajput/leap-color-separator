@@ -678,7 +678,9 @@ function placeLiveArtGraphicIntoSepDoc(versionDoc, sepDoc, graphicName, selectio
 				var sepArtWidth = sepArtBounds[2] - sepArtBounds[0];
 				var targetCenterX = sepArtBounds[0] + (sepArtWidth / 2);
 				var targetTop = sepArtBounds[1];
-				pastedGroup.translate(targetCenterX - currentCenterX, targetTop - currentBounds[1]);
+				/* Mask-safe move: a plain translate() left the graphic's opacity masks behind (see
+				   lcsTransformKeepingMasks). Returns the moved item, still named graphicName. */
+				pastedGroup = lcsTransformKeepingMasks(sepDoc, pastedGroup, targetCenterX - currentCenterX, targetTop - currentBounds[1], null, null);
 				prepareSizedArtGraphicForProcessing(sepDoc, pastedGroup);
 				setFillOverprintOnContainer(pastedGroup, false);
 			}
@@ -2602,11 +2604,17 @@ function finishSeparationOnSepDoc(ctx) {
 						}
 						var existingIndex = -1;
 						var currentProfileName = profileMetadata && profileMetadata.profileName ? profileMetadata.profileName : null;
-						savePathsDebug.push("Current graphic: " + graphicName + ", profile: " + (currentProfileName || "none"));
+						/* The group this SEP document belongs to (stamped at Prepare); "" = primary group. Without
+						   it, Generating a separate same-profile group overwrote the primary group's record. */
+						var currentGroupId = leapSeparationGroupIdFromEntry({ profileMetadata: profileMetadata });
+						savePathsDebug.push("Current graphic: " + graphicName + ", profile: " + (currentProfileName || "none") + (currentGroupId ? ", group: " + currentGroupId : ""));
 						for (var i = 0; i < separations.length; i++) {
 							var existingSeparation = separations[i];
 							var existingGraphicName = existingSeparation.graphicName;
 							var existingProfileName = existingSeparation.profileMetadata && existingSeparation.profileMetadata.profileName ? existingSeparation.profileMetadata.profileName : null;
+							if (leapSeparationGroupIdFromEntry(existingSeparation) !== currentGroupId) {
+								continue;
+							}
 							if (existingGraphicName === graphicName) {
 								if (currentProfileName && existingProfileName) {
 									if (existingProfileName === currentProfileName) {
@@ -2684,6 +2692,7 @@ function finishSeparationOnSepDoc(ctx) {
 				graphicName: graphicName,
 				profileName: profileMetadata ? profileMetadata.profileName : "",
 				profileCode: profileMetadata ? profileMetadata.profileCode : "",
+				separationGroupId: leapSeparationGroupIdFromEntry({ profileMetadata: profileMetadata }),
 				separationVersion: nextSeparationVersion,
 				separationFilePath: sepDocPath,
 				createdAtConfiguredPath: createdAtConfiguredPath
@@ -3108,7 +3117,8 @@ function runSeparationStaged(params_string, stage) {
 			teamCode,
 			graphicName,
 			profileNameForVersion,
-			profileMetadata.profileCode
+			profileMetadata.profileCode,
+			leapSeparationGroupIdFromEntry({ profileMetadata: profileMetadata })
 		);
 		profileMetadata.separationVersion = nextSeparationVersion;
 		appendLeapSepLog(
@@ -3176,16 +3186,61 @@ function runSeparationStaged(params_string, stage) {
 		 * window would be left pointing at a file that changed underneath it — so close it first,
 		 * discarding its changes (they are being replaced by design).
 		 */
+		/* Where the SEP document will be written — same rule copyAndPrepareSEPDocument applies. */
+		var targetPathGuess = "";
+		try {
+			var targetName = "";
+			if (separationFileName && String(separationFileName).replace(/^\s+|\s+$/g, "") !== "") {
+				targetName = String(separationFileName).replace(/^\s+|\s+$/g, "");
+				if (!/\.ai$/i.test(targetName)) targetName += ".ai";
+			} else {
+				targetName = docName + "-SEP-" + (profileMetadata && profileMetadata.profileCode ? profileMetadata.profileCode : "") + ".ai";
+			}
+			targetPathGuess = separationTargetFolder.fsName + "/" + targetName;
+		} catch (eTarget) { targetPathGuess = ""; }
+
+		/*
+		 * Never let a SEPARATE same-profile group overwrite another group's SEP file (2026-10-02). File
+		 * names normally differ because the pattern carries the group's own [Style_code], but they collide
+		 * if two groups share their first style or the pattern has no style token — and the template copy
+		 * below would then silently replace the other group's separation. Stop instead, and say why.
+		 *
+		 * Scoped to collisions that involve a separate group. Two ordinary groups resolving to one name
+		 * overwrite each other today; that is existing behaviour and is deliberately left alone here.
+		 * A failed check never blocks Prepare.
+		 */
+		if (targetPathGuess) {
+			try {
+				var normalizeGuardPath = function (pth) { return String(pth || "").replace(/\\/g, "/").toLowerCase(); };
+				var thisProfileName = profileMetadata && profileMetadata.profileName ? String(profileMetadata.profileName) : "";
+				var thisGroupId = leapSeparationGroupIdFromEntry({ profileMetadata: profileMetadata });
+				var guardXmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", activeDoc);
+				if (guardXmp.isXmpCreated && guardXmp.doesStructFieldExist("LEAPSeparationProfileData")) {
+					var guardEntries = guardXmp.getStructField("LEAPSeparationProfileData", true);
+					for (var ge = 0; guardEntries && ge < guardEntries.length; ge++) {
+						var otherEntry = guardEntries[ge];
+						if (!otherEntry || !otherEntry.separatedDocumentPath) continue;
+						if (normalizeGuardPath(otherEntry.separatedDocumentPath) !== normalizeGuardPath(targetPathGuess)) continue;
+						/* Our own previous file: re-Prepare replacing it is the intended behaviour. */
+						if (leapSeparationEntryMatches(otherEntry, graphicName, thisProfileName, thisGroupId)) continue;
+						var otherGroupId = leapSeparationGroupIdFromEntry(otherEntry);
+						if (!thisGroupId && !otherGroupId) continue;
+						var otherLabel = String(otherEntry.graphicName || "") + " / " + leapProfileNameFromSeparationEntry(otherEntry) +
+							(otherGroupId ? " (separate group)" : "");
+						appendLeapSepLog("Prepare stopped: " + targetPathGuess + " already belongs to " + otherLabel);
+						return JSON.stringify({
+							success: false,
+							error: "This separation would be saved as \"" + targetName + "\", which is already the separation file of " +
+								otherLabel + ". Preparing would overwrite it. Give the groups different first style codes, or add " +
+								"[Style_code] to the Export Settings \"Separation file path\" pattern."
+						});
+					}
+				}
+			} catch (eGuard) { }
+		}
+
 		if (isPrepare) {
 			try {
-				var targetName = "";
-				if (separationFileName && String(separationFileName).replace(/^\s+|\s+$/g, "") !== "") {
-					targetName = String(separationFileName).replace(/^\s+|\s+$/g, "");
-					if (!/\.ai$/i.test(targetName)) targetName += ".ai";
-				} else {
-					targetName = docName + "-SEP-" + (profileMetadata && profileMetadata.profileCode ? profileMetadata.profileCode : "") + ".ai";
-				}
-				var targetPathGuess = separationTargetFolder.fsName + "/" + targetName;
 				for (var od = app.documents.length - 1; od >= 0; od--) {
 					var openDoc = app.documents[od];
 					try {
@@ -3230,6 +3285,7 @@ function runSeparationStaged(params_string, stage) {
 				graphicName: graphicName,
 				profileName: profileMetadata ? profileMetadata.profileName : "",
 				profileCode: profileMetadata ? profileMetadata.profileCode : "",
+				separationGroupId: leapSeparationGroupIdFromEntry({ profileMetadata: profileMetadata }),
 				separationFilePath: sepDocPath,
 				createdAtConfiguredPath: createdAtConfiguredPath
 			});
@@ -3521,7 +3577,8 @@ function handleRecreatePlatesInActiveDocument(params_string) {
 				var bumpedVersion = bumpSeparationVersionOnVersionDoc(
 					versionDocRecreate,
 					graphicName,
-					profileNameRecreate
+					profileNameRecreate,
+					leapSeparationGroupIdFromEntry({ profileMetadata: profileMetadata })
 				);
 				profileMetadata.separationVersion = bumpedVersion;
 				appendLeapSepLog(
@@ -6123,10 +6180,16 @@ function handleLoadSeparationPaths(params_string) {
 							profileName = separation.profileMetadata.profileName;
 						}
 						loadPathsDebug.push("Profile name: " + profileName);
+						/* Separate same-profile groups get "#<groupId>" so they do not overwrite the primary
+						   group's path; primary groups keep the exact key the panel has always used. */
+						var entryGroupId = leapSeparationGroupIdFromEntry(separation);
 						if (separation && separation.graphicName && separation.separatedDocumentPath) {
 							var key = separation.graphicName;
 							if (profileName) {
 								key = separation.graphicName + "_" + profileName;
+							}
+							if (entryGroupId) {
+								key = key + "#" + entryGroupId;
 							}
 							loadPathsDebug.push("Adding path with key: " + key + ", path: " + separation.separatedDocumentPath);
 							separationPaths[key] = separation.separatedDocumentPath;
@@ -6148,7 +6211,8 @@ function handleLoadSeparationPaths(params_string) {
 								graphicName: separation.graphicName,
 								profileName: profileName,
 								styleCodes: styleCodes,
-								separatedDocumentPath: separation.separatedDocumentPath || ""
+								separatedDocumentPath: separation.separatedDocumentPath || "",
+								groupId: entryGroupId
 							});
 						}
 					}
@@ -6415,12 +6479,54 @@ function leapProfileNameFromSeparationEntry(separation) {
 	return "";
 }
 
+/*
+ * SEPARATE SAME-PROFILE GROUPS (2026-10-02).
+ *
+ * A graphic can carry more than one separation with the SAME profile — e.g. FRONT has
+ * "Fanatics_HSWB_Cotton: NKAC" and a separate "Fanatics_HSWB_Cotton: FM13" for a different garment
+ * (different styles, possibly a different graphic scale). Every handler used to find "the" entry by
+ * graphic + profile, first match, so the second group merged into the first and Prepare/Generate
+ * overwrote the first group's file and record.
+ *
+ * A separate group carries profileMetadata.separationGroupId. It lives INSIDE profileMetadata on
+ * purpose: Generate rebuilds the entry from the SEP document's profileMetadata (stamped at Prepare)
+ * and Update keeps unknown meta keys, so this is the one place both preserve it. Groups created before
+ * this change have no id — they are the "primary" group ("") and behave exactly as before.
+ *
+ * Matching rule everywhere: same graphic AND same profile AND same group id. The id comparison
+ * matters for primary groups too — without it, a primary lookup could land on a separate group's
+ * entry that happens to come first in the array.
+ */
+function leapSeparationGroupIdFromEntry(separation) {
+	if (separation && separation.profileMetadata && separation.profileMetadata.separationGroupId != null) {
+		return String(separation.profileMetadata.separationGroupId).replace(/^\s+|\s+$/g, "");
+	}
+	return "";
+}
+
+function leapSeparationEntryMatches(separation, graphicName, profileName, groupId) {
+	var g = separation && separation.graphicName ? String(separation.graphicName) : "";
+	return g === String(graphicName == null ? "" : graphicName) &&
+		leapProfileNameFromSeparationEntry(separation) === String(profileName == null ? "" : profileName) &&
+		leapSeparationGroupIdFromEntry(separation) === String(groupId == null ? "" : groupId);
+}
+
+/*
+ * Capability marker the panel probes (typeof … === "function") before offering "Create a separate
+ * group". A panel served from the web can be newer than the JSX installed on a machine; this keeps the
+ * option hidden until the JSX that can store it safely is actually installed.
+ */
+function leapSeparationGroupsSupported() {
+	return true;
+}
+
 function handleDeleteSeparationFile(params_string) {
 	try {
 		var params = JSON.parse(params_string);
 		var graphicName = params.graphicName;
 		var profileName = params.profileName ? String(params.profileName) : "";
 		var filePath = params.filePath ? String(params.filePath) : "";
+		var groupId = params.groupId ? String(params.groupId) : "";
 
 		var versionDoc = app.activeDocument;
 		var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", versionDoc);
@@ -6448,10 +6554,7 @@ function handleDeleteSeparationFile(params_string) {
 
 		var idx = -1;
 		for (var i = 0; i < separations.length; i++) {
-			var sep = separations[i];
-			var g = sep && sep.graphicName ? String(sep.graphicName) : "";
-			var pn = leapProfileNameFromSeparationEntry(sep);
-			if (g === String(graphicName) && pn === profileName) {
+			if (leapSeparationEntryMatches(separations[i], graphicName, profileName, groupId)) {
 				idx = i;
 				break;
 			}
@@ -6507,7 +6610,8 @@ function handleDeleteSeparationFile(params_string) {
 					sidecarForDelete.league,
 					sidecarForDelete.teamCode,
 					sidecarForDelete.graphicName,
-					sidecarForDelete.profileCode
+					sidecarForDelete.profileCode,
+					sidecarForDelete.separationGroupId
 				);
 				if (registryKeyToDelete) {
 					var registryEntryFile = new File(
@@ -6552,6 +6656,7 @@ function handleUpdateSeparationProfileDataEntry(params_string) {
 		var params = JSON.parse(params_string);
 		var graphicName = params.graphicName ? String(params.graphicName) : "";
 		var matchProfileName = params.matchProfileName != null ? String(params.matchProfileName) : "";
+		var matchGroupId = params.matchGroupId ? String(params.matchGroupId) : "";
 		var newProfileName = params.profileName != null ? String(params.profileName) : "";
 		var styleCodes = params.styleCodes && params.styleCodes instanceof Array ? params.styleCodes : [];
 		var profileCode = params.profileCode != null ? params.profileCode : null;
@@ -6592,10 +6697,7 @@ function handleUpdateSeparationProfileDataEntry(params_string) {
 
 		var idx = -1;
 		for (var j = 0; j < separations.length; j++) {
-			var sep2 = separations[j];
-			var g2 = sep2 && sep2.graphicName ? String(sep2.graphicName) : "";
-			var pn2 = leapProfileNameFromSeparationEntry(sep2);
-			if (g2 === graphicName && pn2 === matchProfileName) {
+			if (leapSeparationEntryMatches(separations[j], graphicName, matchProfileName, matchGroupId)) {
 				idx = j;
 				break;
 			}
@@ -6695,6 +6797,8 @@ function handleAddSeparationProfileDataEntry(params_string) {
 		var profileName = params.profileName ? String(params.profileName) : "";
 		var profileCode = params.profileCode != null ? String(params.profileCode) : "";
 		var styleCodes = params.styleCodes && params.styleCodes instanceof Array ? params.styleCodes : [];
+		/* Set only for a SEPARATE same-profile group; "" = the primary group, exactly as before. */
+		var groupId = params.separationGroupId ? String(params.separationGroupId).replace(/^\s+|\s+$/g, "") : "";
 
 		if (!graphicName || !profileName || !styleCodes.length) {
 			return JSON.stringify({ success: false, error: "graphicName, profileName and styleCodes are required" });
@@ -6762,10 +6866,7 @@ function handleAddSeparationProfileDataEntry(params_string) {
 
 		var idx = -1;
 		for (var j = 0; j < separations.length; j++) {
-			var s = separations[j];
-			var g = s && s.graphicName ? String(s.graphicName) : "";
-			var p = leapProfileNameFromSeparationEntry(s);
-			if (g === graphicName && p === profileName) { idx = j; break; }
+			if (leapSeparationEntryMatches(separations[j], graphicName, profileName, groupId)) { idx = j; break; }
 		}
 
 		var normalizedIncoming = normalizeCodes(styleCodes);
@@ -6782,13 +6883,15 @@ function handleAddSeparationProfileDataEntry(params_string) {
 			separations[idx] = entry;
 		} else {
 			created = true;
+			var newMeta = {
+				profileName: profileName,
+				profileCode: profileCode || null,
+				styleCodes: normalizedIncoming
+			};
+			if (groupId) newMeta.separationGroupId = groupId;
 			separations.push({
 				graphicName: graphicName,
-				profileMetadata: {
-					profileName: profileName,
-					profileCode: profileCode || null,
-					styleCodes: normalizedIncoming
-				},
+				profileMetadata: newMeta,
 				separatedDocumentPath: ""
 			});
 		}
@@ -6799,7 +6902,7 @@ function handleAddSeparationProfileDataEntry(params_string) {
 			try { versionDoc.save(); } catch (saveErr) { }
 		}
 
-		return JSON.stringify({ success: true, created: created });
+		return JSON.stringify({ success: true, created: created, separationGroupId: groupId });
 	} catch (e) {
 		return JSON.stringify({ success: false, error: e.message || e.toString() });
 	}

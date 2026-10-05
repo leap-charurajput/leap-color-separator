@@ -24,6 +24,14 @@ interface Separation {
 	colors: string[];
 	sepFileName: string;
 	isCreated: boolean;
+	/*
+	 * Set only on a SEPARATE same-profile group (2026-10-02): a second separation with the same
+	 * profile as an existing group, e.g. "Fanatics_HSWB_Cotton: FM13" beside "Fanatics_HSWB_Cotton:
+	 * NKAC". Stored on the entry as profileMetadata.separationGroupId. Ordinary groups have none.
+	 */
+	groupId?: string;
+	/* The one graphic a separate group belongs to — it is shown only there (user decision). */
+	graphicScope?: string;
 }
 
 interface XmpSeparationGroup {
@@ -45,6 +53,14 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 	isLoadingGraphics = false;
 	teamCode = '';
 	separations: Separation[] = [];
+	/*
+	 * Separate same-profile groups, each scoped to one graphic. Kept apart from `separations` (the
+	 * document-wide profile groups shown under every graphic) so a separate group never merges into
+	 * the ordinary group of the same profile, and never appears under other graphics.
+	 */
+	separateGroups: Separation[] = [];
+	/* Whether the installed JSX can store separate groups (see ControllerService.separationGroupsSupported). */
+	separateGroupsSupported = false;
 	isLoadingSeparations = false;
 	graphicsData: any[] = [];
 	availableColors: string[] = [];
@@ -105,6 +121,8 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 		separationId: number;
 		profileName: string;
 		filePath: string;
+		/* Separate same-profile group id; undefined = an ordinary group. */
+		groupId?: string;
 	} | null = null;
 	/** Duplicate / Edit-New separation dialog */
 	separationActionDialogOpen = false;
@@ -114,6 +132,8 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 		graphicName: string;
 		separationId: number;
 		originalProfileName: string;
+		/* Separate same-profile group id; undefined = an ordinary group. */
+		groupId?: string;
 	} | null = null;
 	separationActionDialogStyleCodes: string[] = [];
 	separationActionDialogInitialProfile = '';
@@ -161,8 +181,8 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 	 * round — a blocking alert interrupts the artist mid-flow, while the banner carries the same
 	 * message, stays dismissible, and everything is already in leap_seps.log for us.
 	 */
-	private reportFailure(id: string, message: string): void {
-		this.dataIssues.report(id, message);
+	private reportFailure(id: string, message: string, detail?: string, scope?: string): void {
+		this.dataIssues.report(id, message, detail, scope);
 	}
 
 	ngOnInit(): void {
@@ -236,6 +256,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 				this.graphicOptions = [];
 				this.teamCode = '';
 				this.separations = [];
+				this.separateGroups = [];
 				this.graphicsData = [];
 				this.separationPaths = {};
 				this.hasGraphicsPositions = false;
@@ -344,7 +365,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 	 * output folder is decided). Position prefills from this graphic's Organize Graphics row.
 	 */
 	private openStandaloneFormForNNProGroup(separationId: number, graphicName: string): void {
-		const separation = this.separations.find((s) => s.id === separationId);
+		const separation = this.findSeparationById(separationId);
 		const row = this.nnProContext?.playerRow || {};
 		const text = (key: string): string => (row && row[key] != null ? String(row[key]).trim() : '');
 		const graphicEntry = this.graphicsData.find((g: any) => g && g.name === graphicName);
@@ -478,6 +499,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 				this.graphicOptions = [];
 				this.teamCode = '';
 				this.separations = [];
+				this.separateGroups = [];
 				this.graphicsData = [];
 				this.separationPaths = {};
 				this.hasGraphicsPositions = false;
@@ -644,6 +666,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 			} else {
 				this.teamCode = '';
 				this.separations = [];
+				this.separateGroups = [];
 				this.cdr.detectChanges();
 			}
 		} catch (err) {
@@ -745,7 +768,46 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 
 			if (result.success && result.separationPaths) {
 				this.separationPaths = result.separationPaths;
-				const entries = Array.isArray(result.separationEntries) ? result.separationEntries : [];
+				const allEntries = Array.isArray(result.separationEntries) ? result.separationEntries : [];
+				/*
+				 * Separate same-profile groups are split off FIRST. Their styles must not reach the ordinary
+				 * groups below — otherwise a separate "Fanatics_HSWB_Cotton: FM13" would also add FM13 to the
+				 * ordinary Fanatics_HSWB_Cotton group (and to every graphic, since that list is document-wide).
+				 * An older JSX returns no groupId, so everything stays ordinary, exactly as before.
+				 */
+				const entries = allEntries.filter((entry: any) => !String(entry?.groupId || '').trim());
+				this.separateGroups = allEntries
+					.filter((entry: any) => !!String(entry?.groupId || '').trim())
+					.map((entry: any, index: number) => ({
+						/* Offset so ids never collide with the index-based ids of the ordinary groups. */
+						id: 100000 + index,
+						profile: String(entry?.profileName || '').trim(),
+						styles: Array.isArray(entry?.styleCodes)
+							? Array.from(new Set<string>(entry.styleCodes.map((code: any) => String(code || '').trim()).filter(Boolean)))
+							: [],
+						colors: [],
+						sepFileName: '',
+						isCreated: !!entry?.separatedDocumentPath,
+						groupId: String(entry.groupId).trim(),
+						graphicScope: String(entry?.graphicName || '').trim()
+					}));
+				/* Per-graphic style lists: the host entries carry graphicName, so keep it (see stylesFor). */
+				const byGraphic: { [graphicName: string]: { [profileName: string]: string[] } } = {};
+				entries.forEach((entry: any) => {
+					const graphic = String(entry?.graphicName || '').trim();
+					const profile = String(entry?.profileName || '').trim();
+					if (!graphic || !profile) {
+						return;
+					}
+					const codes = Array.isArray(entry?.styleCodes)
+						? entry.styleCodes.map((code: any) => String(code || '').trim()).filter(Boolean)
+						: [];
+					if (!byGraphic[graphic]) {
+						byGraphic[graphic] = {};
+					}
+					byGraphic[graphic][profile] = Array.from(new Set<string>(codes));
+				});
+				this.xmpStylesByGraphic = byGraphic;
 				const grouped: { [profile: string]: Set<string> } = {};
 				entries.forEach((entry: any) => {
 					const profile = String(entry?.profileName || '').trim();
@@ -766,11 +828,13 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 			} else {
 				this.separationPaths = {};
 				this.xmpSeparationGroups = [];
+				this.separateGroups = [];
 			}
 		} catch (err) {
 			console.error('[Separations] loadSeparationPaths error:', err);
 			this.separationPaths = {};
 			this.xmpSeparationGroups = [];
+			this.separateGroups = [];
 		} finally {
 			this.cdr.detectChanges();
 		}
@@ -874,6 +938,17 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 		];
 	}
 
+	/*
+	 * Combine the Styles.xlsx-derived groups (`base`) with the groups recorded on the document
+	 * (`groups`, from LEAPSeparationProfileData). This is a UNION and stays one: it answers "which
+	 * profile groups exist on this document", which is a document-level question.
+	 *
+	 * It deliberately does NOT decide which styles a group shows for a given graphic — that is
+	 * per-graphic and lives in `xmpStylesByGraphic` / `stylesFor()`. An earlier attempt to make the
+	 * recorded list win HERE fixed removals but leaked them across graphics, because these groups are
+	 * rendered under every graphic ("I add one style back for one graphic, but it adds to all
+	 * graphics", 2026-09-28).
+	 */
 	private mergeSeparationGroups(base: Separation[], groups: XmpSeparationGroup[]): Separation[] {
 		let merged = [...(base || [])];
 		(groups || []).forEach((group) => {
@@ -884,6 +959,61 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 			});
 		});
 		return merged;
+	}
+
+	/*
+	 * Styles recorded ON THIS DOCUMENT, per graphic and per profile, from LEAPSeparationProfileData.
+	 *
+	 * The XMP is already per graphic — an entry is keyed graphicName + profileName, and
+	 * updateSeparationProfileDataEntry matches on both. The panel simply threw the graphic away when
+	 * it grouped the entries, so every graphic rendered one shared style list and an edit to one
+	 * graphic appeared on all of them.
+	 */
+	private xmpStylesByGraphic: { [graphicName: string]: { [profileName: string]: string[] } } = {};
+
+	/**
+	 * Style codes a profile group shows FOR ONE GRAPHIC: what that graphic has recorded for this
+	 * profile, falling back to the group's document-level list when it has no entry yet — so a
+	 * graphic that has never been separated still shows the Styles.xlsx mapping, as before.
+	 */
+	stylesFor(separation: Separation, graphicName: string): string[] {
+		/* A separate group belongs to one graphic and carries its own list. */
+		if (separation?.groupId) {
+			return separation.styles || [];
+		}
+		const recorded = this.xmpStylesByGraphic[String(graphicName || '')];
+		const profile = String(separation?.profile || '').trim();
+		const own = recorded ? recorded[profile] : null;
+		if (own && own.length > 0) {
+			return own;
+		}
+		return separation?.styles || [];
+	}
+
+	/** A group by id — ordinary or separate. Every action that receives an id must use this. */
+	private findSeparationById(id: number): Separation | undefined {
+		return this.separations.find((s) => s.id === id) || this.separateGroups.find((s) => s.id === id);
+	}
+
+	/** The groups shown under one graphic: the document-wide ones, then that graphic's separate groups. */
+	separationsFor(graphicName: string): Separation[] {
+		const g = String(graphicName || '').trim();
+		return [...this.separations, ...this.separateGroups.filter((sep) => sep.graphicScope === g)];
+	}
+
+	/** Record one graphic's style list for a profile so an edit shows up without waiting for a reload. */
+	private setStylesFor(graphicName: string, profileName: string, styleCodes: string[]): void {
+		const graphic = String(graphicName || '');
+		const profile = String(profileName || '').trim();
+		if (!graphic || !profile) {
+			return;
+		}
+		if (!this.xmpStylesByGraphic[graphic]) {
+			this.xmpStylesByGraphic[graphic] = {};
+		}
+		this.xmpStylesByGraphic[graphic][profile] = Array.from(
+			new Set((styleCodes || []).map((code) => String(code || '').trim()).filter(Boolean))
+		);
 	}
 
 	/*
@@ -1555,7 +1685,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 			return;
 		}
 
-		const separation = this.separations.find((s) => s.id === separationId);
+		const separation = this.findSeparationById(separationId);
 		if (!separation) {
 			return;
 		}
@@ -1572,7 +1702,8 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 			}
 		);
 
-		const styleCodes = separation.styles || [];
+		/* This graphic's styles, not the document-level group list (see stylesFor). */
+		const styleCodes = this.stylesFor(separation, graphicName);
 		const profileName = separation.profile || '';
 		const graphicColors = this.getGraphicColors(graphicName);
 		const graphicDistress = this.getGraphicDistress(graphicName);
@@ -1581,6 +1712,8 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 		/* Captured for the INFO-BOX prefill after a successful Prepare (see prefillSepTableAfterPrepare). */
 		let preparedProfileInfo: any = null;
 		let preparedProfileMetadata: any = null;
+		/* Saved graphic scale for this group (percent of original), applied after Prepare. */
+		let prepareScalePercent: number | null = null;
 
 		const getProfileCodeAndCreateSeparation = async () => {
 			let profileCode = null;
@@ -1831,6 +1964,27 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 				profileMetadata.separationFileNamePattern = this.separationFilePathPattern.trim();
 			}
 
+			/*
+			 * Graphic scale saved through Edit ("Scale graphic to … %"). Stamped into the payload so the
+			 * SEP document records it AND so Generate keeps it: Generate rewrites this group's
+			 * LEAPSeparationProfileData entry from the SEP document's profileMetadata, which would
+			 * otherwise drop the saved value. Applied to the art once Prepare returns (see below).
+			 */
+			/*
+			 * A separate same-profile group stamps its id, so the JSX records THIS group's version, file
+			 * and LEAPSeparationProfileData entry instead of the ordinary group's (and refuses to overwrite
+			 * another group's file). Generate reads it back from the SEP document.
+			 */
+			if (separation.groupId) {
+				profileMetadata.separationGroupId = separation.groupId;
+			}
+			if (stage === 'prepare' && !this.isRunningInBrowser) {
+				prepareScalePercent = await this.savedScalePercentFor(graphicName, profileName, separation.groupId);
+				if (prepareScalePercent != null) {
+					profileMetadata.graphicScalePercent = prepareScalePercent;
+				}
+			}
+
 			preparedProfileInfo = profileInfo;
 			preparedProfileMetadata = profileMetadata;
 			console.log('[SEPARATIONS][UB_DEBUG] ' + stage + ' payload profileMetadata:', profileMetadata);
@@ -1873,10 +2027,17 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 						 * edit the art before generating.
 						 */
 						this.dataIssues.clear('separation-generate');
-						/* Fill the document's printed PG Ink / GRID INFO BOX from the profile (document-only
-						   preview; Generate rewrites it from the real plates). */
-						this.prefillSepTableAfterPrepare(preparedProfileInfo, preparedProfileMetadata);
-						this.refreshData();
+						this.reportCadPlacement(result, graphicName);
+						/*
+						 * Scale first, while the prepared SEP document is still the active one, so the user
+						 * edits the art at its final size. Then the table prefill and the refresh, as before.
+						 */
+						this.applyPreparedScale(graphicName, prepareScalePercent, result?.separatedDocumentPath).finally(() => {
+							/* Fill the document's printed PG Ink / GRID INFO BOX from the profile (document-only
+							   preview; Generate rewrites it from the real plates). */
+							this.prefillSepTableAfterPrepare(preparedProfileInfo, preparedProfileMetadata);
+							this.refreshData();
+						});
 						return;
 					}
 
@@ -1984,7 +2145,14 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 	}
 
 	/* Delete confirmation state (mirrors the other confirm dialogs). filePath set = also delete the file. */
-	separationDeleteTarget: { separationId: number; graphicName: string; profileName: string; filePath: string } | null = null;
+	separationDeleteTarget: {
+		separationId: number;
+		graphicName: string;
+		profileName: string;
+		filePath: string;
+		/* Separate same-profile group id; undefined = an ordinary group. */
+		groupId?: string;
+	} | null = null;
 
 	get separationDeleteMessage(): string {
 		const t = this.separationDeleteTarget;
@@ -1999,6 +2167,10 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 		const target = this.separationDeleteTarget;
 		this.separationDeleteTarget = null;
 		if (!target) return;
+		if (target.groupId) {
+			this.deleteSeparateGroup(target);
+			return;
+		}
 		/*
 		 * Delete = remove any manual XMP entries for the profile AND suppress the profile for this
 		 * document. Suppression is what makes deletion stick for Excel-derived groups (0 XMP entries
@@ -2047,6 +2219,48 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 			});
 	}
 
+	/*
+	 * Delete ONE separate same-profile group: its file, then its own entry. No suppression — that is a
+	 * document-wide switch for an ordinary profile group, and using it here would also hide the ordinary
+	 * group of the same profile on every graphic.
+	 */
+	private deleteSeparateGroup(target: { graphicName: string; profileName: string; filePath: string; groupId?: string }): void {
+		const groupId = String(target.groupId || '');
+		const deleteFileFirst: Promise<string> = target.filePath
+			? this.controller.deleteSeparationFileFromDisk(target.filePath).then((r: any) => (r?.success ? '' : (r?.error || 'Unknown error')))
+			: Promise.resolve('');
+		deleteFileFirst
+			.then((fileError: string) => {
+				if (fileError) {
+					this.reportFailure('separation-delete', 'Could not delete the separation file: ' + fileError);
+					throw new Error('__handled__');
+				}
+				return this.controller.removeSeparationProfileDataEntry({
+					graphicName: target.graphicName,
+					profileName: target.profileName,
+					groupId
+				});
+			})
+			.then((res: any) => {
+				if (!res?.success) {
+					this.reportFailure('separation-delete', 'Could not delete the separation: ' + (res?.error || 'Unknown error'));
+					return;
+				}
+				this.leapSepsLog.logInfo(
+					'Separations',
+					'Deleted separate group ' + target.profileName + ' on ' + target.graphicName + ' (' + (res.removed || 0) + ' entry removed)'
+				);
+				this.separateGroups = this.separateGroups.filter((sep) => sep.groupId !== groupId);
+				this.cdr.detectChanges();
+				this.loadSeparationPaths();
+			})
+			.catch((err: any) => {
+				if (err?.message !== '__handled__') {
+					this.reportFailure('separation-delete', 'Could not delete the separation: ' + (err?.message || err));
+				}
+			});
+	}
+
 	cancelDeleteSeparationGroup(): void {
 		this.separationDeleteTarget = null;
 		this.cdr.detectChanges();
@@ -2055,13 +2269,14 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 	handleSeparationMenuClick(item: string, separationId: number, graphicName: string): void {
 		this.leapSepsLog.logClick('Separation menu: ' + item, { separationId, graphicName });
 		if (item === 'Delete') {
-			const separation = this.separations.find((sep) => sep.id === separationId);
+			const separation = this.findSeparationById(separationId);
 			if (separation) {
 				this.separationDeleteTarget = {
 					separationId,
 					graphicName,
 					profileName: separation.profile,
-					filePath: this.getSeparationPath(separation, graphicName) || ''
+					filePath: this.getSeparationPath(separation, graphicName) || '',
+					groupId: separation.groupId
 				};
 				this.cdr.detectChanges();
 			}
@@ -2070,7 +2285,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 		if (this.isRunningInBrowser) {
 			return;
 		}
-		const separation = this.separations.find((s) => s.id === separationId);
+		const separation = this.findSeparationById(separationId);
 		if (!separation) {
 			return;
 		}
@@ -2084,7 +2299,8 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 				graphicName,
 				separationId,
 				profileName: separation.profile,
-				filePath
+				filePath,
+				groupId: separation.groupId
 			};
 			this.showDeleteSeparationFileConfirm = true;
 			this.cdr.detectChanges();
@@ -2112,14 +2328,22 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 	 * full style set when nothing is missing (adding a second profile on purpose) — never the whole
 	 * Styles.xlsx catalog.
 	 */
+	/* Profiles already listed under the graphic the Add dialog is for — where "existing or separate?" applies. */
+	get addSeparationExistingProfiles(): string[] {
+		const graphic = this.addSeparationDialogGraphicName || '';
+		return Array.from(new Set(this.separationsFor(graphic).map((sep) => String(sep.profile || '').trim()).filter(Boolean)));
+	}
+
 	get addSeparationTargetStyleCodes(): string[] {
 		if (this.addSeparationStandaloneJob) {
 			return this.parseStandaloneJobStyleCodes(this.addSeparationStandaloneJob);
 		}
 		const missing = new Set<string>();
 		const all = new Set<string>();
+		const graphic = this.addSeparationDialogGraphicName || '';
 		for (const sep of this.separations) {
-			for (const sc of sep.styles || []) {
+			/* This graphic's styles — the dialog is opened for one graphic, so its target styles are too. */
+			for (const sc of this.stylesFor(sep, graphic)) {
 				const code = String(sc || '').trim();
 				if (!code) continue;
 				all.add(code);
@@ -2148,6 +2372,11 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 			return;
 		}
 		await this.ensureStyleCatalogOptionsLoaded();
+		/* Offer "Create a separate group" only when the INSTALLED JSX can store it (LEAP documents only). */
+		this.separateGroupsSupported =
+			!this.isRunningInBrowser && !this.addSeparationStandaloneJob && !this.isNNProDoc
+				? await this.controller.separationGroupsSupported()
+				: false;
 		this.addSeparationDialogGraphicName = graphicName;
 		this.addSeparationDialogOpen = true;
 		console.log('[Separations] Opening Add Separation dialog', {
@@ -2156,6 +2385,72 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 			versionDocumentPath: this.versionDocumentPath || '(none)'
 		});
 		this.cdr.detectChanges();
+	}
+
+	/*
+	 * Create a separate same-profile group on the Add dialog's graphic: a NEW entry (never merged into
+	 * the ordinary group) carrying its own profileMetadata.separationGroupId, shown only under that
+	 * graphic. Prepare then writes its own SEP file — named from the pattern, normally via this group's
+	 * own [Style_code] — and the JSX refuses to overwrite another group's file if the names collide.
+	 */
+	private async addSeparateGroup(profileName: string, styleCodes: string[]): Promise<void> {
+		const graphicName = this.addSeparationDialogGraphicName;
+		const groupId = 'g' + Date.now().toString(36) + Math.floor(Math.random() * 1296).toString(36);
+		this.isLoadingAddSeparationDialog = true;
+		this.cdr.detectChanges();
+		try {
+			let profileCode: string | null = null;
+			try {
+				const codeRes = await this.controller.getProfileCodeFromName(profileName);
+				if (codeRes?.success && codeRes.profileCode) {
+					profileCode = String(codeRes.profileCode);
+				}
+			} catch (_) {
+				profileCode = null;
+			}
+			const saved = await this.controller.addSeparationProfileDataEntry({
+				graphicName,
+				profileName,
+				styleCodes,
+				profileCode,
+				separationGroupId: groupId
+			});
+			/* An older JSX ignores the id and would have MERGED — it reports created:false or no id back. */
+			if (!saved?.success || saved?.separationGroupId !== groupId) {
+				const message = saved?.success
+					? 'The installed LEAP scripts are too old to store a separate group — update them and try again.'
+					: String(saved?.error || 'Unknown error');
+				this.leapSepsLog.logError('Separations', 'Separate group not created: ' + message, saved);
+				this.reportFailure('separation-add', 'Could not create the separate group: ' + message);
+				return;
+			}
+			this.separateGroups = [
+				...this.separateGroups,
+				{
+					id: 100000 + this.separateGroups.length + Date.now() % 100000,
+					profile: profileName,
+					styles: [...styleCodes],
+					colors: [],
+					sepFileName: '',
+					isCreated: false,
+					groupId,
+					graphicScope: graphicName
+				}
+			];
+			roiLogEvent({ action: 'sepcreate', doc: graphicName || '', elements: { StyleCodes: styleCodes.length } });
+			this.leapSepsLog.logInfo(
+				'Separations',
+				'Created separate group ' + profileName + ' [' + styleCodes.join(', ') + '] on ' + graphicName + ' (' + groupId + ')'
+			);
+			await this.loadSeparationPaths(true);
+		} catch (err: any) {
+			const message = err?.message || String(err);
+			this.leapSepsLog.logError('Separations', 'Separate group error: ' + message, err);
+			this.reportFailure('separation-add', 'Could not create the separate group: ' + message);
+		} finally {
+			this.isLoadingAddSeparationDialog = false;
+			this.cancelAddSeparationDialog();
+		}
 	}
 
 	/*
@@ -2323,6 +2618,20 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 			return;
 		}
 
+		/*
+		 * SEPARATE same-profile group (2026-10-02). Handled before everything below on purpose: it must
+		 * not un-suppress the ordinary group of this profile, nor merge into it (upsertMany).
+		 */
+		if (
+			result?.groupMode === 'separate' &&
+			this.separateGroupsSupported &&
+			!this.addSeparationStandaloneJob &&
+			!this.isRunningInBrowser
+		) {
+			await this.addSeparateGroup(profileName, styleCodes);
+			return;
+		}
+
 		/* TEAMOUT-SCOPE PERSISTENCE — parked (2026-08-25), see docs/TODO.md "Teamout profile overrides".
 		if (result?.scope === 'teamout') {
 			this.writeTeamoutProfileOverrides(styleCodes, profileName);
@@ -2414,6 +2723,29 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 		}
 	}
 
+	/*
+	 * Style codes offered when EDITING a group: its own styles first (they are the ticked ones and
+	 * belong at the top), then every other team style code, so a style removed earlier can be put
+	 * back. Falls back to the group's own styles when the team list has not loaded — an empty team
+	 * list must never shrink what the user can see.
+	 */
+	private styleCodeOptionsForEdit(graphicStyles: string[]): string[] {
+		const current = (graphicStyles || [])
+			.map((code) => String(code || '').trim())
+			.filter(Boolean);
+		const seen = new Set(current.map((code) => code.toUpperCase()));
+		const rest: string[] = [];
+		for (const raw of this.allTeamStyleCodes || []) {
+			const code = String(raw || '').trim();
+			if (!code || seen.has(code.toUpperCase())) {
+				continue;
+			}
+			seen.add(code.toUpperCase());
+			rest.push(code);
+		}
+		return [...current, ...rest];
+	}
+
 	private openSeparationActionDialog(
 		mode: 'duplicate' | 'edit-new',
 		graphicName: string,
@@ -2433,12 +2765,30 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 			: {
 				graphicName,
 				separationId: separation.id,
-				originalProfileName: separation.profile
+				originalProfileName: separation.profile,
+				groupId: separation.groupId
 			};
-		this.separationActionDialogStyleCodes = isNew ? [...this.allTeamStyleCodes] : [...(separation.styles || [])];
+		/*
+		 * Which style codes the dialog offers as checkboxes.
+		 *
+		 * EDIT used to offer only the group's CURRENT styles, which made removal a one-way door once
+		 * removals started sticking (2026-09-28): untick a style, OK, reopen Edit — and the style was
+		 * no longer in the list to tick again. Edit now offers the group's styles FIRST, then the rest
+		 * of the team's style codes, so the same dialog both removes and restores.
+		 *
+		 * DUPLICATE is deliberately left as-is: it pins the first option (its canSubmit treats
+		 * styleCodeOptions[0] as the style that stays with the original and only lets the REST move),
+		 * so padding that list with the whole team would change what the dialog means.
+		 */
+		const graphicStyles = isNew ? [] : this.stylesFor(separation, graphicName);
+		this.separationActionDialogStyleCodes = isNew
+			? [...this.allTeamStyleCodes]
+			: mode === 'edit-new'
+				? this.styleCodeOptionsForEdit(graphicStyles)
+				: [...graphicStyles];
 		this.separationActionDialogInitialProfile =
 			isNew && profileOpts.length > 0 ? profileOpts[0] : separation.profile || (profileOpts[0] || '');
-		this.separationActionDialogInitialStyles = isNew ? [] : [...(separation.styles || [])];
+		this.separationActionDialogInitialStyles = isNew ? [] : [...graphicStyles];
 		const path = isNew ? null : this.getSeparationPath(separation, graphicName);
 		this.separationActionDialogHasFile = !!path;
 		this.separationActionDialogInitialDuplicateAi = true;
@@ -2446,6 +2796,138 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 		this.separationActionDialogInitialScalePercent = 100;
 		this.separationActionDialogOpen = true;
 		this.cdr.detectChanges();
+
+		/*
+		 * Show the scale this group already has. These were hard-coded to "off, 100", so reopening Edit
+		 * after saving 120% showed 100 — the saved value was invisible and easy to wipe by pressing OK.
+		 * Edit only: Duplicate is left as it was (user decision, 2026-10-02).
+		 */
+		if (!isNew && mode === 'edit-new' && !this.isRunningInBrowser) {
+			const profile = separation.profile;
+			this.savedScalePercentFor(graphicName, profile, separation.groupId).then((saved) => {
+				/* Only if this dialog is still the one that asked. */
+				const ctx = this.separationActionDialogContext;
+				if (!this.separationActionDialogOpen || !ctx || ctx.graphicName !== graphicName || ctx.originalProfileName !== profile) {
+					return;
+				}
+				if (saved != null) {
+					this.separationActionDialogInitialScaleEnabled = true;
+					this.separationActionDialogInitialScalePercent = saved;
+					this.cdr.detectChanges();
+				}
+			});
+		}
+	}
+
+	/*
+	 * The graphic scale saved for one graphic + profile group (percent of original size), or null when
+	 * none is set. First match, the same rule the host uses when it updates the entry.
+	 */
+	private async savedScalePercentFor(graphicName: string, profileName: string, groupId = ''): Promise<number | null> {
+		try {
+			const entries = await this.controller.readSeparationEntries();
+			const g = String(graphicName || '').trim();
+			const p = String(profileName || '').trim().toUpperCase();
+			const gid = String(groupId || '').trim();
+			const entry = entries.find(
+				(e) =>
+					e.graphicName === g &&
+					String(e.profileName || '').trim().toUpperCase() === p &&
+					String(e.groupId || '').trim() === gid
+			);
+			const pct = entry ? entry.graphicScalePercent : null;
+			return pct != null && pct > 0 && pct !== 100 ? pct : null;
+		} catch (e) {
+			return null;
+		}
+	}
+
+	/*
+	 * Tell the user, at the bottom of the panel, why no garment silhouette (CAD) was placed — Prepare
+	 * used to skip it silently, with the reason only in a debug field the log truncates (2026-10-02).
+	 * Scoped to the new SEP document: Prepare switches to it a moment later, and an unscoped message
+	 * would be wiped by that switch before anyone saw it. Cleared when a later Prepare does place one.
+	 */
+	private reportCadPlacement(result: any, graphicName: string): void {
+		const id = 'separation-cad';
+		const dbg = result?.cadPlacementDebug;
+		const sepDocPath = String(result?.separatedDocumentPath || '');
+		if (!dbg || dbg.placed === true) {
+			this.dataIssues.clear(id);
+			return;
+		}
+		const base = (p: string) => String(p || '').split(/[\\/]/).pop() || '';
+		/* Show a path from its numbered job folder on ("04 ASSETS/PNG"), not the whole disk path. */
+		const short = (p: string) => {
+			const parts = String(p || '').split(/[\\/]/).filter(Boolean);
+			const at = parts.findIndex((seg) => /^\d\d\s/.test(seg));
+			return (at >= 0 ? parts.slice(at) : parts.slice(-2)).join('/');
+		};
+		const tried: string[] = Array.isArray(dbg.cadPngTriedPaths) ? dbg.cadPngTriedPaths : [];
+		const names = Array.from(new Set(tried.filter((p) => /\.png$/i.test(p)).map(base)));
+		const folders = Array.from(new Set(tried.filter((p) => !/\.png$/i.test(p)).map(short)));
+		const team = String(this.teamCode || '').trim();
+
+		let message: string;
+		let detail = '';
+		if (dbg.cadPngSource === 'not_found' || dbg.fileExists === false) {
+			message = 'No garment silhouette (CAD) was placed for ' + graphicName + ': no matching CAD image was found.';
+			const lookedFor = [
+				names.length ? names.map((n) => '"' + n + '"').join(' or ') : '',
+				team ? 'a PNG whose name contains "' + team + '"' : ''
+			].filter(Boolean).join(', or ');
+			detail = 'Looked for ' + (lookedFor || 'a CAD PNG') +
+				(folders.length ? ' in ' + folders.join(', ') : ' (no 03 CADS or 04 ASSETS/PNG folder found)') + '.';
+		} else if (dbg.cadsLayerFound === false) {
+			message = 'No garment silhouette (CAD) was placed for ' + graphicName + ': the SEP template has no CADS layer to put it on.';
+			detail = 'CAD image found: ' + base(dbg.cadPngPath);
+		} else {
+			message = 'No garment silhouette (CAD) was placed for ' + graphicName + '.';
+			detail = String(dbg.message || 'Unknown reason') + (dbg.cadPngPath ? ' — ' + base(dbg.cadPngPath) : '');
+		}
+		this.leapSepsLog.logWarn('Separations', message + ' ' + detail, dbg);
+		this.dataIssues.report(id, message, detail, sepDocPath || undefined);
+	}
+
+	/*
+	 * Scale the art Prepare just placed. A failure leaves the art at its original size, so it is never
+	 * silent: the separation would otherwise come out at the wrong size with nothing to say why.
+	 */
+	private async applyPreparedScale(graphicName: string, percent: number | null, sepDocPath?: string): Promise<void> {
+		if (percent == null || this.isRunningInBrowser) {
+			return;
+		}
+		try {
+			const res = await this.controller.scalePreparedGraphic(graphicName, percent);
+			if (res?.success) {
+				this.leapSepsLog.logInfo(
+					'Separations',
+					'Scaled "' + graphicName + '" to ' + percent + '% at Prepare' +
+					(res.before && res.after
+						? ' (' + Math.round(res.before[0]) + 'x' + Math.round(res.before[1]) + ' -> ' +
+						Math.round(res.after[0]) + 'x' + Math.round(res.after[1]) + ' pt)'
+						: '')
+				);
+				return;
+			}
+			const message = String(res?.error || 'Unknown error');
+			this.leapSepsLog.logError('Separations', 'Graphic scale failed: ' + message, res);
+			this.reportFailure(
+				'separation-scale',
+				'The graphic was NOT scaled to ' + percent + '% — it is at its original size. ' + message,
+				undefined,
+				sepDocPath
+			);
+		} catch (err: any) {
+			const message = err?.message || String(err);
+			this.leapSepsLog.logError('Separations', 'Graphic scale error: ' + message, err);
+			this.reportFailure(
+				'separation-scale',
+				'The graphic was NOT scaled to ' + percent + '% — it is at its original size. ' + message,
+				undefined,
+				sepDocPath
+			);
+		}
 	}
 
 	cancelDeleteSeparationFile(): void {
@@ -2466,7 +2948,8 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 			.deleteSeparationFile({
 				graphicName: ctx.graphicName,
 				profileName: ctx.profileName,
-				filePath: ctx.filePath
+				filePath: ctx.filePath,
+				groupId: ctx.groupId
 			})
 			.then((res) => {
 				if (res?.success) {
@@ -2509,7 +2992,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 			return;
 		}
 
-		const separation = this.separations.find((s) => s.id === ctx.separationId);
+		const separation = this.findSeparationById(ctx.separationId);
 		if (!separation) {
 			this.cancelSeparationActionDialog();
 			return;
@@ -2530,6 +3013,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 		const patch: any = {
 			graphicName: ctx.graphicName,
 			matchProfileName: ctx.originalProfileName,
+			matchGroupId: ctx.groupId,
 			profileName: result.profileName,
 			styleCodes: result.styleCodes,
 			duplicateAiFile: result.duplicateAiFile === true,
@@ -2540,18 +3024,66 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 			patch.profileCode = profileCode;
 		}
 
-		this.controller
-			.updateSeparationProfileDataEntry(patch)
+		/*
+		 * A group that comes only from Styles.xlsx has no LEAPSeparationProfileData entry until it is
+		 * first generated (or added by hand), and the host refuses to update an entry that does not
+		 * exist. That made it impossible to set a scale — or any edit — BEFORE the first separation,
+		 * which is exactly when a scale is wanted. Create the entry, then apply the edit to it.
+		 */
+		const NO_ENTRY = /No matching separation entry|LEAPSeparationProfileData not found/i;
+		const mode = this.separationActionDialogMode;
+		const updateCreatingIfMissing = async (): Promise<any> => {
+			const first = await this.controller.updateSeparationProfileDataEntry(patch);
+			if (first?.success || !NO_ENTRY.test(String(first?.error || '')) || mode !== 'edit-new') {
+				return first;
+			}
+			const added = await this.controller.addSeparationProfileDataEntry({
+				graphicName: ctx.graphicName,
+				profileName: ctx.originalProfileName,
+				styleCodes: result.styleCodes,
+				profileCode: profileCode != null ? profileCode : null,
+				separationGroupId: ctx.groupId
+			});
+			if (!added?.success) {
+				return { success: false, error: added?.error || first?.error || 'Could not create the separation entry' };
+			}
+			this.leapSepsLog.logInfo('Separations', 'Edit: created the missing entry for ' + ctx.graphicName + ' / ' + ctx.originalProfileName);
+			return this.controller.updateSeparationProfileDataEntry(patch);
+		};
+
+		updateCreatingIfMissing()
 			.then((res) => {
 				if (res?.success) {
 					separation.profile = result.profileName;
-					separation.styles = [...result.styleCodes];
+					/*
+					 * Record against THIS graphic only. Writing result.styleCodes onto the shared group
+					 * (separation.styles) is what made an edit on one graphic show up on all of them.
+					 */
+					if (ctx.groupId) {
+						/* A separate group owns its style list (see stylesFor). */
+						separation.styles = [...result.styleCodes];
+					} else {
+						this.setStylesFor(ctx.graphicName, result.profileName, result.styleCodes);
+					}
 					this.separationActionDialogOpen = false;
 					this.separationActionDialogContext = null;
 					this.loadSeparationPaths();
+					return;
 				}
+				/*
+				 * A rejected edit used to do NOTHING visible — no banner, no log, dialog left open with
+				 * the old styles still listed. That is indistinguishable from the edit having been
+				 * silently undone, which is exactly the confusion this area already caused.
+				 */
+				const message = String(res?.error || 'Unknown error');
+				this.leapSepsLog.logError('Separations', 'Edit separation failed: ' + message, res);
+				this.reportFailure('separation-edit', 'Could not update the separation: ' + message);
 			})
-			.catch(() => { });
+			.catch((err) => {
+				const message = err?.message || String(err);
+				this.leapSepsLog.logError('Separations', 'Edit separation error: ' + message, err);
+				this.reportFailure('separation-edit', 'Could not update the separation: ' + message);
+			});
 	}
 
 	checkAllGraphicFolders(): void {
@@ -2671,9 +3203,10 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 		return separation.profile === 'Unknown Profile';
 	}
 
-	getMissingStyleCodes(separation: Separation): string[] {
+	getMissingStyleCodes(separation: Separation, graphicName = ''): string[] {
 		if (this.hasUnknownProfile(separation)) {
-			return separation.styles || [];
+			/* Per-graphic when a graphic is named, so the warning lists the styles THIS graphic is missing. */
+			return graphicName ? this.stylesFor(separation, graphicName) : separation.styles || [];
 		}
 		return [];
 	}
@@ -2825,7 +3358,9 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 			return null;
 		}
 		const profileName = separation.profile || '';
-		const compositeKey = `${graphicName}_${profileName}`;
+		/* A separate group's file is keyed "<graphic>_<profile>#<groupId>" so it never shows the
+		   ordinary group's file (or vice versa); ordinary groups keep their exact old key. */
+		const compositeKey = `${graphicName}_${profileName}` + (separation.groupId ? `#${separation.groupId}` : '');
 		let separationPath = this.separationPaths[compositeKey] || null;
 
 		if (!separationPath) {

@@ -8,6 +8,7 @@ import {
  SimpleChanges
 } from '@angular/core';
 import { ControllerService } from '../../services/controller.service';
+import { DataIssuesService } from '../../services/data-issues.service';
 
 /*
  * Payload for the standalone separation. The host exports the selection to a sibling ASSETS
@@ -218,7 +219,11 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
   return false;
  }
 
- constructor(private controller: ControllerService, private cdr: ChangeDetectorRef) {
+ constructor(
+  private controller: ControllerService,
+  private cdr: ChangeDetectorRef,
+  private dataIssues: DataIssuesService
+ ) {
   /*
    * Outside Illustrator (plain browser dev) the leap bridge is absent; keep the form
    * inert rather than throwing when the user experiments with it.
@@ -1330,6 +1335,16 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
   * nothing selected — and Generate would fail on a missing file. Piggybacks on the selection poll;
   * a cheap fs.existsSync every 700ms.
   */
+ /* True when the path exists on this machine (false outside CEP or on any error). */
+ private localPathExists(p: string): boolean {
+  try {
+   const req = (window as any).cep_node?.require;
+   return !!req && !!p && req('fs').existsSync(p);
+  } catch (e) {
+   return false;
+  }
+ }
+
  private validateExportedFileStillExists(): void {
   if (!this.exported || !this.exportedFilePath) return;
   try {
@@ -1355,7 +1370,14 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
   * Searched in a "PNG" folder at the source document's level, one level up and two levels up —
   * case-insensitive file match. Returns '' when anything is missing; the CAD image is optional.
   */
+ /*
+  * Why the last resolveCadPngPath() found nothing, in words for the bottom banner ('' when it found
+  * a file). Set on every call; read right after Prepare (see reportCadMiss).
+  */
+ private lastCadMiss = '';
+
  private resolveCadPngPath(): string {
+  this.lastCadMiss = '';
   try {
    const req = (window as any).cep_node?.require;
    if (!req) return '';
@@ -1368,6 +1390,15 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
    const nnProCad = this.resolveNNProCadPngPath(fs, path, src);
    if (nnProCad) {
     return nnProCad;
+   }
+   if (fs.existsSync(path.join(path.dirname(src), 'Assets'))) {
+    const side = this.isBackPosition(this.position) ? 'rear ("_R")' : 'front';
+    this.lastCadMiss =
+     'Looked in the product\'s Assets folder for a ' + side + ' CAD image' +
+     (this.styleCode.trim() ? ' for style ' + this.styleCode.trim() : '') +
+     (this.itemId.trim() ? ' (e.g. ' + this.itemId.trim() + (side === 'front' ? '' : '_R') + '.png)' : '') +
+     ' — none found.';
+    return '';
    }
 
    const base = src.split('\\').join('/').split('/').pop() || '';
@@ -1388,7 +1419,13 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
    const lastSeg = segs.length > 3 ? segs[3] : '';
    /* "ANGD31" -> ["ANG", "D31"]: split at the final letter-followed-by-digits run. */
    const m = lastSeg.match(/^(.*?)([A-Za-z]\d+)$/);
-   if (!style || !colorCodes.length || !m || !m[1]) return '';
+   if (!style || !colorCodes.length || !m || !m[1]) {
+    this.lastCadMiss =
+     'Finding the CAD image needs a Style Code, a Garment Color Code and a source file named like ' +
+     'LEAGUE_ORG_STYLE_PREFIXG## (e.g. MLBN_0FWK_N199_ANGD31) — ' +
+     (!style ? 'the Style Code is missing.' : !colorCodes.length ? 'the Garment Color Code is missing.' : 'the file name does not have that shape.');
+    return '';
+   }
 
    /* Collect the PNG dirs once (doc level, one up, two up). */
    const pngDirs: string[] = [];
@@ -1400,6 +1437,9 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
     dir = parent;
    }
 
+   const expected = colorCodes.map((code) => style + '-' + code + '-' + m[1] + '-' + m[2] + '.png');
+   this.lastCadMiss =
+    'Looked for ' + expected.join(' or ') + ' in PNG folders at, and up to two levels above, the source document — none found.';
    /* Color code has priority over folder level: the generating code's PNG wins wherever it lives. */
    for (const code of colorCodes) {
     const pngName = (style + '-' + code + '-' + m[1] + '-' + m[2] + '.png').toLowerCase();
@@ -1409,6 +1449,7 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
        const files: string[] = fs.readdirSync(pngDir);
        for (const f of files) {
         if (String(f).toLowerCase() === pngName) {
+         this.lastCadMiss = '';
          return path.join(pngDir, f);
         }
        }
@@ -1484,7 +1525,14 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
  /*
   * NN Pro CAD lookup: <productFolder>/Assets holds the CAD PNGs exported by the NN Pro run.
   * The authoritative list is Metadata/data.json (assets whose artboardName starts "CAD:");
-  * fallbacks are <Item ID>.png and any style-code-prefixed png. "_R" (reverse) files rank last.
+  * fallbacks are <Item ID>.png and any style-code-prefixed png.
+  *
+  * FRONT vs BACK silhouette (2026-10-02): files ending "_R" are the REAR view of the garment. They
+  * used to rank last for every position — and the last-resort scan skipped them outright — so a
+  * BACK separation was always laid over the FRONT silhouette. The side now follows the position:
+  * a back position prefers "_R", everything else prefers the non-"_R" file, exactly as before. If
+  * the wanted side has no file, the other side is used (as before) and the miss is logged.
+  *
   * Returns '' when the folder does not exist — every other document type falls through to the
   * LEAP PNG-folder lookup unchanged.
   */
@@ -1514,31 +1562,103 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
    }
    if (this.itemId.trim()) {
     candidates.push(this.itemId.trim() + '.png');
+    candidates.push(this.itemId.trim() + '_R.png');
    }
 
    const style = this.styleCode.trim().toUpperCase();
+   const wantRear = this.isBackPosition(this.position);
+   const isRear = (name: string): boolean => /_R\.png$/i.test(name);
+   /*
+    * The product's own CAD is named after its Item_ID ("FM14-1314-H44-71G" -> FM14-1314-H44-71G.png /
+    * _R.png). One Assets folder can hold several COLOURWAYS of the same style (…-1314-… and …-0042-…),
+    * which tie on side and style — they used to be separated only by data.json's listing order, so a
+    * 0042 product could get the 1314 silhouette. The Item_ID now breaks that tie (2026-10-02).
+    */
+   const item = this.itemId.trim().toUpperCase();
+   const isThisItem = (name: string): boolean =>
+    !!item && name.replace(/\.png$/i, '').replace(/_R$/i, '').toUpperCase() === item;
+   /* Wrong side costs 1, wrong style costs 2: the right style on the other side beats the right side
+      of another style — the same weighting the old "_R last" rule used, now relative to the position.
+      Not-this-item adds 0.5, so it only ever breaks ties inside one of those levels. */
    const rank = (name: string): number =>
-    (/_R\.png$/i.test(name) ? 1 : 0) + (style && name.toUpperCase().indexOf(style) === 0 ? 0 : 2);
+    (isRear(name) === wantRear ? 0 : 1) +
+    (style && name.toUpperCase().indexOf(style) === 0 ? 0 : 2) +
+    (isThisItem(name) || !item ? 0 : 0.5);
+   const pick = (full: string): string => {
+    if (isRear(full) !== wantRear) {
+     console.warn(
+      '[STANDALONE] NN Pro CAD: no ' + (wantRear ? 'rear ("_R")' : 'front') + ' silhouette for position "' +
+       this.position + '" — using ' + path.basename(full) + ' instead.'
+     );
+    }
+    return full;
+   };
    const ordered = candidates
     .filter((c, i) => candidates.indexOf(c) === i)
     .sort((a, b) => rank(a) - rank(b));
+   /* Pass 1: right side AND right style (rank below 1). Sorted, so this item's own file comes first;
+      a product whose Item_ID is not a CAD name keeps data.json's order, exactly as before. */
    for (const candidate of ordered) {
     const full = path.join(assetsDir, candidate);
-    if (fs.existsSync(full)) return full;
+    if (rank(candidate) < 1 && fs.existsSync(full)) return full;
    }
 
-   /* Last resort: any non-"_R" png in Assets, style-code-prefixed when one is known. */
+   /*
+    * Last resort: any png in Assets, style-code-prefixed when one is known, on the wanted side first.
+    * Scanning the folder BEFORE accepting a wrong-side candidate matters: data.json may list only the
+    * front CAD while the "_R" file sits in Assets.
+    */
+   let files: string[] = [];
    try {
-    const files: string[] = fs.readdirSync(assetsDir);
-    const match = files.find(
-     (f) => /\.png$/i.test(f) && !/_R\.png$/i.test(f) && (!style || f.toUpperCase().indexOf(style) === 0)
-    );
-    if (match) return path.join(assetsDir, match);
+    files = fs.readdirSync(assetsDir).filter((f: string) => /\.png$/i.test(f));
    } catch (e) { }
+   const styled = (f: string): boolean => !style || f.toUpperCase().indexOf(style) === 0;
+   const sameSide =
+    files.find((f) => isThisItem(f) && isRear(f) === wantRear) ||
+    files.find((f) => styled(f) && isRear(f) === wantRear);
+   if (sameSide) return path.join(assetsDir, sameSide);
+   /* Then the listed candidates in rank order: this style's other side beats ANOTHER style's
+      silhouette — a different garment's outline is worse than the wrong side of the right one. */
+   for (const candidate of ordered) {
+    const full = path.join(assetsDir, candidate);
+    if (fs.existsSync(full)) return pick(full);
+   }
+   const otherSide = files.find((f) => styled(f));
+   if (otherSide) return pick(path.join(assetsDir, otherSide));
    return '';
   } catch (e) {
    return '';
   }
+ }
+
+ /*
+  * True for a BACK placement. Matches the graphic_positions.json vocabulary ("BACK PRINT" = BK,
+  * "BACK 1in DOWN FROM COLL" = BK1), the built-in "Back", and the abbreviations themselves. Nothing
+  * else is treated as back — e.g. "HOOD PRINT" keeps the front silhouette rather than a guess.
+  */
+ private isBackPosition(position: string): boolean {
+  const p = String(position || '').trim();
+  if (!p) return false;
+  if (/\bback\b/i.test(p) || /^BK\d*$/i.test(p)) return true;
+  const entry = this.positionEntries.find((e) => String(e?.desc || '').trim().toUpperCase() === p.toUpperCase());
+  return !!entry && /^BK\d*$/i.test(String(entry.abbv || '').trim());
+ }
+
+ /*
+  * Bottom-banner message when Prepare placed no garment silhouette (CAD): it used to be skipped
+  * silently. Scoped to the new SEP document, which becomes active right after Prepare (an unscoped
+  * message would be wiped by that switch). Cleared when a later Prepare finds one.
+  */
+ private reportCadMiss(cadPngPath: string, sepDocPath: string): void {
+  const id = 'separation-cad';
+  if (cadPngPath) {
+   this.dataIssues.clear(id);
+   return;
+  }
+  const message = 'No garment silhouette (CAD) was placed for ' + (this.position.trim() || 'this graphic') + ': no matching CAD image was found.';
+  const detail = this.lastCadMiss || 'No CAD image could be located for this document.';
+  console.warn('[STANDALONE] ' + message + ' ' + detail);
+  this.dataIssues.report(id, message, detail, sepDocPath || undefined);
  }
 
  /*
@@ -1824,6 +1944,8 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
   group.status = stage === 'prepare' ? 'Preparing for seps…' : 'Generating separations…';
   this.cdr.detectChanges();
 
+  /* Resolved once per run: sent to the host AND used to explain a missing silhouette afterwards. */
+  let cadPngPath = '';
   const artCheck: Promise<boolean> =
    fromSelection && stage === 'prepare'
     ? this.controller
@@ -1840,6 +1962,7 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
     return this.buildStandaloneProfileMetadata(group);
    })
    .then(({ meta, sepsTemplateFileName }) => {
+    cadPngPath = this.resolveCadPngPath();
     const jsonData = this.buildJsonData();
     /* Fallback source for any SEP token not explicitly handled. */
     meta.batchVariableSource = jsonData;
@@ -1852,7 +1975,7 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
      exportedFilePath: this.exportedFilePath || undefined,
      fromSelection: fromSelection && stage === 'prepare' ? true : undefined,
      docBaseName: fromSelection && stage === 'prepare' ? this.buildSelectionDocBaseName() : undefined,
-     cadPngPath: this.resolveCadPngPath() || undefined,
+     cadPngPath: cadPngPath || undefined,
      stage: stage
     });
    })
@@ -1874,6 +1997,7 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
       this.sessionDocPaths.add(this.normalizeDocPath(String(result.separatedDocumentPath)));
      }
      if (stage === 'prepare') {
+      this.reportCadMiss(cadPngPath, String(result.separatedDocumentPath || ''));
       group.status = 'Prepared. Edit the art in the SEP document, then Generate.';
       group.prepared = true;
       /* Stay on Separations so the row now offers Generate; refresh its doc-state. */
@@ -2041,7 +2165,25 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
   this.composeItemIdFromParts();
   this.exportedFileName = job.exportedFileName ? String(job.exportedFileName) : '';
   this.exportedFilePath = job.exportedFilePath ? String(job.exportedFilePath) : '';
-  this.sourceDocumentPath = job.sourceDocumentPath ? String(job.sourceDocumentPath) : '';
+  /*
+   * The job's path was recorded on whichever machine created it ("/Users/josgonzalez/Desktop/…" on a
+   * file sent over by the client). It only replaces the open document's own path when it exists HERE —
+   * otherwise the NN Pro Assets folder is looked for in a folder that does not exist and the CAD
+   * silhouette is reported missing although it sits next to the document.
+   */
+  const jobSource = job.sourceDocumentPath ? String(job.sourceDocumentPath) : '';
+  this.sourceDocumentPath = jobSource;
+  if (!this.localPathExists(jobSource) && !this.isRunningInBrowser) {
+   /* Jobs are read from the active document's XMP, so the active document IS this job's source. */
+   this.controller
+    .getActiveDocumentPath()
+    .then((activePath: string) => {
+     if (activePath && this.localPathExists(activePath)) {
+      this.sourceDocumentPath = activePath;
+     }
+    })
+    .catch(() => { /* keep the recorded path */ });
+  }
   this.exported = !!this.exportedFilePath;
   const colors: string[] = Array.isArray(job.colors) ? job.colors.filter((c: any) => !!c) : [];
   this.separationGroups = this.profileName

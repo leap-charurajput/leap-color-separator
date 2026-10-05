@@ -185,3 +185,21 @@
 	gap: 4px;
 	cursor: pointer;
 }
+
+/* "Add to the existing group" / "Create a separate group" — shown only when the profile already has one. */
+.add-separation-modal-group-choice {
+	margin: 10px 0 4px;
+	padding: 8px 10px;
+	border: 1px solid rgba(255, 255, 255, 0.12);
+	border-radius: 3px;
+}
+
+.add-separation-modal-group-choice app-radio {
+	display: block;
+	margin-top: 4px;
+}
+
+.add-separation-modal-group-choice-label {
+	color: rgba(255, 255, 255, 0.75);
+	margin-bottom: 2px;
+}

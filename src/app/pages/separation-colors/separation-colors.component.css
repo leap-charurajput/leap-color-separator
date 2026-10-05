@@ -327,6 +327,17 @@
  opacity: 1;
 }
 
+/*
+ * Refresh in progress. The click is no longer silently dropped (it used to start a second, racing
+ * reload — see refreshInFlight in the component), so the button has to SAY it is busy; a button that
+ * looks ready but does nothing is what made people click it repeatedly in the first place.
+ */
+.separation-action-btn.is-refreshing,
+.separation-action-btn:disabled {
+ cursor: default;
+ opacity: 0.45;
+}
+
 .separation-action-btn svg {
  width: 100%;
  height: 100%;

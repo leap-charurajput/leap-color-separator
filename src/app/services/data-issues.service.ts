@@ -11,6 +11,14 @@ export interface DataIssue {
 	message: string;
 	/** Optional second line: the path / value that failed, for someone who wants to go look. */
 	detail?: string;
+	/*
+	 * The document this issue is ABOUT, when that is not the document active at the moment it is
+	 * reported. Prepare reports on the SEP document it just created while the version document is still
+	 * the scope, and the switch to the SEP document a moment later used to wipe the message before
+	 * anyone could read it. A scoped issue survives the change TO its document and goes away on a
+	 * change to any other one.
+	 */
+	scope?: string;
 }
 
 /*
@@ -44,10 +52,18 @@ export class DataIssuesService {
 		}
 		this.scopeKey = next;
 		this.dismissed.clear();
+		/* Keep only issues that belong to the document now in scope (see DataIssue.scope). */
+		const keep = this.issues.filter((issue) => !!issue.scope && this.sameDocument(issue.scope, next));
 		this.issues.length = 0;
+		this.issues.push(...keep);
 	}
 
-	report(id: string, message: string, detail?: string): void {
+	private sameDocument(a: string, b: string): boolean {
+		const norm = (p: string) => String(p || '').replace(/\\/g, '/').trim().toLowerCase();
+		return !!norm(a) && norm(a) === norm(b);
+	}
+
+	report(id: string, message: string, detail?: string, scope?: string): void {
 		if (!id || !message || this.dismissed.has(id)) {
 			return;
 		}
@@ -55,9 +71,10 @@ export class DataIssuesService {
 		if (existing) {
 			existing.message = message;
 			existing.detail = detail;
+			existing.scope = scope;
 			return;
 		}
-		this.issues.push({ id, message, detail });
+		this.issues.push({ id, message, detail, scope });
 	}
 
 	clear(id: string): void {

@@ -1,4 +1,5 @@
 import { evalScript } from '../../libs/helper';
+import { maskSafeTransformHostCode } from './maskSafeTransform.inline';
 import { standaloneSeparationHostCode } from './standaloneSeparation.inline';
 import { polyfillsCode } from './polyfills';
 
@@ -30,6 +31,7 @@ export async function runStandaloneSeparation(payload: StandaloneSeparationRunIn
 	const paramsJson = JSON.stringify(payload || {});
 	const script =
 		polyfillsCode +
+		maskSafeTransformHostCode +
 		standaloneSeparationHostCode +
 		`
 (function() {

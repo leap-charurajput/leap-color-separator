@@ -98,6 +98,38 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 	private carryOverRowValues: { [normName: string]: Partial<ColorRow> } | null = null;
 	/** Plates-UI row order (normalized names) captured before a refresh reload — see applyCarryOverRowOrder. */
 	private carryOverRowOrder: string[] | null = null;
+	/*
+	 * Refresh is SERIALISED (2026-09-28, field report: "using Refresh too often makes LEAP start
+	 * making mistakes").
+	 *
+	 * A refresh snapshots the per-plate grid values + row order, reloads the plates asynchronously,
+	 * and then writes the result into the document's SEP TABLE (which can also RENAME ink swatches).
+	 * The snapshots are one-shot — whichever reload finishes first consumes them. So a second click
+	 * while the first reload was still in flight got `null` back and rebuilt the plate list WITHOUT
+	 * the user's mesh / micron / flash / cool / WB values, without their `removed` plates and in
+	 * document order instead of theirs — then pushed exactly that into the document. The panel looked
+	 * like it had "forgotten" the grid, and the document was wrong, not just the display.
+	 *
+	 * `refreshInFlight` makes extra clicks coalesce into ONE follow-up refresh instead of racing;
+	 * `loadGeneration` makes a stale reload (e.g. one started by a document check) unable to
+	 * overwrite the rows a newer one already wrote.
+	 */
+	private refreshInFlight = false;
+	private refreshQueued = false;
+	private loadGeneration = 0;
+	/* Document the current plate list was loaded for — tells a tab switch from a document switch. */
+	private loadedDocPath = '';
+	/* The plate list as it was when the user left the Plates tab (see ngOnChanges). */
+	private tabReturnSnapshot: {
+		docPath: string;
+		values: { [normName: string]: Partial<ColorRow> };
+		order: string[];
+	} | null = null;
+
+	/** Template: a refresh is running, so the button is disabled rather than silently ignoring clicks. */
+	get isRefreshing(): boolean {
+		return this.refreshInFlight;
+	}
 	documentProfileMetadata: any = null;
 	/** Saved LEAPSeparationColorsData rows — merged into layer-based rows for mesh/flash metadata. */
 	private xmpColorDataForMerge: any[] | null = null;
@@ -333,6 +365,44 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 			.map((x) => x.row);
 	}
 
+	/*
+	 * Re-apply the plate order SAVED in the document: Refresh writes each row's `seq` into
+	 * LEAPSeparationColorsData (handleUpdateSepTable), but loading only merged mesh/flags from it and
+	 * rebuilt the order from the layers. Matched by the same names mergeXmpMetadataIntoColorRows uses.
+	 * Plates the saved table does not know (new since the last Refresh) keep their default relative order
+	 * after the known ones. Generate clears LEAPSeparationColorsData, so a fresh separation starts in the
+	 * default order, as before.
+	 */
+	private applySavedXmpOrder(rows: ColorRow[]): ColorRow[] {
+		const xmpData = this.xmpColorDataForMerge;
+		if (!xmpData || xmpData.length === 0) {
+			return rows;
+		}
+		const seqByName = new Map<string, number>();
+		xmpData.forEach((entry: any, index: number) => {
+			if (!entry) return;
+			const raw = Number(entry.seq);
+			const seq = !isNaN(raw) && raw > 0 ? raw : index + 1;
+			for (const n of [entry.colorName, entry.swatchName]) {
+				if (n != null && String(n).trim() !== '') {
+					const key = String(n).trim().toLowerCase();
+					if (!seqByName.has(key)) seqByName.set(key, seq);
+				}
+			}
+		});
+		const savedSeq = (row: ColorRow): number | undefined =>
+			seqByName.get(this.hostLayerName(row).trim().toLowerCase()) ??
+			seqByName.get(String(row.colorName || '').trim().toLowerCase());
+		if (!rows.some((row) => savedSeq(row) != null)) {
+			return rows;
+		}
+		const unknownBase = Number.MAX_SAFE_INTEGER / 2;
+		return rows
+			.map((row, index) => ({ row, index, seq: savedSeq(row) }))
+			.sort((a, b) => (a.seq ?? unknownBase + a.index) - (b.seq ?? unknownBase + b.index) || a.index - b.index)
+			.map((x) => x.row);
+	}
+
 	ngAfterViewInit(): void {
 		// Data loading is handled in checkIfSeparatedDocument
 	}
@@ -343,6 +413,19 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 			checkForJSXUpdates((window as any).location.origin).then((res) => {
 				console.log('check update status ref', res);
 			});
+			/*
+			 * Snapshot BEFORE the reset. This fires on every switch back to the Plates tab, not only on a
+			 * document change, and the wipe below threw away an order the user had just dragged (and any
+			 * unsaved mesh/flag edits). checkIfSeparatedDocument hands the snapshot to the reload when it
+			 * turns out to be the SAME document, and drops it for a different one.
+			 */
+			if (this.colorRows.length > 0 && this.loadedDocPath) {
+				this.tabReturnSnapshot = {
+					docPath: this.loadedDocPath,
+					values: this.snapshotRowValues(),
+					order: this.colorRows.map((row) => this.normalizePlateKey(row.colorName))
+				};
+			}
 			// Reset state when document changes
 			this.colorRows = [];
 			this.graphicSwatches = [];
@@ -524,6 +607,20 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 
 					if (data.isSeparatedDoc) {
 						this.isSeparatedDoc = true;
+						/*
+						 * Same document as before the tab switch -> keep what the user had: their row order and
+						 * any unsaved grid values ride into BOTH reloads that follow (the direct load below and
+						 * the automatic refresh 500 ms later, which writes the SEP table). Another document ->
+						 * the snapshot belongs to the previous file and is dropped.
+						 */
+						const docPath = String(data.docPath || '');
+						const snapshot = this.tabReturnSnapshot;
+						this.tabReturnSnapshot = null;
+						if (snapshot && docPath && snapshot.docPath === docPath) {
+							this.carryOverRowValues = snapshot.values;
+							this.carryOverRowOrder = snapshot.order;
+						}
+						this.loadedDocPath = docPath;
 						const bodyColorData = data.bodyColor;
 						this.bodyColorFromDocument =
 							bodyColorData && (bodyColorData as any).bodyColor ? (bodyColorData as any).bodyColor : null;
@@ -666,6 +763,9 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 	}
 
 	private setUIForNonSeparatedDocument(): void {
+		/* Not a separated document: nothing to carry, and the next one starts clean. */
+		this.loadedDocPath = '';
+		this.tabReturnSnapshot = null;
 		this.isSeparatedDoc = false;
 		this.graphicNameFromPath = '';
 		this.documentProfileMetadata = null;
@@ -750,6 +850,15 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 		// Re-reading swatches can itself perturb the swatch list; suppress self-induced warnings.
 		this.beginInternalSwatchOp();
 		this.isLoadingSwatches = true;
+		/*
+		 * Generation stamp: a document check can start a reload while a refresh-triggered one is still
+		 * in flight (checkIfSeparatedDocument does both). Whichever finished LAST used to win, so an
+		 * older reload could overwrite the newer plate list — and the SEP TABLE write that follows
+		 * would then push the stale rows into the document. A reload that is no longer the newest
+		 * drops its result instead.
+		 */
+		const generation = ++this.loadGeneration;
+		const isStale = () => generation !== this.loadGeneration;
 		let allSwatchesFromDoc: any[] = [];
 
 		return this.controller
@@ -787,6 +896,9 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 						'[SEPARATION] Failed to load swatches from SeparatedLayerNames:',
 						result.error || 'Invalid response'
 					);
+					if (isStale()) {
+						return null;
+					}
 					if (this.loadColorRowsFromXmpFallback('getGraphicSwatches failed')) {
 						return null;
 					}
@@ -799,6 +911,9 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 			})
 			.then((inkResult) => {
 				if (!inkResult || !inkResult.success || !inkResult.inkInfoList) {
+					if (isStale()) {
+						return;
+					}
 					console.warn('[SEPARATION] Failed to load ink information, using default mesh values');
 					this.createColorRowsFromSwatchesWithDefaults();
 					this.cdr.detectChanges(); // Force change detection after creating default rows
@@ -890,13 +1005,27 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 					newColorRows = this.applySecondHitMeshRule(newColorRows);
 
 					const mergedColorRows = this.mergeXmpMetadataIntoColorRows(newColorRows);
+					/*
+					 * Stale check BEFORE the carry-overs below: they are one-shot, and a reload that lost the race
+					 * used to consume them and then throw its result away — leaving the winning reload with
+					 * nothing to carry, so the user's order and grid values were lost anyway.
+					 */
+					if (isStale()) {
+						console.log('[SEPARATION] Discarding stale plate reload result');
+						return;
+					}
 					// On a refresh-triggered reload, keep each surviving plate's current grid values
 					// (mesh/micron/flash/cool/wb/color) so a swatch merge doesn't reset the plates that
 					// remain. Plates whose swatch was removed simply don't appear here, so they drop.
 					const carriedColorRows = this.applyCarryOverRowValues(mergedColorRows);
-					/* Default sort first, then the user's pre-refresh UI order wins for surviving plates. */
+					/*
+					 * Order, lowest to highest priority: default sort -> the order SAVED in the document (the seq
+					 * Refresh writes to LEAPSeparationColorsData) -> the in-session order carried across a refresh
+					 * or a tab switch. The saved order used to be ignored, so every reload showed the default
+					 * sequence — and the automatic refresh then wrote that default back over the saved one.
+					 */
 					const sortedColorRows = this.applyCarryOverRowOrder(
-						this.sortColorRowsWithWhiteUBAtBottom(carriedColorRows)
+						this.applySavedXmpOrder(this.sortColorRowsWithWhiteUBAtBottom(carriedColorRows))
 					);
 					console.log(
 						'[SEPARATION] Color rows loaded from SeparatedLayerNames + Excel:',
@@ -924,6 +1053,9 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 			})
 			.catch((err) => {
 				console.error('[SEPARATION] Error loading color rows from SeparatedLayerNames + Excel:', err);
+				if (isStale()) {
+					return;
+				}
 				if (!this.loadColorRowsFromXmpFallback('loadColorRowsFromSeparatedLayerNames error')) {
 					this.graphicSwatches = [];
 					this.colorRows = [];
@@ -1253,10 +1385,24 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 			this.secondHitMeshByInk.forEach((v, k) => (mapDump[k] = v));
 			console.log('[SECOND_HIT_MESH] secondHitMeshByInk map:', mapDump);
 		} catch (e) { }
+		const underbaseMeshes = this.getProfileUnderbaseMeshes();
 		return rows.map((row) => {
 			const name = (row.colorName || '').trim();
 			if (!this.isInkHitPlateName(name)) {
 				return row;
+			}
+			/*
+			 * An underbase pass is not a second hit even when its name ends in a number: a profile's custom
+			 * UB name like "SL WHITE 1" would otherwise be read as a hit of the "SL WHITE" ink and take that
+			 * ink's mesh (305) over the profile's UB 1 Mesh (122). Only when the profile HAS a mesh for that
+			 * pass: with an empty UB N Mesh the old behaviour stays ("White UB 2" takes "White UB"'s mesh).
+			 * Shared-ink underbases are real inks and still follow the rule.
+			 */
+			if ((row.isUnderbase || this.isWhiteUB(this.plateIdentityName(row))) && !row.underbaseSharedInk) {
+				const ubPass = row.underbasePass || this.getWhiteUbPassNumber(this.plateIdentityName(row));
+				if (ubPass > 0 && underbaseMeshes[ubPass - 1]) {
+					return row;
+				}
 			}
 			const baseName = name.replace(/\s+\d+$/, '').trim();
 			const baseRow = rows.find(
@@ -1413,11 +1559,33 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 
 		const requiredWhiteCount = this.getRequiredWhiteUbCountFromProfile();
 		const underbaseMeshes = this.getProfileUnderbaseMeshes();
-		const expandedCount = Math.max(requiredWhiteCount, whiteRows.length);
 
-		const sortedWhiteRows = [...whiteRows].sort(
-			(a, b) => this.getWhiteUbPassIndex(a.colorName) - this.getWhiteUbPassIndex(b.colorName)
+		/*
+		 * Count the passes the document already HAS from every underbase plate, not only the "White UB…"
+		 * ones. A custom-named pass ("SL WHITE 1") is not in whiteRows, so with UB 2 enabled the pass
+		 * looked missing and a second, invented "White UB 2" row was added to the SEP table. Rows are
+		 * added only for passes beyond the ones present — the same count as before for "White UB" names.
+		 */
+		const passOf = (row: ColorRow): number =>
+			row.underbasePass && row.underbasePass > 0
+				? row.underbasePass
+				: this.getWhiteUbPassIndex(this.plateIdentityName(row));
+		const presentPasses = new Set(
+			activeRows
+				.filter(
+					(row) =>
+						(row.isUnderbase && !row.underbaseSharedInk) || this.isWhiteUB(this.plateIdentityName(row))
+				)
+				.map(passOf)
+				.filter((p) => p > 0 && p < 999)
 		);
+		const missingPasses: number[] = [];
+		for (let p = 1; p <= 4 && presentPasses.size + missingPasses.length < requiredWhiteCount; p++) {
+			if (!presentPasses.has(p)) missingPasses.push(p);
+		}
+		const expandedCount = whiteRows.length + missingPasses.length;
+
+		const sortedWhiteRows = [...whiteRows].sort((a, b) => passOf(a) - passOf(b));
 		const whiteTemplate = sortedWhiteRows[0];
 		const baseWhiteName = (whiteTemplate.colorName || 'White UB').replace(/\s+\d+$/g, '').trim();
 
@@ -1429,7 +1597,9 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 		const expandedWhiteRows: ColorRow[] = [];
 		for (let i = 0; i < expandedCount; i++) {
 			const sourceRow = sortedWhiteRows[i] || whiteTemplate;
-			const meshFromProfile = underbaseMeshes[i] || '';
+			/* The pass this table row stands for: an existing row's own pass, else the next missing one. */
+			const pass = sortedWhiteRows[i] ? passOf(sortedWhiteRows[i]) : missingPasses[i - sortedWhiteRows.length];
+			const meshFromProfile = (pass > 0 && pass < 999 ? underbaseMeshes[pass - 1] : '') || '';
 			/*
 			 * Name this pass after what the DOCUMENT actually calls it, then the profile's custom name,
 			 * and only invent "<base> <n>" as a last resort.
@@ -1444,15 +1614,22 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 			const existingName = sortedWhiteRows[i] ? this.hostLayerName(sortedWhiteRows[i]).trim() : '';
 			const rowColorName =
 				existingName ||
-				profileUbNames[i] ||
-				(i === 0 ? baseWhiteName : `${baseWhiteName} ${i + 1}`);
+				profileUbNames[pass - 1] ||
+				(pass === 1 ? baseWhiteName : `${baseWhiteName} ${pass}`);
 			const hexFromDocument = this.getSwatchHexByName(rowColorName);
 			expandedWhiteRows.push({
 				...sourceRow,
 				colorName: rowColorName,
 				/* The name above IS the document name, so no swatchName override is needed (or wanted). */
 				swatchName: undefined,
-				mesh: meshFromProfile || sourceRow.mesh,
+				/*
+				 * A pass that exists on the Plates grid keeps ITS mesh — the row was loaded with the profile's
+				 * UB mesh, so this only differs when the user edited it. Taking the profile value first threw
+				 * that edit away on every Refresh and wrote the profile value into the SEP table / XMP (client:
+				 * "changed White UB 2's mesh, Refresh, table not updated; switch documents, old value back").
+				 * Passes synthesized here (no row yet) still start from the profile.
+				 */
+				mesh: sortedWhiteRows[i] ? sourceRow.mesh || meshFromProfile : meshFromProfile || sourceRow.mesh,
 				layerColor: hexFromDocument || sourceRow.layerColor
 			});
 		}
@@ -1492,6 +1669,18 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 		// GRID DATA. Surviving plates keep their current grid values (mesh/flags/color); plates
 		// whose swatch was removed/merged in the Swatches panel drop out; Choke stays out (no
 		// swatch). Clears both out-of-sync warnings (unsaved grid edits + external swatch change).
+
+		/*
+		 * A refresh already running owns the carry-over snapshots and is about to write the SEP TABLE.
+		 * Starting a second one now is what corrupted the plate list (see refreshInFlight above), so
+		 * the click is remembered instead: one more refresh runs when this one finishes, with the
+		 * rows as they are by then. Any number of impatient clicks collapse into that single re-run.
+		 */
+		if (this.refreshInFlight) {
+			this.refreshQueued = true;
+			return;
+		}
+
 		this.hasUIChanges = false;
 		this.swatchesOutOfSync = false;
 		this.beginInternalSwatchOp();
@@ -1504,9 +1693,15 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 		// Snapshot current grid values AND row order so surviving plates keep both across the reload
 		// (order matters since 2026-08-28: dragging no longer reorders SEPARATED_ART, so the reload
 		// would otherwise come back in document order and Refresh would push the old sequence).
-		this.carryOverRowValues = this.snapshotRowValues();
-		this.carryOverRowOrder = this.colorRows.map((row) => this.normalizePlateKey(row.colorName));
+		/* An empty list (mid-reload after a tab switch) has nothing to carry — and overwriting the pending
+		   carry-over with it would discard the order the tab switch is trying to keep. */
+		if (this.colorRows.length > 0) {
+			this.carryOverRowValues = this.snapshotRowValues();
+			this.carryOverRowOrder = this.colorRows.map((row) => this.normalizePlateKey(row.colorName));
+		}
 
+		this.refreshInFlight = true;
+		this.cdr.detectChanges();
 		this.loadColorRowsFromSeparatedLayerNames()
 			.then(() => {
 				this.updateSepTableInDocument();
@@ -1514,6 +1709,15 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 			.catch((err) => {
 				console.error('[SEPARATION] Refresh reload failed:', err);
 				this.updateSepTableInDocument();
+			})
+			.then(() => {
+				this.refreshInFlight = false;
+				this.cdr.detectChanges();
+				if (this.refreshQueued) {
+					this.refreshQueued = false;
+					/* Out of this promise chain so the queued run starts from a settled state. */
+					setTimeout(() => this.handleRefreshList(), 0);
+				}
 			});
 	}
 

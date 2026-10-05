@@ -10,6 +10,12 @@ export interface AddSeparationDialogResult {
 	mode: 'style' | 'profile';
 	profileName: string;
 	styleCodes: string[];
+	/*
+	 * Only meaningful when the profile already has a group on this graphic: 'existing' adds the styles
+	 * to it (the behaviour before 2026-10-02), 'separate' creates a second, separate separation with the
+	 * same profile — its own SEP file and settings (e.g. a different scale) for a different garment.
+	 */
+	groupMode: 'existing' | 'separate';
 	/* Where the manual style->profile decision should live: just this document, or the whole teamout. */
 	scope: 'file' | 'teamout';
 }
@@ -30,12 +36,17 @@ export class AddSeparationDialogComponent implements OnChanges {
 	 * "Fanatics-Plastisol" used to attach every style mapped to it in Styles.xlsx (hundreds).
 	 */
 	@Input() targetStyleCodes: string[] = [];
+	/* Profiles that already have a group on this graphic — the cases where "existing or separate?" is asked. */
+	@Input() existingProfiles: string[] = [];
+	/* False until the installed JSX can store separate groups; the choice stays hidden until then. */
+	@Input() separateGroupsSupported = false;
 
 	@Output() cancel = new EventEmitter<void>();
 	@Output() confirm = new EventEmitter<AddSeparationDialogResult>();
 
 	selectionMode: 'style' | 'profile' = 'style';
 	scope: 'file' | 'teamout' = 'file';
+	groupMode: 'existing' | 'separate' = 'existing';
 	query = '';
 	selectedStyleCode = '';
 	selectedProfileName = '';
@@ -58,6 +69,7 @@ export class AddSeparationDialogComponent implements OnChanges {
 	private resetState(): void {
 		this.selectionMode = 'style';
 		this.scope = 'file';
+		this.groupMode = 'existing';
 		this.query = '';
 		this.selectedStyleCode = '';
 		this.selectedProfileName = '';
@@ -126,6 +138,32 @@ export class AddSeparationDialogComponent implements OnChanges {
 			(item) => String(item?.styleCode || '').trim() === String(this.selectedStyleCode || '').trim()
 		);
 		return selected?.profileName || '';
+	}
+
+	/* The profile this add will use, whichever field it came from. */
+	get effectiveProfileName(): string {
+		return String((this.selectionMode === 'style' ? this.selectedProfileFromStyle : this.selectedProfileName) || '').trim();
+	}
+
+	/*
+	 * Ask "existing or separate?" only when it means something: the profile is known, it already has a
+	 * group on this graphic, and the installed JSX can store a separate one.
+	 */
+	get showGroupChoice(): boolean {
+		const profile = this.effectiveProfileName.toUpperCase();
+		if (!this.separateGroupsSupported || !profile || profile === 'UNKNOWN PROFILE') {
+			return false;
+		}
+		return (this.existingProfiles || []).some((p) => String(p || '').trim().toUpperCase() === profile);
+	}
+
+	setGroupMode(mode: 'existing' | 'separate'): void {
+		this.groupMode = mode;
+	}
+
+	/* What is actually sent: 'separate' only while the choice is on screen. */
+	private get effectiveGroupMode(): 'existing' | 'separate' {
+		return this.showGroupChoice ? this.groupMode : 'existing';
 	}
 
 	get selectedProfileDisplay(): string {
@@ -270,6 +308,7 @@ export class AddSeparationDialogComponent implements OnChanges {
 				mode: 'style',
 				profileName: this.selectedProfileFromStyle || 'Unknown Profile',
 				styleCodes: [styleCode],
+				groupMode: this.effectiveGroupMode,
 				scope: this.scope
 			});
 			return;
@@ -295,6 +334,7 @@ export class AddSeparationDialogComponent implements OnChanges {
 			mode: 'profile',
 			profileName,
 			styleCodes: deduped,
+			groupMode: this.effectiveGroupMode,
 			scope: this.scope
 		});
 	}

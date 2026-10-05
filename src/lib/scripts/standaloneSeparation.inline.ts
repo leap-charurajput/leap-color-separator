@@ -231,7 +231,8 @@ function standaloneSeparationRun(params) {
 						var selCurBounds = selPasted.geometricBounds;
 						var selCurCenterX = selCurBounds[0] + ((selCurBounds[2] - selCurBounds[0]) / 2);
 						var selTargetCenterX = selGuideBounds[0] + ((selGuideBounds[2] - selGuideBounds[0]) / 2);
-						selPasted.translate(selTargetCenterX - selCurCenterX, selGuideBounds[1] - selCurBounds[1]);
+						/* Mask-safe move — a plain translate() left opacity masks behind (see lcsMaskSafeTransform). */
+						selPasted = lcsMaskSafeTransform(sepDoc, selPasted, selTargetCenterX - selCurCenterX, selGuideBounds[1] - selCurBounds[1], null, null);
 					}
 					prepareSizedArtGraphicForProcessing(sepDoc, selPasted);
 					setFillOverprintOnContainer(selPasted, false);
@@ -255,14 +256,17 @@ function standaloneSeparationRun(params) {
 								gphDup.name = "";
 								var dupW = gphDup.width;
 								var dupH = gphDup.height;
-								if (dupW > 0 && dupH > 0) {
-									var fitPct = Math.min(gbW / dupW, gbH / dupH) * 100;
-									gphDup.resize(fitPct, fitPct);
-								}
-								var newW = gphDup.width;
-								var newH = gphDup.height;
-								gphDup.left = gb[0] + ((gbW - newW) / 2);
-								gphDup.top = gb[3] + gbH - ((gbH - newH) / 2);
+								/*
+								 * Fit + centre in ONE mask-safe transform: move the top-left to where the scaled
+								 * copy's top-left must end up, then scale about that corner. resize() and setting
+								 * left/top both left the copy's opacity masks behind.
+								 */
+								var fitPct = (dupW > 0 && dupH > 0) ? Math.min(gbW / dupW, gbH / dupH) * 100 : 100;
+								var newW = dupW * fitPct / 100;
+								var newH = dupH * fitPct / 100;
+								var wantLeft = gb[0] + ((gbW - newW) / 2);
+								var wantTop = gb[3] + gbH - ((gbH - newH) / 2);
+								gphDup = lcsMaskSafeTransform(sepDoc, gphDup, wantLeft - gphDup.left, wantTop - gphDup.top, fitPct, Transformation.TOPLEFT);
 								gphCount++;
 							}
 						}

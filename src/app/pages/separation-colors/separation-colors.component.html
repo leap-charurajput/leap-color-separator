@@ -91,7 +91,9 @@
     <button
      class="separation-action-btn"
      (click)="handleRefreshList()"
-     [title]="(hasUIChanges || swatchesOutOfSync) ? (swatchesOutOfSync ? 'Refresh list (swatches changed — panel out of sync)' : 'Refresh list (unsaved changes)') : 'Refresh list'"
+     [disabled]="isRefreshing"
+     [class.is-refreshing]="isRefreshing"
+     [title]="isRefreshing ? 'Refreshing…' : ((hasUIChanges || swatchesOutOfSync) ? (swatchesOutOfSync ? 'Refresh list (swatches changed — panel out of sync)' : 'Refresh list (unsaved changes)') : 'Refresh list')"
     >
      <svg
       *ngIf="!(hasUIChanges || swatchesOutOfSync)"
