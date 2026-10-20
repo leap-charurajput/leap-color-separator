@@ -7,7 +7,7 @@ import {
  SimpleChanges
 } from '@angular/core';
 
-export type SeparationProfileActionDialogMode = 'duplicate' | 'edit-new';
+export type SeparationProfileActionDialogMode = 'duplicate' | 'edit-new' | 'duplicate-file';
 
 export interface SeparationProfileActionDialogResult {
  mode: SeparationProfileActionDialogMode;
@@ -16,6 +16,9 @@ export interface SeparationProfileActionDialogResult {
  duplicateAiFile?: boolean;
  scaleEnabled: boolean;
  scalePercent: number | null;
+ /* 'duplicate-file' only: the style the copy is for, and the copy's file name. */
+ styleNumber?: string;
+ fileName?: string;
 }
 
 @Component({
@@ -35,6 +38,9 @@ export class SeparationProfileActionDialogComponent implements OnChanges {
  @Input() initialDuplicateAiFile = true;
  @Input() initialScaleEnabled = false;
  @Input() initialScalePercent: number | null = 100;
+ /* 'duplicate-file' only: the existing SEP file name, and the style(s) it was made for. */
+ @Input() existingFileName = '';
+ @Input() existingStyleCodes: string[] = [];
 
  @Output() cancel = new EventEmitter<void>();
  @Output() confirm = new EventEmitter<SeparationProfileActionDialogResult>();
@@ -44,6 +50,10 @@ export class SeparationProfileActionDialogComponent implements OnChanges {
  duplicateAiFile = true;
  scaleEnabled = false;
  scalePercentStr = '100';
+ styleNumber = '';
+ fileName = '';
+ /* Once the user edits the file name, typing a style no longer rewrites it. */
+ private fileNameTouched = false;
  /*
   * Graphic scale is a percent OF THE ORIGINAL SIZE: 100 = unchanged, 120 = 20% larger, 80 = 20%
   * smaller (same as Illustrator's Object > Transform > Scale). The label used to read "Scale graphic
@@ -63,6 +73,7 @@ export class SeparationProfileActionDialogComponent implements OnChanges {
     changes['initialSelectedStyleCodes'] ||
     changes['initialProfileName'] ||
     changes['hasSeparationFile'] ||
+    changes['existingFileName'] ||
     changes['mode'])
   ) {
    this.resetFromInputs();
@@ -98,6 +109,14 @@ export class SeparationProfileActionDialogComponent implements OnChanges {
   this.duplicateAiFile = this.hasSeparationFile ? this.initialDuplicateAiFile : false;
   this.scaleTouched = false;
   this.applyInitialScale();
+  this.styleNumber = '';
+  this.fileName = this.existingFileName || '';
+  this.fileNameTouched = false;
+  if (this.mode === 'duplicate-file') {
+   /* The copy starts at the file's own size; ticking Scale resizes it from there. */
+   this.scaleEnabled = false;
+   this.scalePercentStr = '100';
+  }
 
   const next: Record<string, boolean> = {};
   const opts = this.styleCodeOptions || [];
@@ -121,6 +140,7 @@ export class SeparationProfileActionDialogComponent implements OnChanges {
  }
 
  get dialogTitle(): string {
+  if (this.mode === 'duplicate-file') return 'Duplicate Separation';
   return this.mode === 'duplicate' ? 'Duplicate Separation' : 'Edit/New Separation';
  }
 
@@ -162,7 +182,7 @@ export class SeparationProfileActionDialogComponent implements OnChanges {
 
  /** Why the scale value cannot be used, or '' when it is fine. Edit/New only — Duplicate is unchanged. */
  get scaleError(): string {
-  if (this.mode !== 'edit-new' || !this.scaleEnabled) {
+  if (this.mode === 'duplicate' || !this.scaleEnabled) {
    return '';
   }
   const n = parseFloat(this.scalePercentStr);
@@ -194,12 +214,79 @@ export class SeparationProfileActionDialogComponent implements OnChanges {
   this.scaleEnabled = t.checked;
  }
 
+ onStyleNumberInput(ev: Event): void {
+  this.styleNumber = (ev.target as HTMLInputElement).value;
+  if (!this.fileNameTouched) {
+   this.fileName = this.buildFileName(this.styleNumber.trim());
+  }
+ }
+
+ onFileNameInput(ev: Event): void {
+  this.fileNameTouched = true;
+  this.fileName = (ev.target as HTMLInputElement).value;
+ }
+
+ /*
+  * The existing file name with its style code swapped for the new one, e.g. 7G_FM01_Front.ai + FM13 ->
+  * 7G_FM13_Front.ai. A name without the old style gets the new one added before ".ai".
+  */
+ private buildFileName(newStyle: string): string {
+  const existing = String(this.existingFileName || '');
+  if (!newStyle || !existing) return existing;
+  const safeStyle = newStyle.replace(/[^A-Za-z0-9._-]+/g, '_');
+  for (const old of this.existingStyleCodes || []) {
+   const code = String(old || '').trim();
+   if (!code) continue;
+   const escaped = code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+   const re = new RegExp('(^|[^A-Za-z0-9])' + escaped + '(?=[^A-Za-z0-9]|$)', 'i');
+   if (re.test(existing)) {
+    return existing.replace(re, (_m: string, lead: string) => lead + safeStyle);
+   }
+  }
+  return existing.replace(/(\.ai)?$/i, '_' + safeStyle + '.ai');
+ }
+
+ /* Why the style / file name cannot be used, or '' when they are fine ('duplicate-file' only). */
+ get duplicateFileError(): string {
+  if (this.mode !== 'duplicate-file') return '';
+  const style = this.styleNumber.trim();
+  if (!style) return 'Enter the style number.';
+  if ((this.existingStyleCodes || []).some((c) => String(c || '').trim().toLowerCase() === style.toLowerCase())) {
+   return 'This separation file is already for ' + style + '. Enter another style.';
+  }
+  const name = this.fileName.trim();
+  if (!name || /^\.ai$/i.test(name)) return 'Enter the file name.';
+  if (/[\/\\:]/.test(name)) return 'The file name cannot contain / \\ or :';
+  if (name.replace(/\.ai$/i, '').toLowerCase() === String(this.existingFileName || '').replace(/\.ai$/i, '').toLowerCase()) {
+   return 'Use a different file name than the original.';
+  }
+  return '';
+ }
+
  onCancel(): void {
   this.cancel.emit();
  }
 
  onOk(): void {
   const selectedStyles = (this.styleCodeOptions || []).filter((c) => !!this.styleChecked[String(c)]);
+  if (this.mode === 'duplicate-file') {
+   if (!this.canSubmit) return;
+   let pct: number | null = null;
+   if (this.scaleEnabled) {
+    const n = parseFloat(this.scalePercentStr);
+    pct = !isNaN(n) && n > 0 && n !== 100 ? n : null;
+   }
+   this.confirm.emit({
+    mode: this.mode,
+    profileName: this.selectedProfileName.trim(),
+    styleCodes: [this.styleNumber.trim()],
+    scaleEnabled: pct != null,
+    scalePercent: pct,
+    styleNumber: this.styleNumber.trim(),
+    fileName: this.fileName.trim()
+   });
+   return;
+  }
   if (!this.selectedProfileName || !this.selectedProfileName.trim()) {
    return;
   }
@@ -230,6 +317,9 @@ export class SeparationProfileActionDialogComponent implements OnChanges {
   }
   if (this.scaleError) {
    return false;
+  }
+  if (this.mode === 'duplicate-file') {
+   return !this.duplicateFileError;
   }
   if (this.mode === 'duplicate') {
    const movable = opts.slice(1);

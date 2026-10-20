@@ -31,7 +31,7 @@
     <span
      *ngIf="isSeparatedDoc && !isRunningInBrowser"
      class="separation-action-btn underbase-menu-opener"
-     title="Underbase actions"
+     data-tip="Underbase actions"
     >
      <app-sub-menu
       [items]="underbaseMenuItems"
@@ -56,7 +56,7 @@
     <button
      class="separation-action-btn"
      (click)="handleAddSelectionToSeparation()"
-     title="Add selected fill swatch to separation"
+     data-tip="Add selected fill swatch to separation"
     >
      <svg
       class="add-selection-to-seps-icon"
@@ -76,7 +76,7 @@
       />
      </svg>
     </button>
-    <button class="separation-action-btn" (click)="handleAddUnderbase()" title="Add underbase">
+    <button class="separation-action-btn" (click)="handleAddUnderbase()" data-tip="Create or Edit Compound Plate">
      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 11.73 11.73" width="20" height="20">
       <polygon
        fill="#fff"
@@ -93,7 +93,7 @@
      (click)="handleRefreshList()"
      [disabled]="isRefreshing"
      [class.is-refreshing]="isRefreshing"
-     [title]="isRefreshing ? 'Refreshing…' : ((hasUIChanges || swatchesOutOfSync) ? (swatchesOutOfSync ? 'Refresh list (swatches changed — panel out of sync)' : 'Refresh list (unsaved changes)') : 'Refresh list')"
+     [attr.data-tip]="isRefreshing ? 'Refreshing…' : ((hasUIChanges || swatchesOutOfSync) ? (swatchesOutOfSync ? 'Refresh list (swatches changed — panel out of sync)' : 'Refresh list (unsaved changes)') : 'Refresh list')"
     >
      <svg
       *ngIf="!(hasUIChanges || swatchesOutOfSync)"
@@ -131,7 +131,7 @@
     <button
      class="separation-action-btn"
      (click)="handleExportProcess()"
-     title="Export to document"
+     data-tip="Export to document"
     >
      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12.23 13.38" width="20" height="20">
       <path

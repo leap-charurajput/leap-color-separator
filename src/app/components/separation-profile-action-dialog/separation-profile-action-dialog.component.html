@@ -5,12 +5,12 @@
   </div>
 
   <div class="modal-body">
-   <div *ngIf="mode === 'edit-new'" class="form-block profile-static-row">
+   <div *ngIf="mode === 'edit-new' || mode === 'duplicate-file'" class="form-block profile-static-row">
     <span class="profile-static-label">Profile:</span>
     <span class="profile-static-value">{{ selectedProfileName }}</span>
    </div>
 
-   <div class="form-block">
+   <div *ngIf="mode !== 'duplicate-file'" class="form-block">
     <div class="field-label">{{ stylesLabel }}</div>
     <div class="style-check-list">
      <div
@@ -64,6 +64,34 @@
       </div>
      </div>
     </div>
+   </ng-container>
+
+   <ng-container *ngIf="mode === 'duplicate-file'">
+    <div class="form-block">
+     <div class="field-label">Style Number *</div>
+     <input type="text" class="text-input" [value]="styleNumber" (input)="onStyleNumberInput($event)" placeholder="e.g. FM13" />
+    </div>
+    <div class="form-block">
+     <div class="field-label">New file name</div>
+     <input type="text" class="text-input" [value]="fileName" (input)="onFileNameInput($event)" />
+     <div class="scale-hint">Copied next to {{ existingFileName }}. The original file is not changed.</div>
+    </div>
+    <div class="form-block">
+     <div class="dup-row scale-row scale-row-inline">
+      <app-checkbox label="Resize graphic to" [checked]="scaleEnabled" (change)="onScaleEnabledToggle($event)"></app-checkbox>
+      <input
+       type="text"
+       class="scale-input"
+       [value]="scalePercentStr"
+       [disabled]="!scaleEnabled"
+       (input)="onScalePercentInput($event)"
+      />
+      <span class="pct">%</span>
+     </div>
+     <div class="scale-hint" [class.scale-hint--error]="!!scaleError">{{ scaleError || scaleHint }}</div>
+     <div *ngIf="scaleEnabled && !scaleError" class="scale-hint">Resizes SEPARATED_ART in the new file (all plates together), from the current file's size.</div>
+    </div>
+    <div *ngIf="duplicateFileError && styleNumber" class="scale-hint scale-hint--error">{{ duplicateFileError }}</div>
    </ng-container>
 
    <ng-container *ngIf="mode === 'edit-new'">

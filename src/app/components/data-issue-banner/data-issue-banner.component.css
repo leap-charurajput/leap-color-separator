@@ -63,3 +63,21 @@
 .data-issue-dismiss:hover {
 	color: #ffffff;
 }
+
+/* Fix-it button under the message (e.g. "Place missing CAD"). */
+.data-issue-action {
+	margin-top: 4px;
+	padding: 2px 8px;
+	font-size: 10px;
+	font-weight: 600;
+	color: #b23a3a;
+	background: #ffffff;
+	border: none;
+	border-radius: 3px;
+	cursor: pointer;
+}
+
+.data-issue-action:disabled {
+	opacity: 0.6;
+	cursor: default;
+}

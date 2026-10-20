@@ -161,6 +161,13 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
  /* Profile resolution (Style Code -> Styles.xlsx -> profile name). */
  isResolvingProfile = false;
  profileResolveWarning = '';
+ /*
+  * Manual profile pick when Styles.xlsx has no profile for the style (or cannot be read). The
+  * warning stays; the user picks from the existing profiles (Profiles.json) and can go on without
+  * editing Styles.xlsx. Remembered per style so a re-resolve of the same style keeps the pick.
+  */
+ profileOptions: string[] = [];
+ manualProfile: { style: string; name: string } | null = null;
  /* TEMPORARY diagnostic: the raw profile-lookup result, shown when the debug box is on. */
  profileLookupDebug = '';
  statusMessage = '';
@@ -329,8 +336,8 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
 
  /*
   * Resolve the separation profile from the current Style Code using the shared Styles.xlsx
-  * (SETTINGS/LEAP_SEPS/Data) — the same Style -> profile mapping the Separations tab uses. There
-  * is no manual profile picker in standalone mode: the style code determines the profile.
+  * (SETTINGS/LEAP_SEPS/Data) — the same Style -> profile mapping the Separations tab uses. When
+  * Styles.xlsx has no profile for the style, the user picks one (onManualProfileChange).
   */
  resolveProfileFromStyle(): void {
   const style = String(this.styleCode || '').trim();
@@ -384,7 +391,9 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
     this.profileName = name;
     this.profileResolveWarning = '';
    } else {
-    this.profileName = '';
+    /* Keep a manual pick for this same style (see manualProfile); otherwise no profile. */
+    this.profileName = this.manualProfile && this.manualProfile.style === target ? this.manualProfile.name : '';
+    this.loadProfileOptions();
     const pathIssue =
      result && result.success === false && /base path|data folder|read styles/i.test(String(result.error || ''));
     if (pathIssue) {
@@ -419,12 +428,46 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
     return lookup.then((result: any) => applyResult(result, basePath));
    })
    .catch((err: any) => {
-    this.profileName = '';
+    this.profileName = this.manualProfile && this.manualProfile.style === target ? this.manualProfile.name : '';
+    this.loadProfileOptions();
     this.profileResolveWarning =
      'Could not read Styles.xlsx to resolve the profile' +
      (err && err.message ? ': ' + err.message : '.');
     finish();
    });
+ }
+
+ /* Existing profile names (Profiles.json), for the manual pick. Loaded once, sorted, de-duplicated. */
+ private loadProfileOptions(): void {
+  if (this.profileOptions.length || this.isRunningInBrowser || typeof this.controller.getSeparationProfiles !== 'function') {
+   return;
+  }
+  this.controller
+   .getSeparationProfiles()
+   .then((result: any) => {
+    const list: any[] = result && Array.isArray(result.profiles) ? result.profiles : [];
+    const names = list
+     .map((p) => String((p && (p['Profile Name'] ?? p.profileName ?? p.name)) || '').trim())
+     .filter((n) => !!n);
+    this.profileOptions = Array.from(new Set(names)).sort((a, b) => a.localeCompare(b));
+    this.cdr.detectChanges();
+   })
+   .catch(() => {
+    /* No list: the warning still tells the user to fix Styles.xlsx. */
+   });
+ }
+
+ /* User picked a profile from the list while Styles.xlsx has none for this style. */
+ onManualProfileChange(name: string): void {
+  const style = String(this.styleCode || '').trim().toUpperCase();
+  const picked = String(name || '').trim();
+  this.profileName = picked;
+  this.manualProfile = picked ? { style, name: picked } : null;
+  /* A different profile invalidates a prior export/grouping, same as a style change. */
+  this.exported = false;
+  this.separationGroups = [];
+  console.log('[STANDALONE] profile chosen manually for style "' + style + '": ' + (picked || '(none)'));
+  this.cdr.detectChanges();
  }
 
  /* Re-resolve the profile whenever the user edits the Style Code (fires on blur/change). */
@@ -821,6 +864,8 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
     this.league = String(sc.league || '');
     this.styleCode = String(sc.styleCode || '');
     this.profileName = String(sc.profileName || '');
+    /* A restored profile counts as a manual pick for its style, so a later re-resolve keeps it. */
+    this.manualProfile = this.profileName ? { style: this.styleCode.trim().toUpperCase(), name: this.profileName } : null;
     this.teamName = String(sc.teamName || '');
     this.concept = String(sc.concept || '');
     this.garmentColors = String(sc.garmentColors || '');
@@ -873,6 +918,7 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
   this.styleCode = '';
   this.profileName = '';
   this.profileResolveWarning = '';
+  this.manualProfile = null;
   this.teamName = '';
   this.concept = '';
   this.garmentColors = '';
@@ -1649,6 +1695,32 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
   * silently. Scoped to the new SEP document, which becomes active right after Prepare (an unscoped
   * message would be wiped by that switch). Cleared when a later Prepare finds one.
   */
+ /*
+  * Remember the prepared SEP file on this job's row (source document XMP), so the Separations tab
+  * can show its link and 3-dots menu like a LEAP row. Best-effort: a failure only loses the link.
+  */
+ private recordPreparedSepPath(group: { profileName: string }, sepDocPath: string): void {
+  if (!sepDocPath || !this.sourceDocumentPath || this.isRunningInBrowser) return;
+  const job = {
+   position: this.position.trim(),
+   profileName: String(group.profileName || this.profileName || '').trim(),
+   styleCode: this.styleCode.trim(),
+   exportedFilePath: this.exportedFilePath || ''
+  };
+  this.controller
+   .recordStandaloneJobSepPath(this.sourceDocumentPath, job, sepDocPath)
+   .then((res: any) => {
+    if (!res?.success) {
+     console.warn('[STANDALONE] Could not record the SEP file on the job:', res?.error);
+    } else if (!res.recorded) {
+     console.warn('[STANDALONE] No saved job matches this Prepare; SEP file link not recorded');
+    } else {
+     console.log('[STANDALONE] SEP file recorded on the job: ' + sepDocPath);
+    }
+   })
+   .catch((err: any) => console.warn('[STANDALONE] Could not record the SEP file on the job:', err));
+ }
+
  private reportCadMiss(cadPngPath: string, sepDocPath: string): void {
   const id = 'separation-cad';
   if (cadPngPath) {
@@ -1658,7 +1730,13 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
   const message = 'No garment silhouette (CAD) was placed for ' + (this.position.trim() || 'this graphic') + ': no matching CAD image was found.';
   const detail = this.lastCadMiss || 'No CAD image could be located for this document.';
   console.warn('[STANDALONE] ' + message + ' ' + detail);
-  this.dataIssues.report(id, message, detail, sepDocPath || undefined);
+  this.dataIssues.report(
+   id,
+   message,
+   detail,
+   sepDocPath || undefined,
+   this.controller.buildPlaceMissingCadAction(id, message, sepDocPath || undefined)
+  );
  }
 
  /*
@@ -1998,6 +2076,7 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
      }
      if (stage === 'prepare') {
       this.reportCadMiss(cadPngPath, String(result.separatedDocumentPath || ''));
+      this.recordPreparedSepPath(group, String(result.separatedDocumentPath || ''));
       group.status = 'Prepared. Edit the art in the SEP document, then Generate.';
       group.prepared = true;
       /* Stay on Separations so the row now offers Generate; refresh its doc-state. */
@@ -2151,6 +2230,7 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
   this.league = job.league ? String(job.league) : '';
   this.styleCode = job.styleCode ? String(job.styleCode) : '';
   this.profileName = job.profileName ? String(job.profileName) : '';
+  this.manualProfile = this.profileName ? { style: this.styleCode.trim().toUpperCase(), name: this.profileName } : null;
   this.teamName = job.teamName ? String(job.teamName) : '';
   this.concept = job.concept ? String(job.concept) : '';
   this.garmentColors = job.garmentColors ? String(job.garmentColors) : '';

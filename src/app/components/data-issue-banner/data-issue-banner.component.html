@@ -8,6 +8,13 @@
 		<div class="data-issue-text">
 			<div class="data-issue-message">{{ issue.message }}</div>
 			<div *ngIf="issue.detail" class="data-issue-detail" [title]="issue.detail">{{ issue.detail }}</div>
+			<button
+				*ngIf="issue.action"
+				type="button"
+				class="data-issue-action"
+				[disabled]="busy.has(issue.id)"
+				(click)="runAction(issue)"
+			>{{ busy.has(issue.id) ? 'Working…' : issue.action.label }}</button>
 		</div>
 		<button
 			type="button"

@@ -1616,18 +1616,34 @@ function inkExceptionNameMatchesName(exceptionInk, targetName) {
 	return false;
 }
 
-// Read/write profile ink exceptions JSON from the configured server base path.
-// Expected location: <ServerBasePath>/SETTINGS/LEAP_SEPS/Data/profile_ink_exceptions.json
-function getProfileInkExceptionsJsonPath() {
+/*
+ * Profiles.json and profile_ink_exceptions.json are kept PER USER, on this machine:
+ *   ~/Documents/LEAP Settings/LEAP_Seps/Data/<fileName>
+ * so each user has their own profiles and ink exceptions (no shared overwrites). The first time the
+ * local file is missing it is seeded from the server copy (<ServerBasePath>/SETTINGS/LEAP_SEPS/Data/),
+ * when that exists. The same rule is in leap-src-index.js and controller.service.ts.
+ */
+function getLocalSepsDataFilePath(fileName) {
 	try {
-		if (typeof getServerBasePath !== "function") return null;
-		var serverBasePath = getServerBasePath();
-		if (!serverBasePath) return null;
-		var normalizedBasePath = String(serverBasePath).replace(/\/$/, "");
-		return normalizedBasePath + "/SETTINGS/LEAP_SEPS/Data/profile_ink_exceptions.json";
+		var dataFolder = new Folder(Folder.myDocuments.fsName + "/LEAP Settings/LEAP_Seps/Data");
+		if (!dataFolder.exists) dataFolder.create();
+		var localFile = new File(dataFolder.fsName + "/" + fileName);
+		if (!localFile.exists && typeof getServerBasePath === "function") {
+			var serverBasePath = getServerBasePath();
+			if (serverBasePath) {
+				var serverFile = new File(String(serverBasePath).replace(/\/$/, "") + "/SETTINGS/LEAP_SEPS/Data/" + fileName);
+				if (serverFile.exists) serverFile.copy(localFile.fsName);
+			}
+		}
+		return localFile.fsName;
 	} catch (e) {
 		return null;
 	}
+}
+
+// Read/write profile ink exceptions JSON (per-user local copy, see getLocalSepsDataFilePath).
+function getProfileInkExceptionsJsonPath() {
+	return getLocalSepsDataFilePath("profile_ink_exceptions.json");
 }
 
 function loadProfileInkExceptionsJson() {

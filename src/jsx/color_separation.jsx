@@ -645,6 +645,28 @@ function resolveSharedWhitePlateSwatchName(doc, profileMetadata) {
 	return "";
 }
 
+/*
+ * 0-based index of the LAST underbase pass this separation builds: the highest profile pass, or a
+ * higher ink-localized pass (ink exception underbase_count; inkLocalizedUnderbase is filled by
+ * mergeInkExceptionUnderbaseIntoProfileMetadata before generateUnderbase runs).
+ */
+function getLastUnderbasePassIndex(profileMetadata) {
+	var enabled = getEnabledUnderbaseIndices(profileMetadata);
+	var last = enabled.length ? enabled[enabled.length - 1] : 0;
+	try {
+		var localized = profileMetadata && profileMetadata.inkLocalizedUnderbase instanceof Array
+			? profileMetadata.inkLocalizedUnderbase
+			: [];
+		for (var i = 0; i < localized.length; i++) {
+			var entry = localized[i];
+			if (entry && entry.layers instanceof Array && entry.layers.length && entry.level - 1 > last) {
+				last = entry.level - 1;
+			}
+		}
+	} catch (e) { }
+	return last;
+}
+
 /** Resolve SEPARATED_ART layer + fill swatch for a profile underbase pass index. */
 function resolveUnderbaseLayerAndSwatch(ubIndex, profileMetadata, doc) {
 	// A custom name (when entered) is used for BOTH the underbase swatch and the layer name.
@@ -659,12 +681,14 @@ function resolveUnderbaseLayerAndSwatch(ubIndex, profileMetadata, doc) {
 	}
 	var layerName = getUnderbaseLayerNameForIndex(ubIndex);
 
-	// UB2 (ubIndex === 1) precedence (per product decision):
+	// LAST underbase pass (2026-10-19, was always UB2), only when there are 2+ passes:
 	//   1) If a white plate swatch already exists (PANTONE White C -> PANTONE White -> White),
-	//      SHARE it as the fill; the layer takes the custom name when entered, else "White UB 2".
+	//      SHARE it as the fill; the layer takes the custom name when entered, else "White UB N".
 	//   2) Else, if a custom name was entered, use it for the layer + swatch.
-	//   3) Else, fall back to the dedicated "White UB 2" swatch (unchanged behavior).
-	if (ubIndex === 1) {
+	//   3) Else, fall back to the dedicated "White UB N" swatch.
+	// Every other pass gets its own swatch, whatever its name (e.g. "ARMOR BLACK 2" in a 4-pass profile).
+	// The last pass counts ink-localized passes too (Jersey_Plastisol: UB 4 under ink 137 shares).
+	if (ubIndex >= 1 && ubIndex === getLastUnderbasePassIndex(profileMetadata)) {
 		/* Format-aware: when ink-name formatting is on, the white plate swatch may already be
 			 renamed (e.g. "PANTONE White C" -> "SL White") — as happens on "Generate underbase from
 			 existing inks", where inks are already formatted. resolveSharedWhitePlateSwatchName finds
@@ -801,31 +825,25 @@ function makeCmykColor(cmyk) {
 	return color;
 }
 
-/** Base (non-spot) color of a swatch, resolving a spot to its alternate color. Null if none. */
-function getUnderbaseBaseColorFromSwatch(doc, swatchName) {
-	if (!swatchName) return null;
-	var sw = getSwatchByName(doc, swatchName);
-	if (!sw || !sw.color) return null;
-	if (sw.color.typename === "SpotColor" && sw.color.spot) return sw.color.spot.color;
-	return sw.color;
-}
-
 /**
  * Ensure the swatch that fills an underbase plate exists, with the right display color.
  * Colors are on-screen only — every underbase prints white. Each plate is created as its
- * own SPOT so it separates independently.
- *   White UB 2  -> copy "White", else "PANTONE White C", else tint C0 M20 Y20 K0
- *   White UB 3  -> tint C20 M0 Y20 K0
- *   White UB 4+ -> tint C20 M20 Y20 K0
- *   White UB / Blocker / other -> copy the "White UB" swatch color
+ * own SPOT so it separates independently. The pass number (passNumber, else "White UB N", else 1)
+ * picks the tint, so custom-named passes differ too:
+ *   pass 1 / Blocker -> copy the "White UB" swatch color (else white)
+ *   pass 2 -> C30 (light cyan), pass 3 -> C30 M20 (light blue), pass 4+ -> C55 M10 Y10 K15 (teal)
+ * The LAST pass usually shares the art's white plate instead (resolveUnderbaseLayerAndSwatch).
  * No-op when the swatch already exists.
  */
-function ensureUnderbaseSwatch(doc, swatchName) {
+function ensureUnderbaseSwatch(doc, swatchName, passNumber) {
 	if (!doc || !swatchName) return;
 	if (getSwatchByName(doc, swatchName)) return;
 
+	/* Pass number from the caller (custom names like "ARMOR BLACK 2" carry no "White UB N"), else
+	   from a "White UB N" name, else 1. Each pass gets a slightly different tint so plates that do
+	   not share a swatch look different on screen. */
 	var match = String(swatchName).match(/white\s*ub\s+(\d+)\s*$/i);
-	var ubNumber = match ? parseInt(match[1], 10) : 1;
+	var ubNumber = passNumber > 0 ? passNumber : (match ? parseInt(match[1], 10) : 1);
 
 	// White UB (UB1), Blocker, and any non-numbered name: keep existing behavior.
 	if (ubNumber < 2) {
@@ -833,19 +851,12 @@ function ensureUnderbaseSwatch(doc, swatchName) {
 		return;
 	}
 
-	// Resolve this pass's display color.
-	var color = null;
-	if (ubNumber === 2) {
-		var whiteName = getSwatchNameCaseInsensitive(doc, "White");
-		if (!whiteName) whiteName = getSwatchNameCaseInsensitive(doc, "PANTONE White C");
-		color = getUnderbaseBaseColorFromSwatch(doc, whiteName);
-	}
-	if (!color) {
-		var cmyk = ubNumber === 2
-			? { c: 5, m: 0, y: 0, k: 0 }
-			: (ubNumber === 3 ? { c: 10, m: 0, y: 0, k: 0 } : { c: 15, m: 0, y: 0, k: 0 });
-		color = makeCmykColor(cmyk);
-	}
+	// This pass's display color (UB1 copies "White UB" above): UB2 light cyan C30, UB3 light blue
+	// C30 M20, UB4 teal C55 M10 Y10 K15 — picked by Charu 2026-10-19 so the passes look different on screen.
+	var cmyk = ubNumber === 2
+		? { c: 30, m: 0, y: 0, k: 0 }
+		: (ubNumber === 3 ? { c: 30, m: 20, y: 0, k: 0 } : { c: 55, m: 10, y: 10, k: 15 });
+	var color = makeCmykColor(cmyk);
 
 	// Every underbase plate is its own spot so it separates independently. A new spot
 	// defaults to process, so colorType must be set to SPOT explicitly.
@@ -892,7 +903,7 @@ function applySpotFillToContainer(container, color) {
 	} catch (e) { }
 }
 
-function finalizeUnderbaseLayer(underbaseLayer, runLeftoverUb, swatchName) {
+function finalizeUnderbaseLayer(underbaseLayer, runLeftoverUb, swatchName, passNumber) {
 	try {
 		var doc = app.activeDocument;
 		var resolvedSwatch = resolveDocumentSwatchName(
@@ -903,7 +914,7 @@ function finalizeUnderbaseLayer(underbaseLayer, runLeftoverUb, swatchName) {
 		);
 		// Ensure the underbase swatch exists so the plate can be filled and appears in the
 		// Swatches panel. UB2 copies White/PANTONE White C, UB3/UB4 get distinct tints.
-		ensureUnderbaseSwatch(doc, resolvedSwatch);
+		ensureUnderbaseSwatch(doc, resolvedSwatch, passNumber);
 		app.selection = null;
 		unlockLayerContentsForSelection(underbaseLayer);
 		doc.activeLayer = underbaseLayer;
@@ -982,7 +993,7 @@ function applyLocalizedInkUnderbaseLayers(profileMetadata, separatedArtLayer, ru
 				continue;
 			}
 
-			finalizeUnderbaseLayer(ubLayer, runLeftoverUb, resolved.swatchName);
+			finalizeUnderbaseLayer(ubLayer, runLeftoverUb, resolved.swatchName, entry.level);
 			appendLeapSepLog(
 				"localized " + ubLayerName + " built from " + entry.layers.join(" + ") + " (" + copied + " items)"
 			);
@@ -1239,7 +1250,7 @@ function generateUnderbase(_graphicName, cleanupOpts, profileMetadata, genOption
 			}
 			var dupCount = duplicateLayerItems(tempWhiteUBLayer, ubLayer);
 			removeKnockoutFilledItemsFromUnderbaseLayer(ubLayer, profileMetadata, ubIndex);
-			finalizeUnderbaseLayer(ubLayer, runLeftoverUb, ubSwatchName);
+			finalizeUnderbaseLayer(ubLayer, runLeftoverUb, ubSwatchName, ubIndex + 1);
 			var ubItemCount = 0;
 			try { ubItemCount = ubLayer.pageItems ? ubLayer.pageItems.length : 0; } catch (cntErr) { }
 			appendLeapSepLog(

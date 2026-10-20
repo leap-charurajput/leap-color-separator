@@ -654,6 +654,18 @@ body.medium-light .profile-ink-pill--ub.is-matches-default:not(:disabled):not(.i
  color: #ffb4b4;
 }
 
+.profile-input.profile-input-row.is-taken,
+.profile-input.profile-input-row.is-taken:focus {
+ border-color: #d32f2f;
+ box-shadow: 0 0 0 1px #d32f2f;
+}
+
+.profile-name-taken-error {
+ margin: -4px 0 8px;
+ font-size: 11px;
+ color: #ff6b6b;
+}
+
 .profile-ink-mesh-input {
  width: 100%;
  max-width: 100%;

@@ -5321,18 +5321,9 @@ function handleCheckSeparatedDocument(params_string) {
 		});
 	}
 }
+/* Per-user local Profiles.json (see getLocalSepsDataFilePath in utilities.jsx). */
 function getProfilesJsonPath() {
-	try {
-		var serverBasePath = getServerBasePath();
-		if (!serverBasePath) {
-			return null;
-		}
-		var normalizedBasePath = serverBasePath.replace(/\/$/, "");
-		var profilesPath = normalizedBasePath + "/SETTINGS/LEAP_SEPS/Data/Profiles.json";
-		return profilesPath;
-	} catch (error) {
-		return null;
-	}
+	return getLocalSepsDataFilePath("Profiles.json");
 }
 function handleGetSeparationProfiles() {
 	try {
@@ -5766,18 +5757,9 @@ function handleLoadGraphicsData(params_string) {
 		});
 	}
 }
+/* Per-user local Profiles.json (see getLocalSepsDataFilePath in utilities.jsx). */
 function getProfilesJsonPath() {
-	try {
-		var serverBasePath = getServerBasePath();
-		if (!serverBasePath) {
-			return null;
-		}
-		var normalizedBasePath = serverBasePath.replace(/\/$/, "");
-		var profilesPath = normalizedBasePath + "/SETTINGS/LEAP_SEPS/Data/Profiles.json";
-		return profilesPath;
-	} catch (error) {
-		return null;
-	}
+	return getLocalSepsDataFilePath("Profiles.json");
 }
 function normalizeDistressFlagForProfile(value) {
 	if (value === true || value === 1) {

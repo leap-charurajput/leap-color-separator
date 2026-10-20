@@ -174,6 +174,31 @@ function getServerBasePath() {
  return null;
 }
 
+/*
+ * Per-user local copy of a LEAP_SEPS data file (Profiles.json, profile_ink_exceptions.json):
+ *   ~/Documents/LEAP Settings/LEAP_Seps/Data/<fileName>
+ * Seeded once from <serverBasePath>/SETTINGS/LEAP_SEPS/Data/<fileName> when the local file is missing.
+ * Same rule as getLocalSepsDataFilePath in utilities.jsx.
+ */
+function getLocalSepsDataFilePath(fileName, serverBasePath) {
+ const home = getHomeDirectory();
+ if (!home) return '';
+ const dataDir = path.join(home, 'Documents', 'LEAP Settings', 'LEAP_Seps', 'Data');
+ const localPath = path.join(dataDir, fileName);
+ try {
+  if (!fs.existsSync(localPath)) {
+   fs.mkdirSync(dataDir, { recursive: true });
+   if (serverBasePath) {
+    const serverPath = path.join(String(serverBasePath).replace(/\/$/, ''), 'SETTINGS', 'LEAP_SEPS', 'Data', fileName);
+    if (fs.existsSync(serverPath)) fs.copyFileSync(serverPath, localPath);
+   }
+  }
+ } catch (error) {
+  console.warn('[LEAP] local ' + fileName + ' seed failed:', error);
+ }
+ return localPath;
+}
+
 async function getServerBasePathWithRetry() {
  const retryDelaysMs = [0, 300, 1000, 2000];
 
@@ -1619,8 +1644,7 @@ async function getProfileInformation(profileCode, options) {
    throw new Error('Server base path not found');
   }
 
-  const normalizedBasePath = serverBasePath.replace(/\/$/, '');
-  const profilesFilePath = path.join(normalizedBasePath, 'SETTINGS', 'LEAP_SEPS', 'Data', 'Profiles.json');
+  const profilesFilePath = getLocalSepsDataFilePath('Profiles.json', serverBasePath);
 
   if (!fs.existsSync(profilesFilePath)) {
    throw new Error(`Profiles.json file not found at: ${profilesFilePath}`);
@@ -1832,15 +1856,8 @@ async function loadInkExceptionsForProfileCode(profileCode) {
   const codeKey = String(profileCode).trim().toUpperCase();
   if (!codeKey) return [];
   const serverBasePath = await getServerBasePathWithRetry();
-  if (!serverBasePath) return [];
-  const jsonPath = path.join(
-   serverBasePath.replace(/\/$/, ''),
-   'SETTINGS',
-   'LEAP_SEPS',
-   'Data',
-   'profile_ink_exceptions.json'
-  );
-  if (!fs.existsSync(jsonPath)) return [];
+  const jsonPath = getLocalSepsDataFilePath('profile_ink_exceptions.json', serverBasePath);
+  if (!jsonPath || !fs.existsSync(jsonPath)) return [];
   const parsed = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
   if (!Array.isArray(parsed)) return [];
   return parsed.filter((entry) => {

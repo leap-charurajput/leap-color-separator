@@ -1133,6 +1133,19 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 		return groups;
 	}
 
+	/*
+	 * standaloneJobGroups builds NEW group objects on every change detection, so without a trackBy the
+	 * rows were destroyed and re-created each time — an open 3-dots menu closed the moment it opened.
+	 */
+	trackStandaloneGroup(_index: number, group: { key: string }): string {
+		return group.key;
+	}
+
+	trackStandaloneJob(_index: number, job: any): string {
+		return [job?.position, job?.profileName, job?.styleCode, job?.exportedFilePath, job?.separatedDocumentPath]
+			.map((v) => String(v || '')).join('|');
+	}
+
 	private standaloneJobGroupKey(job: any): string {
 		const position = String((job && job.position) || '').trim().toUpperCase();
 		if (position) return 'pos:' + position;
@@ -2140,8 +2153,244 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 	 * code dictates e.g. HSWB by default but the job prints plastisol, so the user adds the right
 	 * profile manually and deletes the default one even after it was generated.
 	 */
+	/* Menu of a LEAP row WITHOUT a separation file. Duplicate needs a file, so it is not offered here. */
 	getSeparationMenuItems(separation: Separation, graphicName: string): string[] {
-		return ['Edit', 'Delete', 'Duplicate'];
+		return ['Edit', SeparationsComponent.DELETE_PROFILE_ITEM];
+	}
+
+	/*
+	 * "Duplicate" = copy the SEP file for another style (2026-10-19, Charu). The OLD Duplicate (move styles
+	 * to another profile, openSeparationActionDialog('duplicate')) is no longer in any menu; its code is
+	 * kept and still runs for OLD_DUPLICATE_ITEM, so it can be put back by adding that item to a menu.
+	 */
+	static readonly DUPLICATE_FILE_ITEM = 'Duplicate';
+	static readonly OLD_DUPLICATE_ITEM = 'Duplicate (move styles)';
+	/* Delete Separation File = only the file (the row stays); Delete Profile = the row (and its file, if any). */
+	static readonly DELETE_FILE_ITEM = 'Delete Separation File';
+	static readonly DELETE_PROFILE_ITEM = 'Delete Profile';
+
+	/* Menu of a LEAP row that HAS a separation file: Duplicate only while the file is on disk. */
+	getSeparationFileMenuItems(separation: Separation, graphicName: string): string[] {
+		const items = [SeparationsComponent.DELETE_FILE_ITEM, SeparationsComponent.DELETE_PROFILE_ITEM, 'Edit'];
+		if (this.sepFileExists(this.getSeparationPath(separation, graphicName))) {
+			items.push(SeparationsComponent.DUPLICATE_FILE_ITEM);
+		}
+		return items;
+	}
+
+	/* Standalone / NN Pro row menu, same rules as LEAP: Delete Separation File / Delete Profile / Duplicate (file on disk). */
+	getStandaloneJobMenuItems(job: any): string[] {
+		if (!job?.separatedDocumentPath) {
+			return [SeparationsComponent.DELETE_PROFILE_ITEM];
+		}
+		const items = [SeparationsComponent.DELETE_FILE_ITEM, SeparationsComponent.DELETE_PROFILE_ITEM];
+		if (this.sepFileExists(job.separatedDocumentPath)) {
+			items.push(SeparationsComponent.DUPLICATE_FILE_ITEM);
+		}
+		return items;
+	}
+
+	/* Panel-side existence check (cep_node fs); false in a browser or on any error. */
+	sepFileExists(path: string | null | undefined): boolean {
+		const p = String(path || '').trim();
+		if (!p) return false;
+		try {
+			const req = (window as any).cep_node?.require;
+			return !!req && req('fs').existsSync(p);
+		} catch {
+			return false;
+		}
+	}
+
+	/* ---- Duplicate (the SEP file, for another style) ---- */
+
+	duplicateFileDialogOpen = false;
+	duplicateFileExistingName = '';
+	duplicateFileExistingStyles: string[] = [];
+	duplicateFileProfileName = '';
+	isDuplicatingFile = false;
+	private duplicateFileContext:
+		| { kind: 'leap'; sourcePath: string; graphicName: string; profileName: string; groupId?: string }
+		| { kind: 'standalone'; sourcePath: string; job: any }
+		| null = null;
+
+	private openDuplicateFileDialog(
+		context: { kind: 'leap'; sourcePath: string; graphicName: string; profileName: string; groupId?: string } | { kind: 'standalone'; sourcePath: string; job: any },
+		profileName: string,
+		styleCodes: string[]
+	): void {
+		if (this.isDuplicatingFile) return;
+		if (!this.sepFileExists(context.sourcePath)) {
+			this.reportFailure('separation-duplicate-file', 'The separation file was not found on disk: ' + context.sourcePath);
+			return;
+		}
+		this.duplicateFileContext = context;
+		this.duplicateFileExistingName = this.getFileNameFromPath(context.sourcePath);
+		this.duplicateFileExistingStyles = styleCodes.map((c) => String(c || '').trim()).filter(Boolean);
+		this.duplicateFileProfileName = profileName;
+		this.duplicateFileDialogOpen = true;
+		this.cdr.detectChanges();
+	}
+
+	cancelDuplicateFileDialog(): void {
+		this.duplicateFileDialogOpen = false;
+		this.duplicateFileContext = null;
+		this.cdr.detectChanges();
+	}
+
+	async confirmDuplicateFileDialog(result: SeparationProfileActionDialogResult): Promise<void> {
+		const ctx = this.duplicateFileContext;
+		this.duplicateFileDialogOpen = false;
+		this.duplicateFileContext = null;
+		if (!ctx || this.isDuplicatingFile || this.isRunningInBrowser) {
+			this.cdr.detectChanges();
+			return;
+		}
+		const newStyle = String(result.styleNumber || '').trim();
+		const fileName = String(result.fileName || '').trim();
+		if (!newStyle || !fileName) {
+			return;
+		}
+		this.isDuplicatingFile = true;
+		this.cdr.detectChanges();
+		this.leapSepsLog.logClick('Duplicate separation file for style ' + newStyle, { fileName, scalePercent: result.scalePercent });
+		try {
+			const res = await this.controller.duplicateSeparationFileForStyle({
+				sourcePath: ctx.sourcePath,
+				fileName,
+				newStyle,
+				scalePercent: result.scalePercent,
+				target: ctx.kind === 'leap'
+					? { kind: 'leap', graphicName: ctx.graphicName, profileName: ctx.profileName, groupId: ctx.groupId }
+					: { kind: 'standalone', job: ctx.job }
+			});
+			if (!res?.success) {
+				this.reportFailure('separation-duplicate-file', 'Could not duplicate the separation file: ' + (res?.error || 'Unknown error'));
+				return;
+			}
+			this.dataIssues.clear('separation-duplicate-file');
+			this.leapSepsLog.logInfo(
+				'Separations',
+				'Duplicated separation file for ' + newStyle + ': ' + res.separatedDocumentPath +
+				(res.scaled ? ' (resized ' + res.scaled.layer + ' to ' + result.scalePercent + '%)' : '')
+			);
+			if (ctx.kind === 'leap') {
+				await this.loadSeparationPaths();
+			} else {
+				await this.loadStandaloneJobs();
+			}
+		} catch (err: any) {
+			this.reportFailure('separation-duplicate-file', 'Could not duplicate the separation file: ' + (err?.message || err));
+		} finally {
+			this.isDuplicatingFile = false;
+			this.cdr.detectChanges();
+		}
+	}
+
+	/* ---- Standalone / NN Pro row menu ---- */
+
+	standaloneDeleteTarget: any = null;
+
+	get standaloneDeleteMessage(): string {
+		const job = this.standaloneDeleteTarget;
+		if (!job) return '';
+		return this.buildDeleteProfileMessage(String(job.profileName || ''), String(job.styleCode || ''), String(job.separatedDocumentPath || ''));
+	}
+
+	handleStandaloneJobMenuClick(item: string, job: any): void {
+		this.leapSepsLog.logClick('Standalone separation menu: ' + item, { position: job?.position, profile: job?.profileName });
+		if (!job || this.isRunningInBrowser) return;
+		if (item === SeparationsComponent.DELETE_PROFILE_ITEM) {
+			this.standaloneDeleteTarget = job;
+			this.cdr.detectChanges();
+			return;
+		}
+		if (item === SeparationsComponent.DELETE_FILE_ITEM) {
+			this.standaloneDeleteFileTarget = job;
+			this.cdr.detectChanges();
+			return;
+		}
+		if (item === SeparationsComponent.DUPLICATE_FILE_ITEM) {
+			this.openDuplicateFileDialog(
+				{ kind: 'standalone', sourcePath: String(job.separatedDocumentPath || ''), job },
+				String(job.profileName || ''),
+				this.parseStandaloneJobStyleCodes(job)
+			);
+		}
+	}
+
+	standaloneDeleteFileTarget: any = null;
+
+	get standaloneDeleteFileMessage(): string {
+		const job = this.standaloneDeleteFileTarget;
+		return job ? this.buildDeleteFileMessage(String(job.separatedDocumentPath || '')) : '';
+	}
+
+	cancelStandaloneDeleteFile(): void {
+		this.standaloneDeleteFileTarget = null;
+		this.cdr.detectChanges();
+	}
+
+	/* Delete only the SEP file, then clear the row's link. A file that cannot be deleted keeps the link. */
+	async confirmStandaloneDeleteFile(): Promise<void> {
+		const job = this.standaloneDeleteFileTarget;
+		this.standaloneDeleteFileTarget = null;
+		if (!job) return;
+		try {
+			const path = String(job.separatedDocumentPath || '');
+			if (this.sepFileExists(path)) {
+				const fileRes: any = await this.controller.deleteSeparationFileFromDisk(path);
+				if (!fileRes?.success) {
+					this.reportFailure('separation-delete', 'Could not delete the separation file: ' + (fileRes?.error || 'Unknown error'));
+					return;
+				}
+			}
+			/* '' = the active document (the one whose rows are listed). */
+			const res: any = await this.controller.recordStandaloneJobSepPath('', job, '');
+			if (!res?.success || !res.recorded) {
+				this.reportFailure('separation-delete', 'The file was deleted but the row still links it: ' + (res?.error || 'row not found'));
+			} else {
+				this.leapSepsLog.logInfo('Separations', 'Deleted separation file ' + path);
+			}
+			await this.loadStandaloneJobs();
+		} catch (err: any) {
+			this.reportFailure('separation-delete', 'Could not delete the separation file: ' + (err?.message || err));
+		} finally {
+			this.cdr.detectChanges();
+		}
+	}
+
+	cancelStandaloneDelete(): void {
+		this.standaloneDeleteTarget = null;
+		this.cdr.detectChanges();
+	}
+
+	/* Delete the row's SEP file first (if any), then the row; a file that cannot be deleted stops both. */
+	async confirmStandaloneDelete(): Promise<void> {
+		const job = this.standaloneDeleteTarget;
+		this.standaloneDeleteTarget = null;
+		if (!job) return;
+		try {
+			const path = String(job.separatedDocumentPath || '');
+			if (this.sepFileExists(path)) {
+				const fileRes: any = await this.controller.deleteSeparationFileFromDisk(path);
+				if (!fileRes?.success) {
+					this.reportFailure('separation-delete', 'Could not delete the separation file: ' + (fileRes?.error || 'Unknown error'));
+					return;
+				}
+			}
+			const res: any = await this.controller.deleteStandaloneJob(job);
+			if (!res?.success) {
+				this.reportFailure('separation-delete', 'Could not delete the separation: ' + (res?.error || 'Unknown error'));
+				return;
+			}
+			this.leapSepsLog.logInfo('Separations', 'Deleted standalone separation ' + (job.profileName || '') + ' ' + (job.styleCode || ''));
+			await this.loadStandaloneJobs();
+		} catch (err: any) {
+			this.reportFailure('separation-delete', 'Could not delete the separation: ' + (err?.message || err));
+		} finally {
+			this.cdr.detectChanges();
+		}
 	}
 
 	/* Delete confirmation state (mirrors the other confirm dialogs). filePath set = also delete the file. */
@@ -2154,13 +2403,33 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 		groupId?: string;
 	} | null = null;
 
+	/*
+	 * ONE wording for LEAP and standalone rows (2026-10-19, Charu).
+	 * Delete Profile removes the row from this document; to get it back, use Add Separation.
+	 */
+	private buildDeleteProfileMessage(profileName: string, styles: string, filePath: string): string {
+		const base = 'Delete the profile \u201C' + (profileName || '\u2014') + '\u201D' + (styles ? ' (' + styles + ')' : '') +
+			' from this document? To add it again, use Add Separation.';
+		if (!filePath || !this.sepFileExists(filePath)) return base;
+		return base + ' The separation file \u201C' + this.getFileNameFromPath(filePath) + '\u201D will also be deleted from disk.';
+	}
+
+	/* Delete Separation File only deletes the file; the wording does not mention the row. */
+	private buildDeleteFileMessage(filePath: string): string {
+		return 'Delete the separation file \u201C' + this.getFileNameFromPath(filePath) + '\u201D from disk?';
+	}
+
 	get separationDeleteMessage(): string {
 		const t = this.separationDeleteTarget;
 		if (!t) return '';
-		const base = 'Delete the separation profile \u201C' + t.profileName + '\u201D? It will no longer be listed for this document (Add Separation brings it back).';
-		if (!t.filePath) return base;
-		const fileName = t.filePath.split(/[\\/]/).pop() || t.filePath;
-		return base + ' The generated separation file \u201C' + fileName + '\u201D will also be DELETED from disk.';
+		const separation = this.findSeparationById(t.separationId);
+		const styles = separation ? this.stylesFor(separation, t.graphicName).join(', ') : '';
+		return this.buildDeleteProfileMessage(t.profileName, styles, t.filePath);
+	}
+
+	get deleteSeparationFileMessage(): string {
+		const ctx = this.deleteSeparationFileContext;
+		return ctx ? this.buildDeleteFileMessage(ctx.filePath) : '';
 	}
 
 	confirmDeleteSeparationGroup(): void {
@@ -2268,7 +2537,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 
 	handleSeparationMenuClick(item: string, separationId: number, graphicName: string): void {
 		this.leapSepsLog.logClick('Separation menu: ' + item, { separationId, graphicName });
-		if (item === 'Delete') {
+		if (item === SeparationsComponent.DELETE_PROFILE_ITEM || item === 'Delete') {
 			const separation = this.findSeparationById(separationId);
 			if (separation) {
 				this.separationDeleteTarget = {
@@ -2290,7 +2559,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 			return;
 		}
 
-		if (item === 'Delete Separation File') {
+		if (item === SeparationsComponent.DELETE_FILE_ITEM) {
 			const filePath = this.getSeparationPath(separation, graphicName);
 			if (!filePath) {
 				return;
@@ -2307,8 +2576,23 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 			return;
 		}
 
-		if (item === 'Duplicate') {
+		if (item === SeparationsComponent.OLD_DUPLICATE_ITEM) {
 			this.openSeparationActionDialog('duplicate', graphicName, separation, false);
+			return;
+		}
+
+		if (item === SeparationsComponent.DUPLICATE_FILE_ITEM) {
+			this.openDuplicateFileDialog(
+				{
+					kind: 'leap',
+					sourcePath: this.getSeparationPath(separation, graphicName) || '',
+					graphicName,
+					profileName: separation.profile,
+					groupId: separation.groupId
+				},
+				separation.profile,
+				this.stylesFor(separation, graphicName)
+			);
 			return;
 		}
 
@@ -2886,7 +3170,13 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 			detail = String(dbg.message || 'Unknown reason') + (dbg.cadPngPath ? ' — ' + base(dbg.cadPngPath) : '');
 		}
 		this.leapSepsLog.logWarn('Separations', message + ' ' + detail, dbg);
-		this.dataIssues.report(id, message, detail, sepDocPath || undefined);
+		this.dataIssues.report(
+			id,
+			message,
+			detail,
+			sepDocPath || undefined,
+			this.controller.buildPlaceMissingCadAction(id, message, sepDocPath || undefined)
+		);
 	}
 
 	/*

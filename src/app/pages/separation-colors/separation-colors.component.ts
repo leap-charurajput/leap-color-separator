@@ -1779,8 +1779,18 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 		// the document's [CONTROL]/[V#] tokens (first export) or the Control_Number/Version_Number text frames
 		// (repeat export) and SAVE FIRST, then continue to the PostScript/Print-Guide export. Never blocks the
 		// export on an update failure (it's logged; the export still runs).
+		// The Top Reg Mark is hidden first, so that save (and every exported file) has it hidden.
 		this.controller
-			.updateControlAndVersionNumbers(controlNumber, versionNumber)
+			.hideTopRegMarkForExport()
+			.then((res: any) => {
+				if (!res || res.success !== true) {
+					console.error('[SEPARATION] Hide Top Reg Mark failed:', res && res.error ? res.error : 'unknown error');
+				}
+			})
+			.catch((err: any) => {
+				console.error('[SEPARATION] Hide Top Reg Mark error:', err && (err.message || err.reason) ? (err.message || err.reason) : err);
+			})
+			.then(() => this.controller.updateControlAndVersionNumbers(controlNumber, versionNumber))
 			.then((res: any) => {
 				if (!res || res.success !== true) {
 					console.error('[SEPARATION] Control/Version number update failed:', res && res.error ? res.error : 'unknown error');

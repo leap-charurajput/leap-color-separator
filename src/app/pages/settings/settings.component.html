@@ -105,6 +105,8 @@
     [profile]="duplicateProfileDraft || selectedProfile"
     [defaultBlackColorNames]="koDarkColorNames"
     [meshValues]="meshValues"
+    [existingProfiles]="profiles"
+    [isNewProfile]="!selectedProfile"
     (close)="handleModalClose()"
     (save)="handleModalSave($event)"></app-edit-separation-profile-modal>
 </div>

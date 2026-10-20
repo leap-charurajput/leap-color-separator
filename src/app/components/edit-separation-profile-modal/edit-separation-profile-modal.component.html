@@ -45,13 +45,15 @@
 
      <div class="settings-field profile-field-row">
       <label class="settings-field-label profile-field-label">Name:</label>
-      <input type="text" class="settings-field-input profile-input profile-input-row" [value]="formState.name" (input)="onInputChange('name', $event)" />
+      <input type="text" class="settings-field-input profile-input profile-input-row" [class.is-taken]="!!profileNameCodeError" [attr.aria-invalid]="!!profileNameCodeError || null" [value]="formState.name" (input)="onInputChange('name', $event)" />
      </div>
 
      <div class="settings-field profile-field-row">
       <label class="settings-field-label profile-field-label">Code:</label>
-      <input type="text" class="settings-field-input profile-input profile-input-row" [value]="formState.code" (input)="onInputChange('code', $event)" />
+      <input type="text" class="settings-field-input profile-input profile-input-row" [class.is-taken]="!!profileNameCodeError" [attr.aria-invalid]="!!profileNameCodeError || null" [value]="formState.code" (input)="onInputChange('code', $event)" />
      </div>
+
+     <div *ngIf="profileNameCodeError" class="profile-name-taken-error" role="alert">{{ profileNameCodeError }}</div>
 
      <div class="settings-field profile-field-row profile-field-row--mesh">
       <label class="settings-field-label profile-field-label">Color Mesh:</label>

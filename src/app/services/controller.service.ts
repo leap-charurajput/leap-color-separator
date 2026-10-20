@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { DataIssuesService } from './data-issues.service';
+import { DataIssueAction, DataIssuesService } from './data-issues.service';
 import { checkForJSXUpdates, csInterface, evalScript } from '../../libs/helper';
 import { createGraphicFromSelection } from '../../lib/scripts/createGraphicFromSelection.script';
 /* Standalone (non-LEAP) mode: read the LICENSING sheet from the active document to prefill the form. */
@@ -8,6 +8,12 @@ import { getLicensingInfoFromDocument } from '../../lib/scripts/getLicensingInfo
 import { exportSelectionToAssets } from '../../lib/scripts/exportSelectionToAssets.script';
 /* Standalone (non-LEAP) mode: run the separation on the exported graphic. */
 import { runStandaloneSeparation } from '../../lib/scripts/standaloneSeparation.script';
+import {
+	duplicateSepFileForStyle,
+	recordStandaloneJobSepPath,
+	deleteStandaloneJobRow,
+	DuplicateSepFileParams
+} from '../../lib/scripts/duplicateSepFile.script';
 import { hasActiveDocument as hasHostActiveDocument } from '../../lib/scripts/hasActiveDocument.script';
 import { getSelectionCount as getHostSelectionCount } from '../../lib/scripts/getSelectionCount.script';
 /* NN Pro product detection: LEAP_XMP_META / colorSepsConfig read from the active doc's XMP. */
@@ -1114,11 +1120,32 @@ export class ControllerService {
 		});
 	}
 
+	/**
+	 * Per-user local profile_ink_exceptions.json: ~/Documents/LEAP Settings/LEAP_Seps/Data/.
+	 * Seeded once from <basePath>/SETTINGS/LEAP_SEPS/Data/ when the local file is missing
+	 * (same rule as getLocalSepsDataFilePath in utilities.jsx / leap-src-index.js).
+	 */
 	private getProfileInkExceptionsFilePath(basePath: string): string {
-		const path = (window as any).cep_node?.require('path');
-		if (!path || !basePath) return '';
-		const normalized = String(basePath).replace(/\/$/, '');
-		return path.join(normalized, 'SETTINGS', 'LEAP_SEPS', 'Data', 'profile_ink_exceptions.json');
+		const nodeRequire = (window as any).cep_node?.require;
+		const path = nodeRequire?.('path');
+		const fs = nodeRequire?.('fs');
+		const os = nodeRequire?.('os');
+		if (!path || !fs || !os) return '';
+		const fileName = 'profile_ink_exceptions.json';
+		const dataDir = path.join(os.homedir(), 'Documents', 'LEAP Settings', 'LEAP_Seps', 'Data');
+		const localPath = path.join(dataDir, fileName);
+		try {
+			if (!fs.existsSync(localPath)) {
+				fs.mkdirSync(dataDir, { recursive: true });
+				if (basePath) {
+					const serverPath = path.join(String(basePath).replace(/\/$/, ''), 'SETTINGS', 'LEAP_SEPS', 'Data', fileName);
+					if (fs.existsSync(serverPath)) fs.copyFileSync(serverPath, localPath);
+				}
+			}
+		} catch (err) {
+			this.log('local ' + fileName + ' seed failed: ' + err);
+		}
+		return localPath;
 	}
 
 	private inkJsonEntryToRow(entry: any, index: number): any | null {
@@ -2660,6 +2687,24 @@ export class ControllerService {
 	}
 
 	/* Standalone jobs recorded on a document; empty array for any document that has none. */
+	/* Copy a SEP file for another style (optionally resized) and record it as a new row. */
+	duplicateSeparationFileForStyle(params: DuplicateSepFileParams): Promise<any> {
+		this.log('duplicateSeparationFileForStyle called: ' + params.newStyle + ' -> ' + params.fileName);
+		return this.ensureSession().then(() => duplicateSepFileForStyle(params));
+	}
+
+	/* After a standalone Prepare: remember the SEP file on the job's row so the Separations tab links it. */
+	recordStandaloneJobSepPath(documentPath: string, job: any, separatedDocumentPath: string): Promise<any> {
+		this.log('recordStandaloneJobSepPath called');
+		return this.ensureSession().then(() => recordStandaloneJobSepPath(documentPath, job, separatedDocumentPath));
+	}
+
+	/* Remove one standalone job row from the active document. */
+	deleteStandaloneJob(job: any): Promise<any> {
+		this.log('deleteStandaloneJob called');
+		return this.ensureSession().then(() => deleteStandaloneJobRow(job));
+	}
+
 	readStandaloneJobsFromXmp(documentPath?: string): Promise<any> {
 		this.log('readStandaloneJobsFromXmp called');
 		return this.ensureSession().then(() => {
@@ -3520,6 +3565,146 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
 	 * are overwritten by name. Matching lowercases the frame name and loops every frame, so the names may
 	 * be any case (CONTROL_NUMBER, Control_Number, …) and there may be more than one of each.
 	 */
+	/*
+	 * "Place missing CAD" button for the banner shown when Prepare placed no garment silhouette (CAD).
+	 * The user picks a PNG; it is placed into the CADS layer of the SEP document (sepDocPath, else the
+	 * active document) with the same placeCadPngInDocument used by Prepare (fit + centre in each "CAD"
+	 * bound, overprint, embedded), and the document is saved. On success the banner entry is cleared;
+	 * on failure it stays and shows why. Cancel in the file picker changes nothing.
+	 */
+	buildPlaceMissingCadAction(issueId: string, message: string, sepDocPath?: string): DataIssueAction {
+		return {
+			label: 'Place missing CAD',
+			run: async () => {
+				const res = await this.placeMissingCadPng(sepDocPath);
+				if (res?.canceled) return;
+				if (res?.success) {
+					this.log('Place missing CAD: placed ' + (res.cadPngPath || ''));
+					this.dataIssues.clear(issueId);
+					return;
+				}
+				const reason = String(res?.error || 'Unknown error');
+				this.log('Place missing CAD failed: ' + reason);
+				this.dataIssues.report(
+					issueId,
+					message,
+					'Could not place the selected CAD: ' + reason,
+					sepDocPath || undefined,
+					this.buildPlaceMissingCadAction(issueId, message, sepDocPath)
+				);
+			}
+		};
+	}
+
+	/* Pick a CAD PNG and place it in the SEP document's CADS layer. See buildPlaceMissingCadAction. */
+	placeMissingCadPng(sepDocPath?: string): Promise<any> {
+		const cep = (window as any).cep;
+		if (!cep || !cep.fs) {
+			return Promise.resolve({ success: false, error: 'File system not available' });
+		}
+		const dialog = cep.fs.showOpenDialog(false, false, 'Select the CAD (garment silhouette) PNG', null, ['png']);
+		if (!dialog || dialog.err !== 0) {
+			return Promise.resolve({ success: false, error: 'Could not open file dialog (' + (dialog ? dialog.err : 'no response') + ')' });
+		}
+		if (!dialog.data || dialog.data.length === 0) {
+			return Promise.resolve({ success: false, canceled: true });
+		}
+		let pngPath = String(dialog.data[0] || '');
+		if (pngPath.indexOf('file://') === 0) {
+			try { pngPath = decodeURIComponent(pngPath.replace('file://', '')); } catch (_) { pngPath = pngPath.replace('file://', ''); }
+		}
+		if (!/\.png$/i.test(pngPath)) {
+			return Promise.resolve({ success: false, error: 'Please choose a .png file' });
+		}
+		const pngLiteral = JSON.stringify(pngPath);
+		const docLiteral = JSON.stringify(String(sepDocPath || ''));
+		return this.ensureSession().then(() => {
+			const script = `
+(function() {
+  try {
+    if (!app.documents.length) {
+      return JSON.stringify({ success: false, error: "No document is open" });
+    }
+    var wanted = ${docLiteral};
+    var doc = null;
+    if (wanted) {
+      for (var i = 0; i < app.documents.length; i++) {
+        try {
+          if (app.documents[i].fullName.fsName === wanted) { doc = app.documents[i]; break; }
+        } catch (ePath) { }
+      }
+    }
+    if (!doc) doc = app.activeDocument;
+    if (typeof placeCadPngInDocument !== "function") {
+      return JSON.stringify({ success: false, error: "CAD placement is not available in the installed scripts" });
+    }
+    app.activeDocument = doc;
+    var dbg = placeCadPngInDocument(doc, ${pngLiteral});
+    if (!dbg || dbg.placed !== true) {
+      return JSON.stringify({ success: false, error: (dbg && dbg.message) || "CAD was not placed", debug: dbg });
+    }
+    try { doc.save(); } catch (eSave) { }
+    return JSON.stringify({ success: true, cadPngPath: ${pngLiteral}, doc: doc.name });
+  } catch (e) {
+    return JSON.stringify({ success: false, error: e.message || e.toString() });
+  }
+})();
+`;
+			return evalScript(script).then((res: any) => {
+				const str = typeof res === 'string' ? res : '';
+				try {
+					return str ? JSON.parse(str) : { success: false, error: 'Empty response from host' };
+				} catch (e) {
+					return { success: false, error: 'Invalid JSON response from host', raw: str };
+				}
+			});
+		});
+	}
+
+	/*
+	 * Hide the "Top Reg Mark" sublayer (GRID > GRID TEMPLATE > Top Reg Mark) at the start of Export, so it
+	 * is hidden in every exported file (.ai copy, Print Guide PDF, PostScript / Seps Preview). It is left
+	 * hidden; the save in updateControlAndVersionNumbers stores that. Missing layer = nothing to do.
+	 */
+	hideTopRegMarkForExport(): Promise<any> {
+		this.log('hideTopRegMarkForExport called');
+		return this.ensureSession().then(() => {
+			const script = `
+(function() {
+  try {
+    if (!app.documents.length) {
+      return JSON.stringify({ success: false, error: "No active document found" });
+    }
+    var hidden = 0;
+    function walk(container, insideGridTemplate) {
+      for (var i = 0; i < container.layers.length; i++) {
+        var layer = container.layers[i];
+        var name = String(layer.name || "").replace(/^\\s+|\\s+$/g, "").toUpperCase();
+        if (insideGridTemplate && name === "TOP REG MARK") {
+          if (layer.visible) { layer.visible = false; hidden++; }
+          continue;
+        }
+        walk(layer, insideGridTemplate || name === "GRID TEMPLATE");
+      }
+    }
+    walk(app.activeDocument, false);
+    return JSON.stringify({ success: true, hidden: hidden });
+  } catch (e) {
+    return JSON.stringify({ success: false, error: "Error hiding Top Reg Mark: " + (e.message || e.toString()) });
+  }
+})();
+`;
+			return evalScript(script).then((res: any) => {
+				const str = typeof res === 'string' ? res : '';
+				try {
+					return str ? JSON.parse(str) : { success: false, error: 'Empty response from host' };
+				} catch (e) {
+					return { success: false, error: 'Invalid JSON response from host', raw: str };
+				}
+			});
+		});
+	}
+
 	updateControlAndVersionNumbers(controlNumber: string, versionNumber: string): Promise<any> {
 		this.log('updateControlAndVersionNumbers called');
 		const controlLiteral = JSON.stringify(String(controlNumber == null ? '' : controlNumber));

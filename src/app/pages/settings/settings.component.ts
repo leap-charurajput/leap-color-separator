@@ -586,7 +586,8 @@ export class SettingsComponent implements OnInit, OnChanges {
 	}
 
 	/**
-	 * Opens the edit modal with a copy of the profile; name and code default to "-2".
+	 * Opens the edit modal with a copy of the profile; name and code get the first free suffix
+	 * ("-2", then "-3", …) so duplicating twice never repeats a name or code.
 	 * JSON is updated only if the user clicks Save.
 	 */
 	handleDuplicateProfile(profile: Profile): void {
@@ -596,9 +597,16 @@ export class SettingsComponent implements OnInit, OnChanges {
 	}
 
 	private buildDuplicateProfileDraft(profile: Profile): Profile {
-		const newName = `${profile.name}-2`;
 		const baseCode = profile.code || profile._jsonData?.['Profile Code'] || '';
-		const newCode = baseCode ? `${baseCode}-2` : '';
+		const norm = (v: any): string => String(v ?? '').trim().toLowerCase();
+		const takenNames = new Set(this.profiles.map((p) => norm(p.name)));
+		const takenCodes = new Set(this.profiles.map((p) => norm(p.code)));
+		let n = 2;
+		while (takenNames.has(norm(`${profile.name}-${n}`)) || (baseCode && takenCodes.has(norm(`${baseCode}-${n}`)))) {
+			n++;
+		}
+		const newName = `${profile.name}-${n}`;
+		const newCode = baseCode ? `${baseCode}-${n}` : '';
 		const distress = profile.distress || profile._jsonData?.Distress || 'N';
 
 		let newJsonData: any | undefined;

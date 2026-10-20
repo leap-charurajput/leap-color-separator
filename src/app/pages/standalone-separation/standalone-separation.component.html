@@ -113,14 +113,31 @@
    <label class="standalone-label">Profile</label>
    <div class="standalone-control">
     <span *ngIf="isResolvingProfile" class="standalone-readonly">Resolving…</span>
-    <span *ngIf="!isResolvingProfile && profileName" class="standalone-readonly">{{ profileName }}</span>
-    <span *ngIf="!isResolvingProfile && !profileName" class="standalone-readonly standalone-readonly-muted">
-     {{ styleCode ? 'No profile for this style' : 'Enter a style code' }}
-    </span>
+    <!-- Styles.xlsx has no profile for this style: let the user pick one (Styles.xlsx is not changed). -->
+    <app-combo-box
+     *ngIf="!isResolvingProfile && profileResolveWarning && profileOptions.length"
+     [value]="profileName"
+     [items]="profileOptions"
+     [allowCustomValue]="false"
+     (onChange)="onManualProfileChange($event)"
+     placeholder="Choose…"
+     title="Choose a profile for this job. Styles.xlsx is not changed."
+    ></app-combo-box>
+    <ng-container *ngIf="!isResolvingProfile && !(profileResolveWarning && profileOptions.length)">
+     <span *ngIf="profileName" class="standalone-readonly">{{ profileName }}</span>
+     <span *ngIf="!profileName" class="standalone-readonly standalone-readonly-muted">
+      {{ styleCode ? 'No profile for this style' : 'Enter a style code' }}
+     </span>
+    </ng-container>
    </div>
   </div>
 
-  <div *ngIf="profileResolveWarning" class="standalone-warning">{{ profileResolveWarning }}</div>
+  <div *ngIf="profileResolveWarning" class="standalone-warning">
+   {{ profileResolveWarning }}
+   <ng-container *ngIf="profileOptions.length">
+    {{ profileName ? 'Using "' + profileName + '", chosen manually.' : 'Choose a profile above to continue.' }}
+   </ng-container>
+  </div>
 
   <!-- [Graphic Name] / [Art Code] / [Design Name]; falls back to Position when left empty. -->
   <div class="standalone-field">

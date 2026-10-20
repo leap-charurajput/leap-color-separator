@@ -66,7 +66,15 @@ export async function writeStandaloneJobDedup(job: any, documentPath?: string): 
 				: (exFile === "" && exPos === keyPos && exProfile === keyProfile);
 			if (matched) { replacedAt = i; break; }
 		}
-		if (replacedAt >= 0) { jobs[replacedAt] = job; } else { jobs.push(job); }
+		if (replacedAt >= 0) {
+			/* Keep the SEP file link Prepare recorded, unless the style changed (then it is another file). */
+			var prev = jobs[replacedAt] || {};
+			var sameStyle = String(prev.styleCode || "").toLowerCase() === String(job.styleCode || "").toLowerCase();
+			if (!job.separatedDocumentPath && prev.separatedDocumentPath && sameStyle) {
+				job.separatedDocumentPath = prev.separatedDocumentPath;
+			}
+			jobs[replacedAt] = job;
+		} else { jobs.push(job); }
 
 		xmp.setStructField("LEAPStandaloneJobs", jobs, true, false);
 		xmp.commit();

@@ -1,4 +1,4 @@
-import { Component } from '@angular/core';
+import { ChangeDetectorRef, Component, NgZone } from '@angular/core';
 import { DataIssue, DataIssuesService } from '../../services/data-issues.service';
 
 /*
@@ -12,7 +12,11 @@ import { DataIssue, DataIssuesService } from '../../services/data-issues.service
 	styleUrls: ['./data-issue-banner.component.css']
 })
 export class DataIssueBannerComponent {
-	constructor(private dataIssues: DataIssuesService) {}
+	constructor(
+		private dataIssues: DataIssuesService,
+		private ngZone: NgZone,
+		private cdr: ChangeDetectorRef
+	) {}
 
 	get issues(): DataIssue[] {
 		return this.dataIssues.issues;
@@ -24,5 +28,22 @@ export class DataIssueBannerComponent {
 
 	dismiss(id: string): void {
 		this.dataIssues.dismiss(id);
+	}
+
+	/** Ids whose action button is running (button disabled meanwhile, so it cannot be clicked twice). */
+	busy = new Set<string>();
+
+	async runAction(issue: DataIssue): Promise<void> {
+		if (!issue.action || this.busy.has(issue.id)) return;
+		this.busy.add(issue.id);
+		try {
+			await issue.action.run();
+		} finally {
+			/* The host call resolves outside Angular's zone; refresh so the button / cleared entry update. */
+			this.ngZone.run(() => {
+				this.busy.delete(issue.id);
+				this.cdr.detectChanges();
+			});
+		}
 	}
 }

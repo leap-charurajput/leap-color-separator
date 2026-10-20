@@ -4,6 +4,12 @@ import { Injectable } from '@angular/core';
  * A data problem the user has to fix in their FILES, not in the panel — a missing team JSON, an
  * unreadable LEAP server path, a swatch the grid could not resolve.
  */
+/** Optional button on a banner entry, e.g. "Place missing CAD". run() resolves when the work is done. */
+export interface DataIssueAction {
+	label: string;
+	run: () => Promise<void> | void;
+}
+
 export interface DataIssue {
 	/** Stable key: re-reporting the same id replaces the entry instead of stacking duplicates. */
 	id: string;
@@ -19,6 +25,8 @@ export interface DataIssue {
 	 * change to any other one.
 	 */
 	scope?: string;
+	/** Optional fix-it button shown next to the message. */
+	action?: DataIssueAction;
 }
 
 /*
@@ -63,7 +71,7 @@ export class DataIssuesService {
 		return !!norm(a) && norm(a) === norm(b);
 	}
 
-	report(id: string, message: string, detail?: string, scope?: string): void {
+	report(id: string, message: string, detail?: string, scope?: string, action?: DataIssueAction): void {
 		if (!id || !message || this.dismissed.has(id)) {
 			return;
 		}
@@ -72,9 +80,10 @@ export class DataIssuesService {
 			existing.message = message;
 			existing.detail = detail;
 			existing.scope = scope;
+			existing.action = action;
 			return;
 		}
-		this.issues.push({ id, message, detail, scope });
+		this.issues.push({ id, message, detail, scope, action });
 	}
 
 	clear(id: string): void {

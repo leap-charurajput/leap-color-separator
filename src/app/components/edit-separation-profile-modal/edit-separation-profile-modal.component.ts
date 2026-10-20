@@ -196,6 +196,10 @@ export class EditSeparationProfileModalComponent implements OnInit, OnChanges {
  @Input() profile: any = null;
  @Input() defaultBlackColorNames = '';
  @Input() meshValues = '';
+ /* All saved profiles, to stop a second profile with the same name or code. */
+ @Input() existingProfiles: any[] = [];
+ /* True for Add / Duplicate (profile is a draft, not in existingProfiles); false when editing. */
+ @Input() isNewProfile = false;
  @Output() close = new EventEmitter<void>();
  @Output() save = new EventEmitter<any>();
 
@@ -208,6 +212,8 @@ export class EditSeparationProfileModalComponent implements OnInit, OnChanges {
  editingInkExceptionId: string | null = null;
  draftInkExceptionName = '';
  inkExceptionNameDuplicate = false;
+ /* Name/Code validation message on the General tab ('' = valid). */
+ profileNameCodeError = '';
  inkExceptionRemoveId: string | null = null;
  inkExceptionsLoading = false;
  inkExceptionsLoadError = '';
@@ -263,6 +269,7 @@ export class EditSeparationProfileModalComponent implements OnInit, OnChanges {
    this.inkExceptionQuery = '';
    this.editingInkExceptionId = null;
    this.inkExceptionNameDuplicate = false;
+   this.profileNameCodeError = '';
    this.inkExceptionRemoveId = null;
    this.loadDocumentSwatches();
   }
@@ -412,6 +419,28 @@ export class EditSeparationProfileModalComponent implements OnInit, OnChanges {
  onInputChange(field: string, event: Event): void {
   const value = (event.target as HTMLInputElement | HTMLTextAreaElement).value;
   (this.formState as any)[field] = value;
+  if (field === 'name' || field === 'code') {
+   this.profileNameCodeError = '';
+  }
+ }
+
+ /**
+  * True when another saved profile already has this name or code (case-insensitive).
+  * Ink exceptions are keyed by code, so a shared code would mix two profiles' inks.
+  * When editing, an unchanged name/code is not checked, so a profile that already has
+  * duplicates in Profiles.json can still be edited.
+  */
+ private isProfileNameOrCodeTaken(): boolean {
+  const norm = (v: any): string => String(v ?? '').trim().toLowerCase();
+  const name = norm(this.formState.name);
+  const code = norm(this.formState.code);
+  const original = this.isNewProfile ? null : this.profile;
+  const checkName = !!name && (!original || norm(original.name) !== name);
+  const checkCode = !!code && (!original || norm(original.code) !== code);
+  if (!checkName && !checkCode) return false;
+  return (this.existingProfiles || []).some(
+   (p) => p !== original && ((checkName && norm(p?.name) === name) || (checkCode && norm(p?.code) === code))
+  );
  }
 
  onMeshChange(index: number, event: Event): void {
@@ -943,6 +972,18 @@ export class EditSeparationProfileModalComponent implements OnInit, OnChanges {
 
  onSubmit(event: Event): void {
   event.preventDefault();
+
+  /* Profiles are matched by code everywhere (ink exceptions, separations), so both are required. */
+  if (!(this.formState.name || '').trim() || !(this.formState.code || '').trim()) {
+   this.profileNameCodeError = 'Profile name and code are required';
+   this.activeTab = 'general';
+   return;
+  }
+  if (this.isProfileNameOrCodeTaken()) {
+   this.profileNameCodeError = 'A profile with this name or code already exists';
+   this.activeTab = 'general';
+   return;
+  }
 
   if (this.editingInkExceptionId) {
    const trimmed = this.draftInkExceptionName.trim();

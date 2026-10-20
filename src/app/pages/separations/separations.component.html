@@ -73,7 +73,7 @@
   </div>
  </div>
 
- <app-confirm-dialog [isOpen]="!!separationDeleteTarget" title="Delete Separation"
+ <app-confirm-dialog [isOpen]="!!separationDeleteTarget" title="Delete Profile"
   [message]="separationDeleteMessage"
   confirmText="Delete" cancelText="Cancel" confirmVariant="danger"
   (confirm)="confirmDeleteSeparationGroup()" (cancel)="cancelDeleteSeparationGroup()">
@@ -90,8 +90,8 @@
   confirmVariant="primary" (confirm)="confirmRecreateAllPlates($event)" (cancel)="cancelRecreateAllPlates()">
  </app-confirm-dialog>
 
- <app-confirm-dialog [isOpen]="showDeleteSeparationFileConfirm" title="Confirm"
-  message="Are you sure you want to delete the separation file?" confirmText="OK" cancelText="Cancel"
+ <app-confirm-dialog [isOpen]="showDeleteSeparationFileConfirm" title="Delete Separation File"
+  [message]="deleteSeparationFileMessage" confirmText="Delete" cancelText="Cancel"
   confirmVariant="danger" (confirm)="confirmDeleteSeparationFile()" (cancel)="cancelDeleteSeparationFile()">
  </app-confirm-dialog>
 
@@ -104,6 +104,25 @@
   [initialScalePercent]="separationActionDialogInitialScalePercent" (cancel)="cancelSeparationActionDialog()"
   (confirm)="confirmSeparationActionDialog($event)">
  </app-separation-profile-action-dialog>
+
+ <!-- Duplicate: copy the SEP file for another style (LEAP and standalone / NN Pro rows). -->
+ <app-separation-profile-action-dialog [isOpen]="duplicateFileDialogOpen" mode="duplicate-file"
+  [initialProfileName]="duplicateFileProfileName" [hasSeparationFile]="true"
+  [existingFileName]="duplicateFileExistingName" [existingStyleCodes]="duplicateFileExistingStyles"
+  (cancel)="cancelDuplicateFileDialog()" (confirm)="confirmDuplicateFileDialog($event)">
+ </app-separation-profile-action-dialog>
+
+ <app-confirm-dialog [isOpen]="!!standaloneDeleteTarget" title="Delete Profile"
+  [message]="standaloneDeleteMessage"
+  confirmText="Delete" cancelText="Cancel" confirmVariant="danger"
+  (confirm)="confirmStandaloneDelete()" (cancel)="cancelStandaloneDelete()">
+ </app-confirm-dialog>
+
+ <app-confirm-dialog [isOpen]="!!standaloneDeleteFileTarget" title="Delete Separation File"
+  [message]="standaloneDeleteFileMessage"
+  confirmText="Delete" cancelText="Cancel" confirmVariant="danger"
+  (confirm)="confirmStandaloneDeleteFile()" (cancel)="cancelStandaloneDeleteFile()">
+ </app-confirm-dialog>
 
 <app-add-separation-dialog
  [isOpen]="addSeparationDialogOpen"
@@ -131,7 +150,7 @@
    "Add Separation..." link in the section HEADER (not on every profile row), and the profile rows
    underneath in a separations-list. Reusing LEAP's classes keeps both lists looking identical.
   -->
-  <div *ngFor="let group of standaloneJobGroups" class="graphic-section-wrapper">
+  <div *ngFor="let group of standaloneJobGroups; trackBy: trackStandaloneGroup" class="graphic-section-wrapper">
    <div class="header">
     <div class="graphic-header">
      <div class="graphic-title">Graphic: <span class="graphic-name">{{ group.title }}</span></div>
@@ -144,7 +163,7 @@
 
    <div class="graphic-content">
     <div class="separations-list">
-     <div *ngFor="let job of group.jobs" class="separation-profile">
+     <div *ngFor="let job of group.jobs; trackBy: trackStandaloneJob" class="separation-profile">
       <div class="separation-profile-header">
        <div class="separation-profile-info">
         <div class="profile-name">Profile: {{ job.profileName || '—' }}</div>
@@ -154,6 +173,25 @@
        </div>
        <div class="separation-profile-right">
         <div class="separation-profile-content">
+         <!-- SEP file link + menu, same as the LEAP rows (the link is recorded on the job at Prepare). -->
+         <div class="separation-profile-actions">
+          <div *ngIf="job.separatedDocumentPath" class="sep-file-link-wrapper">
+           <button class="sep-file-link" (click)="handleOpenSeparation(job.separatedDocumentPath)"
+            title="Click to open separation document">
+            {{ getFileNameFromPath(job.separatedDocumentPath) }}
+           </button>
+           <app-sub-menu [items]="getStandaloneJobMenuItems(job)"
+            (onItemClick)="handleStandaloneJobMenuClick($event, job)"
+            iconClass="openerImage icon-ellipsis"></app-sub-menu>
+          </div>
+          <ng-container *ngIf="!job.separatedDocumentPath">
+           <div class="sep-not-created">Separation not created</div>
+           <app-sub-menu [items]="getStandaloneJobMenuItems(job)"
+            (onItemClick)="handleStandaloneJobMenuClick($event, job)"
+            iconClass="openerImage icon-ellipsis"></app-sub-menu>
+          </ng-container>
+         </div>
+         <div *ngIf="isDuplicatingFile" class="sep-path-missing-note">Duplicating separation file…</div>
          <div class="generate-button-section">
           <!--
            Two-stage (standalone). A job WITH an exported .ai (legacy Export flow) prepares from
@@ -252,7 +290,7 @@
             title="Click to open separation document">
             {{ getFileNameFromPath(getSeparationPath(separation, graphic)!) }}
            </button>
-           <app-sub-menu [items]="['Delete Separation File','Duplicate', 'Edit']"
+           <app-sub-menu [items]="getSeparationFileMenuItems(separation, graphic)"
             (onItemClick)="handleSeparationMenuClick($event, separation.id, graphic)"
             iconClass="openerImage icon-ellipsis"></app-sub-menu>
           </div>
