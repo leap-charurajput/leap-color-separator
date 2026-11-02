@@ -60,6 +60,7 @@
 					<input
 						type="text"
 						[value]="selectionMode === 'profile' ? (query || selectedProfileName) : selectedProfileName"
+						[attr.title]="selectedProfileName || null"
 						(input)="onProfileInput($event)"
 						(focus)="onProfileFocus()"
 						(blur)="onProfileBlur()"

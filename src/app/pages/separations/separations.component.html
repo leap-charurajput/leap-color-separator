@@ -90,6 +90,11 @@
   confirmVariant="primary" (confirm)="confirmRecreateAllPlates($event)" (cancel)="cancelRecreateAllPlates()">
  </app-confirm-dialog>
 
+ <app-confirm-dialog [isOpen]="!!reprepareTarget" title="Re-prepare"
+  [message]="reprepareMessage" confirmText="Re-prepare" cancelText="Cancel"
+  confirmVariant="primary" (confirm)="confirmReprepare()" (cancel)="cancelReprepare()">
+ </app-confirm-dialog>
+
  <app-confirm-dialog [isOpen]="showDeleteSeparationFileConfirm" title="Delete Separation File"
   [message]="deleteSeparationFileMessage" confirmText="Delete" cancelText="Cancel"
   confirmVariant="danger" (confirm)="confirmDeleteSeparationFile()" (cancel)="cancelDeleteSeparationFile()">
@@ -316,7 +321,7 @@
            <app-button (click)="handlePrepareForSeps(separation.id, graphic)" variant="primary" size="medium"
             [disabled]="hasUnknownProfile(separation) || isProfileMissingInSettings(separation) || isInkInfoMissingForProfile(separation) || isSeparationFilePathMissing"
             [title]="isNNProDoc ? 'Opens the separation form for this profile group' : (hasIllustratorSelection ? 'Prepare using the current Illustrator selection' : 'Prepare using the sized graphic (SIZED_GRAPHICS)')">
-            {{ !isNNProDoc && hasIllustratorSelection ? 'Prepare for Seps from Selection' : 'Prepare for Seps' }}
+            {{ isReprepare(separation, graphic) ? 'Re-prepare' : (!isNNProDoc && hasIllustratorSelection ? 'Prepare for Seps from Selection' : 'Prepare for Seps') }}
            </app-button>
            <app-button variant="secondary" size="medium" [disabled]="true"
             title="Prepare for Seps first. Generate runs on the prepared SEP document.">

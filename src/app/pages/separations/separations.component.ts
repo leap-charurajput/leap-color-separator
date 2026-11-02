@@ -13,6 +13,7 @@ import { SeparationProfileActionDialogResult } from '../../components/separation
 import { AddSeparationDialogResult, AddSeparationDialogStyleOption } from '../../components/add-separation-dialog/add-separation-dialog.component';
 import { ControllerService } from '../../services/controller.service';
 import { DataIssuesService } from '../../services/data-issues.service';
+import { brandFromProfileName } from '../../services/brand';
 import { GraphicsDataService } from '../../services/graphics-data.service';
 import { LeapSepsLogService } from '../../services/leap-seps-log.service';
 import { roiLogEvent } from '../../services/roi';
@@ -383,7 +384,6 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 					: '',
 			teamName: text('Graphic Org Name'),
 			concept: text('Graphic Concept Code'),
-			garmentColors: '',
 			garmentColorCode: text('Color Code'),
 			graphicName: text('Graphic_Name'),
 			graphicCode: text('Graphic_code'),
@@ -1171,20 +1171,12 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 	 * Garment colour CODES for the row's "Colors:" line — the same thing the LEAP list shows there
 	 * (getGraphicColors returns codes, e.g. "127A", not ink names).
 	 *
-	 * A standalone job stores them in `garmentColors`, taken from the LICENSING sheet's "Color" field,
-	 * which carries codes ("0484, 0042"). Falls back to the single resolved garmentColorCode.
+	 * A standalone job's Color Code (`garmentColorCode`, the form field the user edits).
 	 * NOTE this is deliberately NOT `job.colors` — those are the decoration INK names extracted from the
 	 * artwork (e.g. "PANTONE 1235 C"), which is a different thing and belongs to the plate list.
 	 */
 	getStandaloneJobColors(job: any): string[] {
 		if (!job) return [];
-		const raw = job.garmentColors != null ? String(job.garmentColors).trim() : '';
-		if (raw) {
-			return raw
-				.split(/[,/]+/)
-				.map((c: string) => c.trim())
-				.filter((c: string) => c.length > 0);
-		}
 		const single = job.garmentColorCode != null ? String(job.garmentColorCode).trim() : '';
 		return single ? [single] : [];
 	}
@@ -1681,11 +1673,56 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 		 * label): something selected -> Prepare from Selection; nothing -> Prepare from the version
 		 * document's SIZED_ART/SIZED_GRAPHICS/<graphic> item.
 		 */
+		/*
+		 * Re-prepare: this row already has its SEP file (e.g. one made by Duplicate). Prepare rebuilds it
+		 * from the artwork, so confirm first, and then replace THAT file instead of writing a second one.
+		 */
+		const separation = this.findSeparationById(separationId);
+		const existingPath = separation ? this.getSeparationPath(separation, graphicName) : null;
+		if (existingPath && this.sepFileExists(existingPath)) {
+			this.reprepareTarget = { separationId, graphicName, path: existingPath };
+			this.cdr.detectChanges();
+			return;
+		}
+		this.startPrepareForSeps(separationId, graphicName);
+	}
+
+	/* True when the row's Prepare button acts as Re-prepare (its SEP file is on disk). */
+	isReprepare(separation: Separation, graphicName: string): boolean {
+		return !this.isNNProDoc && this.sepFileExists(this.getSeparationPath(separation, graphicName));
+	}
+
+	reprepareTarget: { separationId: number; graphicName: string; path: string } | null = null;
+
+	get reprepareMessage(): string {
+		const t = this.reprepareTarget;
+		if (!t) return '';
+		return (
+			'"' + this.getFileNameFromPath(t.path) + '" will be rebuilt from the artwork and replaced. ' +
+			'Changes made in that file (including a resize done by Duplicate) are lost; the saved scale for ' +
+			'this row is applied again. Continue?'
+		);
+	}
+
+	confirmReprepare(): void {
+		const t = this.reprepareTarget;
+		this.reprepareTarget = null;
+		this.leapSepsLog.logClick('Re-prepare confirmed', t ? { graphicName: t.graphicName, file: this.getFileNameFromPath(t.path) } : {});
+		if (t) this.startPrepareForSeps(t.separationId, t.graphicName, t.path);
+		this.cdr.detectChanges();
+	}
+
+	cancelReprepare(): void {
+		this.reprepareTarget = null;
+		this.cdr.detectChanges();
+	}
+
+	private startPrepareForSeps(separationId: number, graphicName: string, overwriteSeparationPath?: string): void {
 		const countPromise = this.isRunningInBrowser
 			? Promise.resolve(0)
 			: this.controller.getSelectionCount().catch(() => 0);
 		countPromise.then((count) => {
-			this.runSeparationStage('prepare', separationId, graphicName, count > 0);
+			this.runSeparationStage('prepare', separationId, graphicName, count > 0, overwriteSeparationPath);
 		});
 	}
 
@@ -1693,7 +1730,13 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 		this.runSeparationStage('generate', separationId, graphicName);
 	}
 
-	private runSeparationStage(stage: 'prepare' | 'generate', separationId: number, graphicName: string, prepareFromSelection = false): void {
+	private runSeparationStage(
+		stage: 'prepare' | 'generate',
+		separationId: number,
+		graphicName: string,
+		prepareFromSelection = false,
+		overwriteSeparationPath?: string
+	): void {
 		if (!graphicName) {
 			return;
 		}
@@ -1820,12 +1863,18 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 							}
 						}
 					}
-					if (!brandName) {
-						console.warn('[SEPARATIONS] No Brand value in Styles.xlsx for styles:', styleCodes);
-					}
 				} catch (brandErr) {
 					console.warn('[SEPARATIONS] Brand lookup failed:', brandErr);
 				}
+			}
+			if (!brandName) {
+				brandName = brandFromProfileName(profileName);
+				console.warn(
+					'[SEPARATIONS] No Brand value in Styles.xlsx for styles:',
+					styleCodes,
+					'- using brand from profile name:',
+					brandName || '(none)'
+				);
 			}
 
 			const profileMetadata: any = {
@@ -2004,7 +2053,8 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 			if (stage === 'prepare') {
 				return this.controller.prepareForSeps(graphicName, styleCodes, profileMetadata, {
 					sepsTemplateFileName,
-					prepareFromSelection
+					prepareFromSelection,
+					overwriteSeparationPath
 				});
 			}
 			/* Generate runs on the prepared SEP doc; the host reads profileMetadata back from that
@@ -2041,6 +2091,17 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 						 */
 						this.dataIssues.clear('separation-generate');
 						this.reportCadPlacement(result, graphicName);
+						/* An older host ignores overwriteSeparationPath and writes a pattern-named file instead. */
+						const norm = (p: any) => String(p || '').replace(/\\/g, '/').toLowerCase();
+						if (overwriteSeparationPath && norm(result?.separatedDocumentPath) !== norm(overwriteSeparationPath)) {
+							this.reportFailure(
+								'separation-reprepare',
+								'Re-prepare wrote "' + this.getFileNameFromPath(result?.separatedDocumentPath || '') + '" instead of replacing "' +
+								this.getFileNameFromPath(overwriteSeparationPath) + '". Update the LEAP Seps extension.'
+							);
+						} else {
+							this.dataIssues.clear('separation-reprepare');
+						}
 						/*
 						 * Scale first, while the prepared SEP document is still the active one, so the user
 						 * edits the art at its final size. Then the table prefill and the refresh, as before.

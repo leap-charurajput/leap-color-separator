@@ -149,19 +149,86 @@ function dsfScaleSepDocArt(doc, pct) {
 	return res;
 }
 
-/* Point the copy's own metadata at the new style (Export reads styleCodes from it). */
-function dsfStampStyleOnSepDoc(doc, newStyle) {
+/*
+ * Point the copy at its NEW row, so it stands on its own:
+ *   - SeparationProfileMetadata: styleCodes (Export reads them), and for a LEAP row the new row's
+ *     separationGroupId + graphicScalePercent — Generate on the copy records into the row these name;
+ *     without the group id it overwrote the ORIGINAL row's file path;
+ *   - LEAPPreparedContext.styleCodes (what Generate on a prepared copy carries forward).
+ * stamp: { groupId?: string, scalePercent?: number|null } — keys absent = leave as they are.
+ * Returns the style codes the copy had BEFORE, for the sheet-text swap.
+ */
+function dsfStampCopyForNewRow(doc, newStyle, stamp) {
+	var oldStyles = [];
 	try {
 		var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
-		if (xmp.isXmpCreated && xmp.doesStructFieldExist("SeparationProfileMetadata")) {
+		if (!xmp.isXmpCreated) return oldStyles;
+		if (xmp.doesStructFieldExist("SeparationProfileMetadata")) {
 			var meta = xmp.getStructField("SeparationProfileMetadata", true) || {};
+			if (meta.styleCodes instanceof Array) oldStyles = meta.styleCodes.slice(0);
 			meta.styleCodes = [newStyle];
+			if (stamp && stamp.hasOwnProperty("groupId")) meta.separationGroupId = stamp.groupId;
+			if (stamp && stamp.hasOwnProperty("scalePercent")) {
+				if (stamp.scalePercent == null) { try { delete meta.graphicScalePercent; } catch (eDel) { meta.graphicScalePercent = null; } }
+				else meta.graphicScalePercent = stamp.scalePercent;
+			}
 			xmp.setStructField("SeparationProfileMetadata", meta, true, false);
-			xmp.commit();
-			return true;
 		}
-	} catch (e) { dsfLog("could not update the copy's style metadata: " + (e.message || e)); }
-	return false;
+		if (xmp.doesStructFieldExist("LEAPPreparedContext")) {
+			var ctx = xmp.getStructField("LEAPPreparedContext", true) || {};
+			if (!oldStyles.length && ctx.styleCodes instanceof Array) oldStyles = ctx.styleCodes.slice(0);
+			ctx.styleCodes = [newStyle];
+			xmp.setStructField("LEAPPreparedContext", ctx, true, false);
+		}
+		xmp.commit();
+	} catch (e) { dsfLog("could not update the copy's metadata: " + (e.message || e)); }
+	return oldStyles;
+}
+
+/*
+ * Swap the old style for the new one in the copy's printed text ([STYLE_CODE], item IDs, …) — Prepare
+ * wrote those once, so a copy otherwise still printed the old style. Same rule as the file-name swap:
+ * the old code at the START of a word, so "CM52-0484" and "CM520484" both change, "ABCM52" does not.
+ * Only plain codes (letters, digits, "-", "_") are swapped. Returns the number of text frames changed.
+ */
+function dsfReplaceStyleText(doc, oldStyles, newStyle) {
+	var res = [];
+	for (var s = 0; s < oldStyles.length; s++) {
+		var code = dsfTrim(String(oldStyles[s] || "").split(",")[0]);
+		if (code && /^[A-Za-z0-9_-]+$/.test(code) && code.toLowerCase() !== newStyle.toLowerCase()) {
+			res.push(new RegExp("(^|[^A-Za-z0-9])" + code, "gi"));
+		}
+	}
+	if (!res.length) return 0;
+	var changed = 0;
+	for (var i = 0; i < doc.textFrames.length; i++) {
+		var tf = doc.textFrames[i];
+		var before = "";
+		try { before = String(tf.contents); } catch (eC) { continue; }
+		var after = before;
+		for (var r = 0; r < res.length; r++) {
+			after = after.replace(res[r], function (m, lead) { return lead + newStyle; });
+		}
+		if (after === before) continue;
+		/* Locked / hidden layers and frames refuse edits — open them for the write, then restore. */
+		var restore = [];
+		var p = tf.layer;
+		while (p && p.typename === "Layer") {
+			restore.push({ obj: p, locked: p.locked, visible: p.visible, isLayer: true });
+			try { if (p.locked) p.locked = false; } catch (eL) { }
+			try { if (!p.visible) p.visible = true; } catch (eV) { }
+			p = p.parent;
+		}
+		var wasLocked = false;
+		try { wasLocked = !!tf.locked; if (wasLocked) tf.locked = false; } catch (eTl) { }
+		try { tf.contents = after; changed++; } catch (eW) { dsfLog("could not update text '" + before + "': " + (eW.message || eW)); }
+		try { if (wasLocked) tf.locked = true; } catch (eTl2) { }
+		for (var k = restore.length - 1; k >= 0; k--) {
+			try { restore[k].obj.visible = restore[k].visible; } catch (eRv) { }
+			try { restore[k].obj.locked = restore[k].locked; } catch (eRl) { }
+		}
+	}
+	return changed;
 }
 
 function dsfDeepCopy(o) { return JSON.parse(JSON.stringify(o == null ? {} : o)); }
@@ -209,6 +276,8 @@ function dsfDuplicateForStyle(params) {
 		var entries = null;
 		var srcIdx = -1;
 		var recordXmp = null;
+		var newGroupId = "";
+		var combinedScale = null;
 		if (target.kind === "leap") {
 			if (typeof leapSeparationGroupsSupported !== "function") {
 				return dsfErr("The installed LEAP Seps extension is too old for this. Please update it.");
@@ -225,6 +294,14 @@ function dsfDuplicateForStyle(params) {
 				if (leapSeparationEntryMatches(entries[i], target.graphicName, target.profileName, target.groupId || "")) { srcIdx = i; break; }
 			}
 			if (srcIdx < 0) return dsfErr("This separation is not recorded on the version document");
+			/* The new row's identity, decided now so the copy and the row carry the SAME values. */
+			newGroupId = "g" + (new Date()).getTime().toString(36) + Math.floor(Math.random() * 1296).toString(36);
+			/* Scale is a percent of the ORIGINAL art, so a re-Prepare reproduces this size. */
+			var srcMeta = entries[srcIdx].profileMetadata || {};
+			var baseScale = Number(srcMeta.graphicScalePercent);
+			if (isNaN(baseScale) || !(baseScale > 0)) baseScale = 100;
+			combinedScale = pct != null ? Math.round(baseScale * pct) / 100 : baseScale;
+			if (combinedScale === 100) combinedScale = null;
 		} else if (target.kind === "standalone") {
 			if (!target.job) return dsfErr("No job given");
 			if (!app.documents.length) return dsfErr("No document is open");
@@ -254,9 +331,15 @@ function dsfDuplicateForStyle(params) {
 		}
 		dsfLog("copied " + srcFile.fsName + " -> " + destFile.fsName);
 
-		/* Stamp the style (and resize) inside the copy. */
+		/* Stamp the new row (style, group, scale, context) and the printed style text inside the copy. */
 		copyDoc = app.open(destFile);
-		dsfStampStyleOnSepDoc(copyDoc, newStyle);
+		var oldStyles = dsfStampCopyForNewRow(
+			copyDoc,
+			newStyle,
+			target.kind === "leap" ? { groupId: newGroupId, scalePercent: combinedScale } : null
+		);
+		var textChanged = dsfReplaceStyleText(copyDoc, oldStyles, newStyle);
+		dsfLog("stamped style " + newStyle + " (was " + oldStyles.join(", ") + "), " + textChanged + " text frame(s) updated");
 		var scaleInfo = null;
 		if (pct != null && pct !== 100) {
 			scaleInfo = dsfScaleSepDocArt(copyDoc, pct);
@@ -273,13 +356,9 @@ function dsfDuplicateForStyle(params) {
 			var src = entries[srcIdx];
 			var meta = dsfDeepCopy(src.profileMetadata);
 			meta.styleCodes = [newStyle];
-			meta.separationGroupId = "g" + (new Date()).getTime().toString(36) + Math.floor(Math.random() * 1296).toString(36);
-			/* Scale is a percent of the ORIGINAL art, so a re-Prepare reproduces this size. */
-			var baseScale = Number(meta.graphicScalePercent);
-			if (isNaN(baseScale) || !(baseScale > 0)) baseScale = 100;
-			var combined = pct != null ? Math.round(baseScale * pct) / 100 : baseScale;
-			if (combined === 100) { try { delete meta.graphicScalePercent; } catch (eDel) { meta.graphicScalePercent = null; } }
-			else meta.graphicScalePercent = combined;
+			meta.separationGroupId = newGroupId;
+			if (combinedScale == null) { try { delete meta.graphicScalePercent; } catch (eDel) { meta.graphicScalePercent = null; } }
+			else meta.graphicScalePercent = combinedScale;
 			entries.push({ graphicName: src.graphicName, profileMetadata: meta, separatedDocumentPath: destPath });
 			recordXmp.setStructField("LEAPSeparationProfileData", entries, true, false);
 		} else {
@@ -327,6 +406,50 @@ function dsfReadJobs(doc) {
 }
 
 /*
+ * DIAGNOSTICS ONLY (2026-10-26) — why a Prepare found no job to link (NN Pro rows lost Duplicate).
+ * Reports which document was read (findOpenDocumentByPath falls back to the ACTIVE document, which
+ * right after Prepare is the new SEP file), the open documents, the job Prepare sent, and for every
+ * job on the document the fields that differ from it. Changes nothing.
+ */
+function dsfRecordMissDebug(params, doc, jobs) {
+	var fields = ["position", "profileName", "styleCode", "exportedFilePath"];
+	function pick(j) {
+		var o = {};
+		for (var f = 0; f < fields.length; f++) o[fields[f]] = j && j[fields[f]] != null ? String(j[fields[f]]) : "(missing)";
+		o.sourceDocumentPath = j && j.sourceDocumentPath != null ? String(j.sourceDocumentPath) : "(missing)";
+		return o;
+	}
+	var readPath = "";
+	try { readPath = doc.fullName.fsName; } catch (eP) { readPath = "(unsaved)"; }
+	var activePath = "";
+	try { activePath = app.activeDocument.fullName.fsName; } catch (eA) { activePath = "(none)"; }
+	var openDocs = [];
+	for (var d = 0; d < app.documents.length; d++) {
+		try { openDocs.push(app.documents[d].fullName.fsName); } catch (eO) { openDocs.push("(unsaved)"); }
+	}
+	var perJob = [];
+	for (var i = 0; i < jobs.length; i++) {
+		var diff = [];
+		for (var k = 0; k < fields.length; k++) {
+			var a = dsfTrim(jobs[i] && jobs[i][fields[k]]).toLowerCase();
+			var b = dsfTrim(params.job && params.job[fields[k]]).toLowerCase();
+			if (a !== b) diff.push(fields[k]);
+		}
+		perJob.push({ index: i, differs: diff, job: pick(jobs[i]) });
+	}
+	return {
+		requestedDocumentPath: String(params.documentPath || ""),
+		readDocumentPath: readPath,
+		readIsRequested: !!params.documentPath && dsfNormPath(readPath) === dsfNormPath(params.documentPath),
+		activeDocumentPath: activePath,
+		openDocuments: openDocs,
+		wanted: pick(params.job),
+		jobCount: jobs.length,
+		jobs: perJob
+	};
+}
+
+/*
  * After a standalone Prepare: remember the SEP file on the job's row (source document), so the
  * Separations tab can show its link. params: { documentPath, job, separatedDocumentPath }.
  */
@@ -342,7 +465,7 @@ function dsfRecordJobSepPath(params) {
 		for (var i = 0; i < r.jobs.length; i++) {
 			if (dsfSameJob(r.jobs[i], params.job)) { idx = i; break; }
 		}
-		if (idx < 0) return JSON.stringify({ success: true, recorded: false });
+		if (idx < 0) return JSON.stringify({ success: true, recorded: false, debug: dsfRecordMissDebug(params, doc, r.jobs) });
 		r.jobs[idx].separatedDocumentPath = dsfTrim(params.separatedDocumentPath);
 		r.xmp.setStructField("LEAPStandaloneJobs", r.jobs, true, false);
 		r.xmp.commit();

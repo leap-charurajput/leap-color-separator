@@ -369,6 +369,16 @@ function standaloneSeparationRun(params) {
 	} catch (ePrep) { stdSepLog("flatten prep error: " + (ePrep.message || ePrep)); }
 
 	if (isPrepare) {
+		/* Brand footer: show "Footer <brand>", hide the other Footer sublayers — same as the LEAP flow.
+		   Logged here too, since appendLeapSepLog does not reach the log file from this script. */
+		try {
+			var footerReport = applyBrandFooterVisibility(sepDoc, profileMetadata ? profileMetadata.brand : "");
+			stdSepLog(
+				footerReport && footerReport.applied
+					? "footer: brand=" + profileMetadata.brand + " shown='" + footerReport.shown + "' hidden=[" + footerReport.hidden.join(", ") + "]"
+					: "footer: left as-is (brand='" + (profileMetadata && profileMetadata.brand ? profileMetadata.brand : "") + "' - empty or no matching 'Footer <brand>' sublayer)"
+			);
+		} catch (eFoot) { stdSepLog("footer visibility error: " + (eFoot.message || eFoot)); }
 		/* Stamp status + everything Generate needs, then stop with the SEP document open for editing. */
 		try {
 			var prepXmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", sepDoc);

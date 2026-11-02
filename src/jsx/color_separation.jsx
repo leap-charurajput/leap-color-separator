@@ -646,6 +646,134 @@ function resolveSharedWhitePlateSwatchName(doc, profileMetadata) {
 }
 
 /*
+ * HIGHLIGHT WHITE MERGE (2026-10-30). The art's white ink merges into the profile's LAST UNCHECKED
+ * underbase whose name contains "White" (Jersey_Plastisol: UB 4 "POLY WHITE 2"; another profile may
+ * end at UB 3). The art's white swatch is renamed to that UB's profile name, so the white plate and
+ * that pass (when an ink exception builds it) are ONE swatch and the profile's name wins.
+ * Set by generateUnderbase for the run and read by resolveUnderbaseLayerAndSwatch; kept out of
+ * profileMetadata so it is never written to XMP.
+ *   null                          -> the profile has no such UB: last-pass sharing as before
+ *   { index, swatchName, ... }    -> swatchName "" when the art has no white ink to merge
+ */
+var __highlightWhiteMerge = null;
+
+/** 0-based index of the last unchecked "White" underbase not built as a global pass, or -1. */
+function getHighlightWhiteUnderbaseIndex(profileMetadata) {
+	var enabled = profileMetadata && profileMetadata.underbaseEnabled instanceof Array
+		? profileMetadata.underbaseEnabled
+		: null;
+	if (!enabled) return -1;
+	/* A slot below the global pass count is built over the whole art even when unchecked. */
+	var globalCount = getProfileUnderbasePassCount(profileMetadata);
+	for (var i = Math.min(enabled.length, 4) - 1; i >= 1 && i >= globalCount; i--) {
+		if (enabled[i] === true) continue;
+		var nm = getUnderbaseCustomName(profileMetadata, i);
+		if (nm && nm.toLowerCase().indexOf("white") !== -1) return i;
+	}
+	return -1;
+}
+
+/** Swatches the underbase stack owns ("White UB N", Blocker, the profile's UB names) — never art white. */
+function isUnderbaseOwnSwatchName(name, profileMetadata) {
+	var n = String(name || "").replace(/^\s+|\s+$/g, "").toLowerCase();
+	if (!n || n.charAt(0) === "[") return true;
+	if (/^white\s*ub(\s*\d+)?$/.test(n)) return true;
+	if (n === String(CONSTANTS.SWATCH_NAMES.BLOCKER).toLowerCase()) return true;
+	var custom = collectCustomUnderbaseNames(profileMetadata);
+	for (var c = 0; c < custom.length; c++) {
+		if (String(custom[c]).toLowerCase() === n) return true;
+	}
+	return false;
+}
+
+/**
+ * The art's white swatch to merge: the Graphics page pick (Underbase 2/3/4 swatch) when it exists in
+ * the document, else the fill of the first ink plate on SEPARATED_ART whose name contains "White".
+ * Returns { name, source } or null.
+ */
+function findArtWhiteSwatchForMerge(doc, profileMetadata, ubIndex) {
+	var picks = [
+		profileMetadata ? profileMetadata["underbase" + (ubIndex + 1) + "Swatch"] : null,
+		profileMetadata ? profileMetadata.underbase2Swatch : null
+	];
+	for (var p = 0; p < picks.length; p++) {
+		var pick = picks[p] != null ? String(picks[p]).replace(/^\s+|\s+$/g, "") : "";
+		if (!pick || isUnderbaseOwnSwatchName(pick, profileMetadata)) continue;
+		var picked = getSwatchNameCaseInsensitive(doc, pick);
+		if (picked) return { name: picked, source: "Graphics pick" };
+	}
+	try {
+		var separatedArtLayer = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SEPARATED_ART);
+		for (var i = 0; i < separatedArtLayer.layers.length; i++) {
+			var layerName = String(separatedArtLayer.layers[i].name || "");
+			if (!isWhiteInkSwatchName(layerName)) continue;
+			if (isUnderbaseStackLayerName(layerName, profileMetadata, doc)) continue;
+			if (isUnderbaseOwnSwatchName(layerName, profileMetadata)) continue;
+			var fill = getFirstFillColorFromSeparatedArtSublayer(doc, layerName);
+			var spotName = fill && fill.typename === "SpotColor" && fill.spot ? String(fill.spot.name || "") : "";
+			if (spotName && !isUnderbaseOwnSwatchName(spotName, profileMetadata)) {
+				return { name: spotName, source: "plate '" + layerName + "'" };
+			}
+		}
+	} catch (eScan) { }
+	return null;
+}
+
+/** Rename a swatch (and its spot) in place; every fill using it follows. */
+function renameSwatchInPlace(doc, fromName, toName) {
+	var sw = getSwatchByName(doc, fromName);
+	if (!sw) return false;
+	try {
+		if (sw.color && sw.color.typename === "SpotColor" && sw.color.spot) {
+			sw.color.spot.name = toName;
+		}
+	} catch (e1) { }
+	try { sw.name = toName; } catch (e2) { }
+	return !!getSwatchByName(doc, toName);
+}
+
+/**
+ * Decide this run's highlight-white merge (see __highlightWhiteMerge) and rename the art's white
+ * swatch to the target UB's profile name. Runs after the ink plates exist (splitColors) and before
+ * the underbase passes, so the localized pass is filled with the renamed swatch.
+ */
+function resolveHighlightWhiteMerge(doc, profileMetadata) {
+	var idx = getHighlightWhiteUnderbaseIndex(profileMetadata);
+	if (idx < 0) return null;
+	var target = getUnderbaseCustomName(profileMetadata, idx);
+	var merge = { index: idx, swatchName: "", target: target };
+	/* Already merged (a re-run, e.g. "Generate underbase from existing inks"). */
+	var existing = getSwatchNameCaseInsensitive(doc, target);
+	var art = findArtWhiteSwatchForMerge(doc, profileMetadata, idx);
+	if (existing && (!art || art.name === existing)) {
+		merge.swatchName = existing;
+		appendLeapSepLog("highlight white: UB " + (idx + 1) + " '" + target + "' already exists, sharing it");
+		return merge;
+	}
+	if (!art) {
+		appendLeapSepLog("highlight white: UB " + (idx + 1) + " '" + target + "' — no white ink in the art, nothing to merge");
+		return merge;
+	}
+	if (existing) {
+		/* Target name taken by another swatch: share the art white as-is rather than clash. */
+		merge.swatchName = art.name;
+		appendLeapSepLog(
+			"highlight white: '" + target + "' already exists as a separate swatch; UB " + (idx + 1) +
+			" shares '" + art.name + "' (" + art.source + ") without renaming"
+		);
+		return merge;
+	}
+	if (renameSwatchInPlace(doc, art.name, target)) {
+		merge.swatchName = target;
+		appendLeapSepLog("highlight white: '" + art.name + "' (" + art.source + ") merged into UB " + (idx + 1) + ", renamed to '" + target + "'");
+	} else {
+		merge.swatchName = art.name;
+		appendLeapSepLog("highlight white: could not rename '" + art.name + "' to '" + target + "'; UB " + (idx + 1) + " shares it");
+	}
+	return merge;
+}
+
+/*
  * 0-based index of the LAST underbase pass this separation builds: the highest profile pass, or a
  * higher ink-localized pass (ink exception underbase_count; inkLocalizedUnderbase is filled by
  * mergeInkExceptionUnderbaseIntoProfileMetadata before generateUnderbase runs).
@@ -681,6 +809,18 @@ function resolveUnderbaseLayerAndSwatch(ubIndex, profileMetadata, doc) {
 	}
 	var layerName = getUnderbaseLayerNameForIndex(ubIndex);
 
+	// Highlight white merge (profile has an unchecked "White" UB): ONLY that UB shares the art white,
+	// under the profile's name (resolveHighlightWhiteMerge renamed it). The last-pass sharing below
+	// is then skipped, so the art white never merges into a regular checked pass.
+	var whiteMerge = __highlightWhiteMerge;
+	if (whiteMerge && ubIndex === whiteMerge.index && whiteMerge.swatchName) {
+		return {
+			layerName: customName || layerName,
+			swatchName: whiteMerge.swatchName,
+			clearBeforeCopy: true
+		};
+	}
+
 	// LAST underbase pass (2026-10-19, was always UB2), only when there are 2+ passes:
 	//   1) If a white plate swatch already exists (PANTONE White C -> PANTONE White -> White),
 	//      SHARE it as the fill; the layer takes the custom name when entered, else "White UB N".
@@ -688,7 +828,7 @@ function resolveUnderbaseLayerAndSwatch(ubIndex, profileMetadata, doc) {
 	//   3) Else, fall back to the dedicated "White UB N" swatch.
 	// Every other pass gets its own swatch, whatever its name (e.g. "ARMOR BLACK 2" in a 4-pass profile).
 	// The last pass counts ink-localized passes too (Jersey_Plastisol: UB 4 under ink 137 shares).
-	if (ubIndex >= 1 && ubIndex === getLastUnderbasePassIndex(profileMetadata)) {
+	if (!whiteMerge && ubIndex >= 1 && ubIndex === getLastUnderbasePassIndex(profileMetadata)) {
 		/* Format-aware: when ink-name formatting is on, the white plate swatch may already be
 			 renamed (e.g. "PANTONE White C" -> "SL White") — as happens on "Generate underbase from
 			 existing inks", where inks are already formatted. resolveSharedWhitePlateSwatchName finds
@@ -1220,6 +1360,15 @@ function generateUnderbase(_graphicName, cleanupOpts, profileMetadata, genOption
 			}
 		}
 
+		// Highlight white: rename the art's white to the profile's last unchecked "White" UB first, so
+		// every pass resolved below sees the merged swatch.
+		__highlightWhiteMerge = null;
+		try {
+			__highlightWhiteMerge = resolveHighlightWhiteMerge(app.activeDocument, profileMetadata);
+		} catch (whiteMergeErr) {
+			appendLeapSepLog("highlight white: merge skipped - " + (whiteMergeErr.message || whiteMergeErr));
+		}
+
 		// pass number (1-based) -> the swatch each underbase pass is filled with, so the panel can
 		// flag a plate as underbase when it SHARES an underbase swatch (e.g. UB2 sharing PANTONE White).
 		var ubResolvedSwatchByPass = {};
@@ -1285,7 +1434,9 @@ function generateUnderbase(_graphicName, cleanupOpts, profileMetadata, genOption
 
 		try { tempWhiteUBLayer.remove(); } catch (tempRemoveErr) { }
 		app.activeDocument.selection = null;
+		__highlightWhiteMerge = null;
 	} catch (e) {
+		__highlightWhiteMerge = null;
 		return JSON.stringify({
 			success: false,
 			error: "Underbase generation failed: " + (e.message || e.toString())
@@ -1353,9 +1504,63 @@ function generateChoke(sourceLayer, separatedArtLayer, profileMetadata) {
 	}
 
 
+	/* Round Cap + Round Join on the Choke stroke. Document defaults cover the live selection; the
+		 per-path pass covers anything the selection missed. */
+	try {
+		app.activeDocument.defaultStrokeCap = StrokeCap.ROUNDENDCAP;
+		app.activeDocument.defaultStrokeJoin = StrokeJoin.ROUNDENDJOIN;
+	} catch (capJoinErr) { }
 	applyChokeStroke(app.activeDocument, CONSTANTS.STYLES.CHOKE_STROKE_WIDTH);
+	setRoundStrokeCapJoinOnContainer(chokeLayer);
 	/* Overprint Stroke OFF on the Choke plate (user decision 2026-09-04; was true before). */
 	setStrokeOverprintOnContainer(chokeLayer, false);
+	app.selection = null;
+	groupLayerTopLevelItems(chokeLayer);
+}
+
+function setRoundStrokeCapJoinOnContainer(container) {
+	if (!container) return;
+	try {
+		if (container.typename === "PathItem") {
+			if (container.stroked) {
+				container.strokeCap = StrokeCap.ROUNDENDCAP;
+				container.strokeJoin = StrokeJoin.ROUNDENDJOIN;
+			}
+			return;
+		}
+		if (container.typename === "CompoundPathItem") {
+			for (var p = 0; p < container.pathItems.length; p++) {
+				setRoundStrokeCapJoinOnContainer(container.pathItems[p]);
+			}
+			return;
+		}
+		if (container.pageItems && container.pageItems.length > 0) {
+			for (var i = 0; i < container.pageItems.length; i++) {
+				setRoundStrokeCapJoinOnContainer(container.pageItems[i]);
+			}
+		}
+	} catch (e) { }
+}
+
+/** Wrap every top-level item of a layer in one group (no-op for 0 items or an existing single group). */
+function groupLayerTopLevelItems(layer) {
+	try {
+		if (!layer || !layer.pageItems || layer.pageItems.length === 0) return null;
+		if (layer.pageItems.length === 1 && layer.pageItems[0].typename === "GroupItem") {
+			return layer.pageItems[0];
+		}
+		var items = [];
+		for (var i = 0; i < layer.pageItems.length; i++) {
+			items.push(layer.pageItems[i]);
+		}
+		var group = layer.groupItems.add();
+		for (var j = 0; j < items.length; j++) {
+			try { items[j].move(group, ElementPlacement.PLACEATEND); } catch (moveErr) { }
+		}
+		return group;
+	} catch (e) {
+		return null;
+	}
 }
 
 /**

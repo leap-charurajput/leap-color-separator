@@ -5593,7 +5593,7 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
 		graphicName: string,
 		styleCodes: string[] = [],
 		profileMetadata: any = null,
-		options?: { sepsTemplateFileName?: string; prepareFromSelection?: boolean }
+		options?: { sepsTemplateFileName?: string; prepareFromSelection?: boolean; overwriteSeparationPath?: string }
 	): Promise<any> {
 		return this.runSeparationStage('handlePrepareForSeps', 'prepareForSeps', graphicName, styleCodes, profileMetadata, options);
 	}
@@ -5623,7 +5623,7 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
 		graphicName: string,
 		styleCodes: string[] = [],
 		profileMetadata: any = null,
-		options?: { recreateInActiveDoc?: boolean; sepsTemplateFileName?: string; prepareFromSelection?: boolean }
+		options?: { recreateInActiveDoc?: boolean; sepsTemplateFileName?: string; prepareFromSelection?: boolean; overwriteSeparationPath?: string }
 	): Promise<any> {
 		this.log(
 			label + ' called for: ' +
@@ -5652,6 +5652,9 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
 			}
 			if (options?.prepareFromSelection === true) {
 				params.prepareFromSelection = true;
+			}
+			if (options?.overwriteSeparationPath) {
+				params.overwriteSeparationPath = String(options.overwriteSeparationPath);
 			}
 
 			return this.evalWithTeamJsonFallback(handler, params, (r: any) =>

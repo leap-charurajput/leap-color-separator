@@ -9,6 +9,7 @@ import {
 } from '@angular/core';
 import { ControllerService } from '../../services/controller.service';
 import { DataIssuesService } from '../../services/data-issues.service';
+import { brandFromProfileName } from '../../services/brand';
 
 /*
  * Payload for the standalone separation. The host exports the selection to a sibling ASSETS
@@ -29,11 +30,6 @@ export interface StandaloneSeparationPayload {
  /* Optional SEP-grid token fields; blank-fallback so any token can be supplied manually. */
  teamName: string;
  concept: string;
- /*
-  * Garment color TEXT for [Garm Colors] / [Colorway_Desc]. No longer a form field — taken from the
-  * LICENSING sheet's "Color" value when present, otherwise the Color Code below.
-  */
- garmentColors: string;
  /* Additional page-variable tokens supplied by the form (blank-fallback). */
  graphicName?: string;
  graphicCode?: string;
@@ -58,8 +54,6 @@ export interface StandaloneSeparationGroup {
  styleCodes: string[];
  /* Decoration inks extracted from the exported art (spot swatches used by the artwork). */
  colors: string[];
- /* Garment colors from the LICENSING sheet (the "Color" field); shown when the art has no spot inks. */
- garmentColors: string;
  isGenerating: boolean;
  status: string;
  error: string;
@@ -121,12 +115,6 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
  /* Optional token fields (see StandaloneSeparationPayload). */
  teamName = '';
  concept = '';
- /*
-  * Garment color TEXT for the [Garm Colors] / [Colorway_Desc] tokens. NOT a form field: it comes
-  * from the LICENSING sheet's "Color" value (or a restored job), and buildJsonData() falls back to
-  * the Color Code when it is empty. The Color Code below is what the user actually edits.
-  */
- garmentColors = '';
  /* Feeds the [Graphic Name] / [Art Code] / [Design Name] tokens (NOT the internal pipeline graphicName, which stays = position). */
  graphicName = '';
  /* Feeds the [Graphic Code] / [Graphic_code] document tokens. */
@@ -771,7 +759,6 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
    profileName: this.profileName.trim(),
    teamName: this.teamName.trim(),
    concept: this.concept.trim(),
-   garmentColors: this.garmentColors.trim(),
    garmentColorCode: this.garmentColorCode.trim(),
    graphicName: this.graphicName.trim(),
    graphicCode: this.graphicCode.trim(),
@@ -868,7 +855,6 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
     this.manualProfile = this.profileName ? { style: this.styleCode.trim().toUpperCase(), name: this.profileName } : null;
     this.teamName = String(sc.teamName || '');
     this.concept = String(sc.concept || '');
-    this.garmentColors = String(sc.garmentColors || '');
     this.garmentColorCode = String(sc.garmentColorCode || '');
     this.graphicName = String(sc.graphicName || '');
     this.graphicCode = String(sc.graphicCode || '');
@@ -921,7 +907,6 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
   this.manualProfile = null;
   this.teamName = '';
   this.concept = '';
-  this.garmentColors = '';
   this.garmentColorCode = '';
   this.graphicName = '';
   this.graphicCode = '';
@@ -1282,11 +1267,10 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
   if (color) {
    /*
     * The sheet's "Color" field carries garment color CODES (e.g. "0484, 0042") — the same codes
-    * COLOR_CODE_LOOKUP.xlsx is keyed by — not descriptive names. Keep the full string as the
-    * [Garm Colors] token text, AND feed the FIRST code into the lookup field that sets the
-    * GARMENT swatch (mirrors the LEAP flow, which looks up the first color code).
+    * COLOR_CODE_LOOKUP.xlsx is keyed by — not descriptive names. Only the FIRST code is used: it
+    * fills the Color Code field, which drives the GARMENT swatch and every color token (mirrors the
+    * LEAP flow, which looks up the first color code).
     */
-   this.garmentColors = color;
    const firstColorToken = color.split(/[,/]+/)[0].trim();
    if (/^[0-9A-Za-z]{2,6}$/.test(firstColorToken)) {
     this.garmentColorCode = firstColorToken;
@@ -1707,6 +1691,11 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
    styleCode: this.styleCode.trim(),
    exportedFilePath: this.exportedFilePath || ''
   };
+  console.log(
+   '[STANDALONE] SEP link: recording for ' + StandaloneSeparationComponent.jobFieldsText(job) +
+    ' presetJob=' + !!this.presetJob
+  );
+  console.log('[STANDALONE] SEP link: source document ' + StandaloneSeparationComponent.pathTail(this.sourceDocumentPath));
   this.controller
    .recordStandaloneJobSepPath(this.sourceDocumentPath, job, sepDocPath)
    .then((res: any) => {
@@ -1714,11 +1703,60 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
      console.warn('[STANDALONE] Could not record the SEP file on the job:', res?.error);
     } else if (!res.recorded) {
      console.warn('[STANDALONE] No saved job matches this Prepare; SEP file link not recorded');
+     this.logSepLinkMiss(res.debug);
     } else {
      console.log('[STANDALONE] SEP file recorded on the job: ' + sepDocPath);
     }
    })
    .catch((err: any) => console.warn('[STANDALONE] Could not record the SEP file on the job:', err));
+ }
+
+ /*
+  * DIAGNOSTICS ONLY (2026-10-26): why Prepare found no job to link the SEP file to (NN Pro rows lost
+  * Duplicate). Written as several SHORT lines on purpose — the file logger compacts any console line
+  * over 280 chars that contains "{" (arrays become "[N items]"), which would hide the job list.
+  */
+ private logSepLinkMiss(debug: any): void {
+  if (!debug) {
+   console.warn('[STANDALONE] SEP link miss: host sent no detail (older script?)');
+   return;
+  }
+  const tail = StandaloneSeparationComponent.pathTail;
+  console.warn(
+   '[STANDALONE] SEP link miss: read requested document=' + !!debug.readIsRequested +
+    ' jobs on it=' + debug.jobCount + ' open documents=' + (debug.openDocuments || []).length
+  );
+  console.warn('[STANDALONE] SEP link miss: requested ' + tail(debug.requestedDocumentPath));
+  console.warn('[STANDALONE] SEP link miss: read      ' + tail(debug.readDocumentPath));
+  console.warn('[STANDALONE] SEP link miss: active    ' + tail(debug.activeDocumentPath));
+  (debug.openDocuments || []).forEach((p: string, i: number) =>
+   console.warn('[STANDALONE] SEP link miss: open #' + i + ' ' + tail(p))
+  );
+  console.warn('[STANDALONE] SEP link miss: wanted ' + StandaloneSeparationComponent.jobFieldsText(debug.wanted));
+  (debug.jobs || []).forEach((j: any) => {
+   console.warn(
+    '[STANDALONE] SEP link miss: job #' + j.index + ' differs=[' + (j.differs || []).join(', ') + '] ' +
+     StandaloneSeparationComponent.jobFieldsText(j.job)
+   );
+   console.warn('[STANDALONE] SEP link miss: job #' + j.index + ' source ' + tail(j.job && j.job.sourceDocumentPath));
+  });
+ }
+
+ /* The four fields the SEP-link match compares, quoted so blanks and stray spaces show. */
+ private static jobFieldsText(job: any): string {
+  const q = (v: any) => (v == null ? '(missing)' : '"' + String(v) + '"');
+  return (
+   'position=' + q(job?.position) + ' profileName=' + q(job?.profileName) +
+   ' styleCode=' + q(job?.styleCode) +
+   /* Only its tail: a legacy Export job's full path would push the line past the logger's cut. */
+   ' exportedFilePath=' + q(job?.exportedFilePath == null ? null : String(job.exportedFilePath).slice(-80))
+  );
+ }
+
+ /* Last 200 chars of a path, so one log line stays under the logger's 280-char cut. */
+ private static pathTail(p: any): string {
+  const s = String(p == null ? '(none)' : p);
+  return s.length > 200 ? '…' + s.slice(-200) : s;
  }
 
  private reportCadMiss(cadPngPath: string, sepDocPath: string): void {
@@ -1760,7 +1798,6 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
    profileName: this.profileName.trim(),
    teamName: this.teamName.trim(),
    concept: this.concept.trim(),
-   garmentColors: this.garmentColors.trim(),
    graphicName: this.graphicName.trim(),
    graphicCode: this.graphicCode.trim(),
    player: this.player.trim(),
@@ -1770,15 +1807,6 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
    garmentColorCode: this.garmentColorCode.trim(),
    exportedFilePath: this.exportedFilePath || undefined
   };
- }
-
- /*
-  * Garment color TEXT for [Garm Colors] / [Colorway_Desc] and the "no spot inks" message. The
-  * Garment Colors input was removed, so this is the LICENSING sheet's "Color" value when the
-  * document had one, and otherwise the Color Code the user entered.
-  */
- private get garmentColorsText(): string {
-  return this.garmentColors.trim() || this.garmentColorCode.trim();
  }
 
  /*
@@ -1820,7 +1848,6 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
    profileName: this.profileName.trim(),
    teamName: this.teamName.trim(),
    concept: this.concept.trim(),
-   garmentColors: this.garmentColors.trim(),
    garmentColorCode: this.garmentColorCode.trim(),
    graphicName: this.graphicName.trim(),
    graphicCode: this.graphicCode.trim(),
@@ -1973,7 +2000,6 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
     profileName: profile,
     styleCodes: [style],
     colors: Array.isArray(colors) ? colors : [],
-    garmentColors: this.garmentColorsText,
     isGenerating: false,
     status: '',
     error: ''
@@ -2121,7 +2147,7 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
   const pos = this.position.trim();
   const style = this.styleCode.trim();
   const colorCode = this.garmentColorCode.trim();
-  const gc = this.garmentColorsText;
+  const gc = colorCode;
   /* [Graphic Name]/[Art Code]/[Design Name] fall back to Position (the value the pipeline uses
      as graphicName) when the Graphic Name field is left empty. */
   const gn = this.graphicName.trim() || pos;
@@ -2233,7 +2259,6 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
   this.manualProfile = this.profileName ? { style: this.styleCode.trim().toUpperCase(), name: this.profileName } : null;
   this.teamName = job.teamName ? String(job.teamName) : '';
   this.concept = job.concept ? String(job.concept) : '';
-  this.garmentColors = job.garmentColors ? String(job.garmentColors) : '';
   this.garmentColorCode = job.garmentColorCode ? String(job.garmentColorCode) : '';
   this.graphicName = job.graphicName ? String(job.graphicName) : '';
   this.graphicCode = job.graphicCode ? String(job.graphicCode) : '';
@@ -2272,7 +2297,6 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
        profileName: this.profileName,
        styleCodes: this.styleCode ? [this.styleCode] : [],
        colors: colors,
-       garmentColors: this.garmentColorsText,
        isGenerating: false,
        status: '',
        error: ''
@@ -2329,14 +2353,9 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
  ): Promise<{ meta: any; sepsTemplateFileName: string }> {
   const profileName = group.profileName;
   const position = this.position.trim();
-  /* Colors carried for reference: prefer art-extracted spot inks, else the sheet's garment colors. */
-  const colorCodes =
-   group.colors && group.colors.length > 0
-    ? group.colors
-    : String(group.garmentColors || '')
-       .split(',')
-       .map((s) => s.trim())
-       .filter((s) => s.length > 0);
+  /* Colors carried for reference: prefer art-extracted spot inks, else the Color Code. */
+  const refColorCode = this.garmentColorCode.trim();
+  const colorCodes = group.colors && group.colors.length > 0 ? group.colors : refColorCode ? [refColorCode] : [];
 
   let profileCode = '';
   let profileInfo: any = null;
@@ -2408,6 +2427,39 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
    distress: false,
    profileDistress: 'N'
   };
+
+  /*
+   * Brand from the Styles.xlsx "Brand" column (first style that has one), same as the Separations
+   * tab. The host uses it for the [Brand] token and to show only the matching Footer sublayer at
+   * Prepare — without it both Nike and Fanatics footers stay visible.
+   */
+  const brandStyleCodes = (group.styleCodes || []).map((s) => String(s).trim()).filter((s) => !!s);
+  if (brandStyleCodes.length > 0) {
+   try {
+    const styleInfoResult: any = await this.controller.getStyleInformation(brandStyleCodes);
+    if (styleInfoResult?.success && styleInfoResult.styleInfoMap) {
+     for (const code of brandStyleCodes) {
+      const info = styleInfoResult.styleInfoMap[code];
+      const value = info && (info['Brand'] || info['brand'] || info['BRAND']);
+      if (value && String(value).trim() !== '') {
+       meta.brand = String(value).trim();
+       break;
+      }
+     }
+    }
+   } catch (brandErr) {
+    console.warn('[STANDALONE] Brand lookup failed:', brandErr);
+   }
+  }
+  if (!meta.brand) {
+   meta.brand = brandFromProfileName(profileName);
+   console.warn(
+    '[STANDALONE] No Brand value in Styles.xlsx for styles:',
+    brandStyleCodes,
+    '- using brand from profile name:',
+    meta.brand || '(none)'
+   );
+  }
 
   const toEnabled = (value: any): boolean => {
    if (value === true || value === 1) return true;

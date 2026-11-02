@@ -3174,6 +3174,22 @@ function runSeparationStaged(params_string, stage) {
 		if (!separationTargetFolder) {
 			separationTargetFolder = getLegacyGraphicFolder();
 		}
+		/*
+		 * Re-prepare: the panel names the row's EXISTING SEP file, which is replaced in place — a duplicated
+		 * file ("0222_…FW01…") would otherwise be ignored while Prepare wrote a second, pattern-named file.
+		 */
+		if (isPrepare && params.overwriteSeparationPath) {
+			try {
+				var overwriteFile = new File(String(params.overwriteSeparationPath));
+				if (overwriteFile.parent && ensureSeparationFolderExists(overwriteFile.parent)) {
+					separationTargetFolder = overwriteFile.parent;
+					separationFileName = overwriteFile.name;
+					appendLeapSepLog("Re-prepare: replacing " + overwriteFile.fsName);
+				}
+			} catch (eOverwritePath) {
+				appendLeapSepLog("Re-prepare: could not use " + params.overwriteSeparationPath + " - " + (eOverwritePath.message || eOverwritePath));
+			}
+		}
 		appendLeapSepLog(
 			"Separation output folder: " + separationTargetFolder.fsName +
 			(createdAtConfiguredPath ? " (from Export Settings pattern)" : " (legacy structure)")

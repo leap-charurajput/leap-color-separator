@@ -228,19 +228,26 @@ export class SeparationProfileActionDialogComponent implements OnChanges {
 
  /*
   * The existing file name with its style code swapped for the new one, e.g. 7G_FM01_Front.ai + FM13 ->
-  * 7G_FM13_Front.ai. A name without the old style gets the new one added before ".ai".
+  * 7G_FM13_Front.ai. The style may also open a longer token, as when it is glued to the color code
+  * (_MLB_CM520484_… + FW01 -> _MLB_FW010484_…). A name without the old style gets the new one added
+  * before ".ai".
   */
  private buildFileName(newStyle: string): string {
   const existing = String(this.existingFileName || '');
   if (!newStyle || !existing) return existing;
   const safeStyle = newStyle.replace(/[^A-Za-z0-9._-]+/g, '_');
-  for (const old of this.existingStyleCodes || []) {
-   const code = String(old || '').trim();
-   if (!code) continue;
-   const escaped = code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-   const re = new RegExp('(^|[^A-Za-z0-9])' + escaped + '(?=[^A-Za-z0-9]|$)', 'i');
-   if (re.test(existing)) {
-    return existing.replace(re, (_m: string, lead: string) => lead + safeStyle);
+  const codes = (this.existingStyleCodes || [])
+   .map((old) => String(old || '').trim())
+   .filter((code) => !!code)
+   .map((code) => code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  /* Whole-token match first, then the style at the START of a token. */
+  const tails = ['(?=[^A-Za-z0-9]|$)', ''];
+  for (const tail of tails) {
+   for (const escaped of codes) {
+    const re = new RegExp('(^|[^A-Za-z0-9])' + escaped + tail, 'i');
+    if (re.test(existing)) {
+     return existing.replace(re, (_m: string, lead: string) => lead + safeStyle);
+    }
    }
   }
   return existing.replace(/(\.ai)?$/i, '_' + safeStyle + '.ai');

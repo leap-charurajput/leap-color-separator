@@ -128,9 +128,14 @@
 .add-separation-modal-list-item .style-code {
 	font-weight: 600;
 	font-variant-numeric: tabular-nums;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+	/* Long profile names wrap onto more lines instead of being cut off with an ellipsis. */
+	white-space: normal;
+	overflow-wrap: anywhere;
+}
+
+/* Profile list rows have only the name: let it use the full row width, not half of the grid. */
+.add-separation-modal-list-item .style-code:only-child {
+	grid-column: 1 / -1;
 }
 
 .add-separation-modal-list-item .style-code .profile-inline {
@@ -143,9 +148,8 @@
 	justify-self: end;
 	text-align: right;
 	width: 100%;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+	white-space: normal;
+	overflow-wrap: anywhere;
 }
 
 .add-separation-modal-empty {
