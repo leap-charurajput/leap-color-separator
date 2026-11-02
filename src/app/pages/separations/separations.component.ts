@@ -13,7 +13,7 @@ import { SeparationProfileActionDialogResult } from '../../components/separation
 import { AddSeparationDialogResult, AddSeparationDialogStyleOption } from '../../components/add-separation-dialog/add-separation-dialog.component';
 import { ControllerService } from '../../services/controller.service';
 import { DataIssuesService } from '../../services/data-issues.service';
-import { brandFromProfileName } from '../../services/brand';
+import { brandFromProfileName, footerBrandFromProfileName } from '../../services/brand';
 import { GraphicsDataService } from '../../services/graphics-data.service';
 import { LeapSepsLogService } from '../../services/leap-seps-log.service';
 import { roiLogEvent } from '../../services/roi';
@@ -1843,12 +1843,14 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 			}
 
 			/*
-			 * Brand from the Styles.xlsx "Brand" column (first style that has one) — the host uses it
+			 * Brand from the profile name when it names Nike or Fanatics (a profile picked in Add
+			 * Separation wins over the style's row), else the Styles.xlsx "Brand" column (first style
+			 * that has one) — the host uses it
 			 * for the [Brand] file/folder token (first letter: F for Fanatics, N for Nike) and to show
 			 * the matching Footer sublayer in the SEP template at Prepare.
 			 */
-			let brandName = '';
-			if (!this.isRunningInBrowser && styleCodes.length > 0) {
+			let brandName = footerBrandFromProfileName(profileName);
+			if (!brandName && !this.isRunningInBrowser && styleCodes.length > 0) {
 				try {
 					const styleInfoResult = await this.controller.getStyleInformation(styleCodes);
 					if (styleInfoResult?.success && styleInfoResult.styleInfoMap) {

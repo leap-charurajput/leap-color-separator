@@ -9,7 +9,7 @@ import {
 } from '@angular/core';
 import { ControllerService } from '../../services/controller.service';
 import { DataIssuesService } from '../../services/data-issues.service';
-import { brandFromProfileName } from '../../services/brand';
+import { brandFromProfileName, footerBrandFromProfileName } from '../../services/brand';
 
 /*
  * Payload for the standalone separation. The host exports the selection to a sibling ASSETS
@@ -2429,12 +2429,14 @@ export class StandaloneSeparationComponent implements OnInit, OnChanges, OnDestr
   };
 
   /*
-   * Brand from the Styles.xlsx "Brand" column (first style that has one), same as the Separations
-   * tab. The host uses it for the [Brand] token and to show only the matching Footer sublayer at
+   * Brand from the profile name when it names Nike or Fanatics (a profile picked in Add Separation
+   * wins over the style's row), else the Styles.xlsx "Brand" column (first style that has one), same
+   * as the Separations tab. The host uses it for the [Brand] token and to show only the matching Footer sublayer at
    * Prepare — without it both Nike and Fanatics footers stay visible.
    */
   const brandStyleCodes = (group.styleCodes || []).map((s) => String(s).trim()).filter((s) => !!s);
-  if (brandStyleCodes.length > 0) {
+  meta.brand = footerBrandFromProfileName(profileName);
+  if (!meta.brand && brandStyleCodes.length > 0) {
    try {
     const styleInfoResult: any = await this.controller.getStyleInformation(brandStyleCodes);
     if (styleInfoResult?.success && styleInfoResult.styleInfoMap) {
