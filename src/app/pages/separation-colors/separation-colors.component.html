@@ -129,6 +129,18 @@
      </svg>
     </button>
     <button
+     *ngIf="isSeparatedDoc && !isRunningInBrowser"
+     class="separation-action-btn"
+     (click)="handleDuplicateSeparation()"
+     [disabled]="isDuplicating"
+     data-tip="Duplicate this separation file for another style"
+    >
+     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12" width="20" height="20">
+      <path fill="currentColor" d="M3.5,0h8.5v8.5h-3.5v-1.2h2.3V1.2H4.7v2.3H3.5V0Z" />
+      <path fill="currentColor" d="M0,3.5h8.5v8.5H0V3.5ZM1.2,4.7v6.1h6.1V4.7H1.2Z" />
+     </svg>
+    </button>
+    <button
      class="separation-action-btn"
      (click)="handleExportProcess()"
      data-tip="Export to document"
@@ -425,6 +437,12 @@
    (cancel)="cancelDeleteUbChokeBlockerPlates()"
   >
   </app-confirm-dialog>
+  <!-- Duplicate: copy this SEP file for another style (same dialog as the Separations tab). -->
+  <app-separation-profile-action-dialog [isOpen]="duplicateDialogOpen" mode="duplicate-file"
+   [initialProfileName]="duplicateProfileName" [hasSeparationFile]="true"
+   [existingFileName]="duplicateExistingName" [existingStyleCodes]="duplicateExistingStyles"
+   (cancel)="cancelDuplicateDialog()" (confirm)="confirmDuplicateDialog($event)">
+  </app-separation-profile-action-dialog>
   <!-- End main UI -->
  </div>
 </div>

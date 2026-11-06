@@ -234,6 +234,265 @@ function dsfReplaceStyleText(doc, oldStyles, newStyle) {
 function dsfDeepCopy(o) { return JSON.parse(JSON.stringify(o == null ? {} : o)); }
 
 /*
+ * The copy is for a new order, so it must not carry the original's control or version number: the frames
+ * named CONTROL_NUMBER go back to "[CONTROL]" and VERSION_NUMBER to "[V#]", which Export fills in again.
+ * Returns { control, version } — how many frames of each were reset.
+ */
+function dsfResetOrderNumbers(doc) {
+	var changed = { control: 0, version: 0 };
+	var placeholders = { control_number: "[CONTROL]", version_number: "[V#]" };
+	for (var i = 0; i < doc.textFrames.length; i++) {
+		var tf = doc.textFrames[i];
+		var name = "";
+		try { name = String(tf.name || "").toLowerCase().replace(/\\s+/g, "_"); } catch (eN) { continue; }
+		if (!placeholders.hasOwnProperty(name)) continue;
+		var placeholder = placeholders[name];
+		var before = "";
+		try { before = String(tf.contents); } catch (eC) { continue; }
+		if (before === placeholder) continue;
+		var restore = [];
+		var p = tf.layer;
+		while (p && p.typename === "Layer") {
+			restore.push({ obj: p, locked: p.locked, visible: p.visible });
+			try { if (p.locked) p.locked = false; } catch (eL) { }
+			try { if (!p.visible) p.visible = true; } catch (eV) { }
+			p = p.parent;
+		}
+		var wasLocked = false;
+		try { wasLocked = !!tf.locked; if (wasLocked) tf.locked = false; } catch (eTl) { }
+		try {
+			tf.contents = placeholder;
+			if (name === "control_number") changed.control++; else changed.version++;
+		} catch (eW) { dsfLog("could not reset " + name + " '" + before + "': " + (eW.message || eW)); }
+		try { if (wasLocked) tf.locked = true; } catch (eTl2) { }
+		for (var k = restore.length - 1; k >= 0; k--) {
+			try { restore[k].obj.visible = restore[k].visible; } catch (eRv) { }
+			try { restore[k].obj.locked = restore[k].locked; } catch (eRl) { }
+		}
+	}
+	return changed;
+}
+
+/* The old style swapped for the new one in a name — the same start-of-word rule as dsfReplaceStyleText. */
+function dsfSwapStyleInName(name, oldStyles, newStyle) {
+	var out = String(name || "");
+	for (var s = 0; s < oldStyles.length; s++) {
+		var code = dsfTrim(String(oldStyles[s] || "").split(",")[0]);
+		if (!code || !/^[A-Za-z0-9_-]+$/.test(code) || code.toLowerCase() === newStyle.toLowerCase()) continue;
+		out = out.replace(new RegExp("(^|[^A-Za-z0-9])" + code, "gi"), function (m, lead) { return lead + newStyle; });
+	}
+	return out;
+}
+
+/*
+ * LEAP copy: the CAD Prepare would pick for the NEW style. Prepare looks for "<version doc name>_SEPS.png"
+ * and the version doc name carries the style (MLBF_0KIF_CM52_0484_ANGTSQ), so the same lookup runs with the
+ * style swapped. Only an exact-name hit counts — the team-name fallback would find the OLD style's CAD.
+ * Returns { path, why } — path '' when not found.
+ */
+function dsfResolveLeapCad(doc, oldStyles, newStyle, graphicName) {
+	var ctx = null;
+	try {
+		var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
+		if (xmp.isXmpCreated && xmp.doesStructFieldExist("LEAPPreparedContext")) ctx = xmp.getStructField("LEAPPreparedContext", true);
+	} catch (eX) { ctx = null; }
+	if (!ctx || ctx.standalone || !ctx.jobRoot || !ctx.docName) {
+		return { path: "", why: "The separation file does not record where its job folder is." };
+	}
+	if (typeof resolveCadPngPath !== "function") {
+		return { path: "", why: "CAD lookup is not available in the installed scripts." };
+	}
+	var newDocName = dsfSwapStyleInName(ctx.docName, oldStyles, newStyle);
+	if (newDocName === String(ctx.docName)) {
+		return { path: "", why: "The style is not part of the document name " + ctx.docName + "." };
+	}
+	var aiFolder = ctx.sourceDocumentPath ? new File(String(ctx.sourceDocumentPath)).parent : new Folder(String(ctx.jobRoot));
+	var r = resolveCadPngPath(new Folder(String(ctx.jobRoot)), aiFolder, newDocName, String(ctx.league || ""), String(ctx.teamCode || ""), graphicName);
+	var exact = { "03 CADS/SEPS/PNG": 1, "03 CADS/ART/PNG": 1, "04 ASSETS/PNG": 1 };
+	if (r && r.path && exact[r.source] === 1) return { path: r.path, why: "" };
+	return { path: "", why: "Looked for " + newDocName + "_SEPS.png in 03 CADS and 04 ASSETS - none found." };
+}
+
+/*
+ * The CAD record ("LEAPCadPlacement") of a SEP file: how its CAD got there — mode "manual" (Place missing
+ * CAD, the user picked the PNG) or "duplicate" — plus manualFolder / manualFileName, the folder and file the
+ * user once picked by hand. Copies keep manualFolder, so every later Duplicate can search it. null if none.
+ */
+function dsfReadCadRecord(doc) {
+	try {
+		var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
+		if (!xmp.isXmpCreated || !xmp.doesStructFieldExist("LEAPCadPlacement")) return null;
+		var rec = xmp.getStructField("LEAPCadPlacement", true);
+		return rec && typeof rec === "object" ? rec : null;
+	} catch (e) { return null; }
+}
+
+function dsfWriteCadRecord(doc, rec) {
+	try {
+		var xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
+		if (xmp.isXmpCreated) xmp.setStructField("LEAPCadPlacement", rec, true, true);
+	} catch (e) { dsfLog("could not save the CAD record: " + (e.message || e)); }
+}
+
+/*
+ * The new style's CAD in the folder the user once picked a CAD from by hand.
+ *   stage "exact":  the manual file's name with the old style swapped for the new one
+ *                   (MZ9_7952_FRONT_SEPS.png -> MZ8_7952_FRONT_SEPS.png).
+ *   stage "prefix": any .png whose name starts with the new style, the same side ("_R" or not) first.
+ * Returns the path, or "".
+ */
+function dsfFindManualCad(rec, oldStyles, newStyle, stage) {
+	if (!rec || !rec.manualFolder) return "";
+	var folder = new Folder(String(rec.manualFolder));
+	if (!folder.exists) return "";
+	var manualName = String(rec.manualFileName || "");
+	if (stage === "exact") {
+		if (!manualName) return "";
+		var swapped = dsfSwapStyleInName(manualName, oldStyles, newStyle);
+		if (swapped === manualName) return "";
+		var f = new File(folder.fsName + "/" + swapped);
+		return f.exists ? f.fsName : "";
+	}
+	var wantRear = /_R\\.png$/i.test(manualName);
+	var style = newStyle.toUpperCase();
+	var files = folder.getFiles();
+	var best = "";
+	var bestRank = 99;
+	for (var i = 0; i < files.length; i++) {
+		if (!(files[i] instanceof File)) continue;
+		var name = decodeURI(files[i].name);
+		if (!/\\.png$/i.test(name) || name.toUpperCase().indexOf(style) !== 0) continue;
+		var rank = (/_R\\.png$/i.test(name) === wantRear ? 0 : 1);
+		if (rank < bestRank || (rank === bestRank && files[i].fsName < best)) {
+			best = files[i].fsName;
+			bestRank = rank;
+		}
+	}
+	return best;
+}
+
+/*
+ * Swap the CAD (garment silhouette) in the copy: remove the placed / embedded images in the CADS layer —
+ * the "CAD" bound paths stay — and place pngPath the way Prepare does. With no pngPath the old CAD is
+ * still removed, so a copy never shows the old style's garment. Returns { removed, placed, message }.
+ */
+function dsfReplaceCad(doc, pngPath) {
+	var out = { removed: 0, placed: false, message: "" };
+	var cadsLayer = typeof findLayerByName === "function" ? findLayerByName(doc.layers, "CADS") : null;
+	if (!cadsLayer) { out.message = "No CADS layer in the separation file"; return out; }
+	var restore = [];
+	var p = cadsLayer.parent;
+	while (p && p.typename === "Layer") {
+		restore.push({ layer: p, locked: p.locked, visible: p.visible });
+		try { if (p.locked) p.locked = false; } catch (eP1) { }
+		try { if (!p.visible) p.visible = true; } catch (eP2) { }
+		p = p.parent;
+	}
+	dsfOpenLayers(cadsLayer, restore);
+	try {
+		var items = dsfCollectItems(cadsLayer, []);
+		for (var i = items.length - 1; i >= 0; i--) {
+			var tn = items[i].typename;
+			if (tn !== "PlacedItem" && tn !== "RasterItem") continue;
+			try { if (items[i].locked) items[i].locked = false; } catch (eLk) { }
+			try { items[i].remove(); out.removed++; } catch (eRm) { }
+		}
+		if (pngPath) {
+			var dbg = placeCadPngInDocument(doc, pngPath);
+			out.placed = !!(dbg && dbg.placed === true);
+			out.message = dbg && dbg.message ? String(dbg.message) : "";
+		}
+	} finally {
+		for (var r = restore.length - 1; r >= 0; r--) {
+			try { restore[r].layer.visible = restore[r].visible; } catch (eR1) { }
+			try { restore[r].layer.locked = restore[r].locked; } catch (eR2) { }
+		}
+	}
+	return out;
+}
+
+/*
+ * Plates tab: which row does this SEP file belong to? Looks in every open document — LEAP rows on a
+ * version document, standalone / NN Pro jobs on their source document — for the entry whose
+ * separatedDocumentPath is sepPath. A LEAP SEP file names its version document, which is opened when it
+ * is not open yet; the SEP file is made active again afterwards. params: { sepPath }.
+ */
+function dsfFindRowForSepFile(params) {
+	try {
+		var sepPath = dsfTrim(params.sepPath);
+		if (!sepPath) return dsfErr("No separation file given");
+		var wanted = dsfNormPath(sepPath);
+		var sepDoc = dsfOpenDocFor(sepPath);
+
+		function scan(doc) {
+			var xmp;
+			try { xmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc); } catch (eX) { return null; }
+			if (!xmp.isXmpCreated) return null;
+			var docPath = "";
+			try { docPath = doc.fullName.fsName; } catch (eP) { return null; }
+			try {
+				if (xmp.doesStructFieldExist("LEAPSeparationProfileData")) {
+					var entries = xmp.getStructField("LEAPSeparationProfileData", true);
+					if (entries instanceof Array) {
+						for (var i = 0; i < entries.length; i++) {
+							if (dsfNormPath(entries[i] && entries[i].separatedDocumentPath) !== wanted) continue;
+							var meta = entries[i].profileMetadata || {};
+							return {
+								kind: "leap", recordDocPath: docPath, graphicName: String(entries[i].graphicName || ""),
+								profileName: String(meta.profileName || ""), groupId: String(meta.separationGroupId || ""),
+								styleCodes: meta.styleCodes instanceof Array ? meta.styleCodes : []
+							};
+						}
+					}
+				}
+			} catch (eL) { }
+			try {
+				var jobs = xmp.getStructField("LEAPStandaloneJobs", true);
+				if (jobs instanceof Array) {
+					for (var j = 0; j < jobs.length; j++) {
+						if (dsfNormPath(jobs[j] && jobs[j].separatedDocumentPath) !== wanted) continue;
+						return { kind: "standalone", recordDocPath: docPath, job: jobs[j], styleCodes: jobs[j].styleCode ? [String(jobs[j].styleCode)] : [] };
+					}
+				}
+			} catch (eJ) { }
+			return null;
+		}
+
+		for (var d = 0; d < app.documents.length; d++) {
+			if (sepDoc && app.documents[d] === sepDoc) continue;
+			var hit = scan(app.documents[d]);
+			if (hit) return JSON.stringify({ success: true, row: hit });
+		}
+
+		/* Not open: a LEAP SEP file knows its version document. */
+		var versionPath = "";
+		if (sepDoc) {
+			try {
+				var sx = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", sepDoc);
+				if (sx.isXmpCreated && sx.doesStructFieldExist("LEAPPreparedContext")) {
+					var ctx = sx.getStructField("LEAPPreparedContext", true) || {};
+					if (!ctx.standalone && ctx.sourceDocumentPath) versionPath = String(ctx.sourceDocumentPath);
+				}
+			} catch (eC) { }
+		}
+		if (versionPath && new File(versionPath).exists) {
+			dsfLog("opening the version document " + versionPath);
+			var opened = app.open(new File(versionPath));
+			try { if (sepDoc) sepDoc.activate(); } catch (eAct) { }
+			var hit2 = opened ? scan(opened) : null;
+			if (hit2) return JSON.stringify({ success: true, row: hit2 });
+		}
+		return dsfErr(
+			"Could not find the row for this separation file. Open the " +
+			(versionPath ? "version document" : "artwork document") +
+			" it was made from, then try again."
+		);
+	} catch (e) {
+		return dsfErr(e.message || e);
+	}
+}
+
+/*
  * params: { sourcePath, fileName, newStyle, scalePercent (null = no resize),
  *           target: { kind: "leap", graphicName, profileName, groupId }
  *                 | { kind: "standalone", job } }
@@ -282,7 +541,7 @@ function dsfDuplicateForStyle(params) {
 			if (typeof leapSeparationGroupsSupported !== "function") {
 				return dsfErr("The installed LEAP Seps extension is too old for this. Please update it.");
 			}
-			recordDoc = dsfFindVersionDocument();
+			recordDoc = target.recordDocPath ? dsfOpenDocFor(target.recordDocPath) : dsfFindVersionDocument();
 			if (!recordDoc) return dsfErr("No version document is open");
 			recordXmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", recordDoc);
 			if (!recordXmp.isXmpCreated || !recordXmp.doesStructFieldExist("LEAPSeparationProfileData")) {
@@ -305,7 +564,9 @@ function dsfDuplicateForStyle(params) {
 		} else if (target.kind === "standalone") {
 			if (!target.job) return dsfErr("No job given");
 			if (!app.documents.length) return dsfErr("No document is open");
-			recordDoc = app.activeDocument;
+			/* Plates tab: the active document is the SEP file, so the job's own document is named. */
+			recordDoc = target.recordDocPath ? dsfOpenDocFor(target.recordDocPath) : app.activeDocument;
+			if (!recordDoc) return dsfErr("The artwork document is not open: " + target.recordDocPath);
 			if (!dsfDocIsSaved(recordDoc)) return dsfErr("Save the document first");
 			recordXmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", recordDoc);
 			if (!recordXmp.isXmpCreated) return dsfErr("Could not open the document XMP");
@@ -340,6 +601,52 @@ function dsfDuplicateForStyle(params) {
 		);
 		var textChanged = dsfReplaceStyleText(copyDoc, oldStyles, newStyle);
 		dsfLog("stamped style " + newStyle + " (was " + oldStyles.join(", ") + "), " + textChanged + " text frame(s) updated");
+		var numbersReset = dsfResetOrderNumbers(copyDoc);
+		dsfLog("control number reset to [CONTROL] in " + numbersReset.control + " frame(s), version to [V#] in " + numbersReset.version + " frame(s)");
+
+		/*
+		 * CAD for the new style, in this order:
+		 *   1. the folder the user once placed a CAD from by hand, same file name with the style swapped;
+		 *   2. the normal lookup — LEAP resolves it here, standalone / NN Pro get it from the panel;
+		 *   3. that manual folder again, any PNG starting with the new style.
+		 */
+		var cadRec = dsfReadCadRecord(copyDoc);
+		var cadPath = dsfFindManualCad(cadRec, oldStyles, newStyle, "exact");
+		var cadSource = cadPath ? "manual folder (same name)" : "";
+		var cadWhy = "";
+		if (!cadPath) {
+			if (target.kind === "leap") {
+				var leapCad = dsfResolveLeapCad(copyDoc, oldStyles, newStyle, target.graphicName);
+				cadPath = leapCad.path;
+				cadWhy = leapCad.why;
+			} else {
+				cadPath = dsfTrim(params.cadPngPath);
+				cadWhy = dsfTrim(params.cadMissReason);
+			}
+			if (cadPath) cadSource = "standard search";
+		}
+		if (!cadPath) {
+			cadPath = dsfFindManualCad(cadRec, oldStyles, newStyle, "prefix");
+			if (cadPath) cadSource = "manual folder (style match)";
+			else if (cadRec && cadRec.manualFolder) {
+				cadWhy = (cadWhy ? cadWhy + " " : "") + "Also looked in " + cadRec.manualFolder +
+					" (where a CAD was placed by hand) - none starting with " + newStyle + ".";
+			}
+		}
+		var cad = dsfReplaceCad(copyDoc, cadPath);
+		if (cadPath && !cad.placed) cadWhy = cad.message || "The CAD image could not be placed";
+		dsfLog("CAD: removed " + cad.removed + ", " + (cad.placed ? "placed " + cadPath + " (" + cadSource + ")" : "none placed - " + cadWhy));
+
+		/* The copy's CAD record: placed by Duplicate (not by hand); the manual folder carries over. */
+		var newRec = { mode: "duplicate", path: cad.placed ? cadPath : "", source: cad.placed ? cadSource : "", placedAt: new Date().toString() };
+		if (cadRec && cadRec.manualFolder) {
+			newRec.manualFolder = String(cadRec.manualFolder);
+			/* Keep the hand-picked naming, for this copy's style, so the next Duplicate's same-name search works. */
+			newRec.manualFileName = cad.placed && cadSource.indexOf("manual folder") === 0
+				? decodeURI(new File(cadPath).name)
+				: dsfSwapStyleInName(String(cadRec.manualFileName || ""), oldStyles, newStyle);
+		}
+		dsfWriteCadRecord(copyDoc, newRec);
 		var scaleInfo = null;
 		if (pct != null && pct !== 100) {
 			scaleInfo = dsfScaleSepDocArt(copyDoc, pct);
@@ -374,7 +681,10 @@ function dsfDuplicateForStyle(params) {
 		return JSON.stringify({
 			success: true,
 			separatedDocumentPath: destPath,
-			scaled: scaleInfo
+			scaled: scaleInfo,
+			cadPlaced: cad.placed,
+			cadPngPath: cad.placed ? cadPath : "",
+			cadMissReason: cad.placed ? "" : cadWhy
 		});
 	} catch (e) {
 		var msg = e.message || String(e);
@@ -534,13 +844,22 @@ export interface DuplicateSepFileParams {
 	newStyle: string;
 	/* Percent of the CURRENT file's size; null = no resize. */
 	scalePercent: number | null;
+	/* Standalone / NN Pro: the new style's CAD PNG found by the panel ('' = none, cadMissReason says why). */
+	cadPngPath?: string;
+	cadMissReason?: string;
+	/* recordDocPath: the document that holds the row (Plates tab); absent = the version / active document. */
 	target:
-	| { kind: 'leap'; graphicName: string; profileName: string; groupId?: string }
-	| { kind: 'standalone'; job: any };
+	| { kind: 'leap'; graphicName: string; profileName: string; groupId?: string; recordDocPath?: string }
+	| { kind: 'standalone'; job: any; recordDocPath?: string };
 }
 
 export function duplicateSepFileForStyle(params: DuplicateSepFileParams): Promise<any> {
 	return runHost('dsfDuplicateForStyle', params);
+}
+
+/* The Separations-tab row a SEP file belongs to (Plates tab Duplicate). */
+export function findRowForSepFile(sepPath: string): Promise<any> {
+	return runHost('dsfFindRowForSepFile', { sepPath });
 }
 
 export function recordStandaloneJobSepPath(documentPath: string, job: any, separatedDocumentPath: string): Promise<any> {

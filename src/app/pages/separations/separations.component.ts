@@ -2337,6 +2337,7 @@ export class SeparationsComponent implements OnInit, OnChanges, OnDestroy {
 				'Duplicated separation file for ' + newStyle + ': ' + res.separatedDocumentPath +
 				(res.scaled ? ' (resized ' + res.scaled.layer + ' to ' + result.scalePercent + '%)' : '')
 			);
+			this.controller.reportDuplicateCadMiss(res, newStyle);
 			if (ctx.kind === 'leap') {
 				await this.loadSeparationPaths();
 			} else {

@@ -657,7 +657,12 @@ function resolveSharedWhitePlateSwatchName(doc, profileMetadata) {
  */
 var __highlightWhiteMerge = null;
 
-/** 0-based index of the last unchecked "White" underbase not built as a global pass, or -1. */
+/**
+ * 0-based index of the last unchecked "White" underbase not built as a global pass, or -1.
+ * Only a name the profile gives it counts: the default "White UB N" names (Fanatics_Plastisol_Cotton's
+ * UB 2 is "White UB 2") are plain extra passes, not a highlight white — merging there renamed the art's
+ * PANTONE White C to "White UB 2".
+ */
 function getHighlightWhiteUnderbaseIndex(profileMetadata) {
 	var enabled = profileMetadata && profileMetadata.underbaseEnabled instanceof Array
 		? profileMetadata.underbaseEnabled
@@ -668,7 +673,7 @@ function getHighlightWhiteUnderbaseIndex(profileMetadata) {
 	for (var i = Math.min(enabled.length, 4) - 1; i >= 1 && i >= globalCount; i--) {
 		if (enabled[i] === true) continue;
 		var nm = getUnderbaseCustomName(profileMetadata, i);
-		if (nm && nm.toLowerCase().indexOf("white") !== -1) return i;
+		if (nm && nm.toLowerCase().indexOf("white") !== -1 && !isWhiteUbSeparationPlateName(nm)) return i;
 	}
 	return -1;
 }
@@ -689,7 +694,9 @@ function isUnderbaseOwnSwatchName(name, profileMetadata) {
 /**
  * The art's white swatch to merge: the Graphics page pick (Underbase 2/3/4 swatch) when it exists in
  * the document, else the fill of the first ink plate on SEPARATED_ART whose name contains "White".
- * Returns { name, source } or null.
+ * The swatch itself must be a white ink too: an ink-exception pass builds its art on the temporary
+ * "__TEMP_WHITE_UB" layer filled with the exception ink, which once got PANTONE 123 C renamed to
+ * "White UB 2" (its plate kept the layer, the swatch was gone). Returns { name, source } or null.
  */
 function findArtWhiteSwatchForMerge(doc, profileMetadata, ubIndex) {
 	var picks = [
@@ -698,7 +705,7 @@ function findArtWhiteSwatchForMerge(doc, profileMetadata, ubIndex) {
 	];
 	for (var p = 0; p < picks.length; p++) {
 		var pick = picks[p] != null ? String(picks[p]).replace(/^\s+|\s+$/g, "") : "";
-		if (!pick || isUnderbaseOwnSwatchName(pick, profileMetadata)) continue;
+		if (!pick || !isWhiteInkSwatchName(pick) || isUnderbaseOwnSwatchName(pick, profileMetadata)) continue;
 		var picked = getSwatchNameCaseInsensitive(doc, pick);
 		if (picked) return { name: picked, source: "Graphics pick" };
 	}
@@ -706,12 +713,12 @@ function findArtWhiteSwatchForMerge(doc, profileMetadata, ubIndex) {
 		var separatedArtLayer = doc.layers.getByName(CONSTANTS.LAYER_NAMES.SEPARATED_ART);
 		for (var i = 0; i < separatedArtLayer.layers.length; i++) {
 			var layerName = String(separatedArtLayer.layers[i].name || "");
-			if (!isWhiteInkSwatchName(layerName)) continue;
+			if (!isWhiteInkSwatchName(layerName) || layerName.indexOf("__") === 0) continue;
 			if (isUnderbaseStackLayerName(layerName, profileMetadata, doc)) continue;
 			if (isUnderbaseOwnSwatchName(layerName, profileMetadata)) continue;
 			var fill = getFirstFillColorFromSeparatedArtSublayer(doc, layerName);
 			var spotName = fill && fill.typename === "SpotColor" && fill.spot ? String(fill.spot.name || "") : "";
-			if (spotName && !isUnderbaseOwnSwatchName(spotName, profileMetadata)) {
+			if (spotName && isWhiteInkSwatchName(spotName) && !isUnderbaseOwnSwatchName(spotName, profileMetadata)) {
 				return { name: spotName, source: "plate '" + layerName + "'" };
 			}
 		}

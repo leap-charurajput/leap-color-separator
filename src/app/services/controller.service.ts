@@ -10,10 +10,12 @@ import { exportSelectionToAssets } from '../../lib/scripts/exportSelectionToAsse
 import { runStandaloneSeparation } from '../../lib/scripts/standaloneSeparation.script';
 import {
 	duplicateSepFileForStyle,
+	findRowForSepFile,
 	recordStandaloneJobSepPath,
 	deleteStandaloneJobRow,
 	DuplicateSepFileParams
 } from '../../lib/scripts/duplicateSepFile.script';
+import { findDuplicateCadPng } from './duplicate-cad';
 import { hasActiveDocument as hasHostActiveDocument } from '../../lib/scripts/hasActiveDocument.script';
 import { getSelectionCount as getHostSelectionCount } from '../../lib/scripts/getSelectionCount.script';
 /* NN Pro product detection: LEAP_XMP_META / colorSepsConfig read from the active doc's XMP. */
@@ -2690,7 +2692,21 @@ export class ControllerService {
 	/* Copy a SEP file for another style (optionally resized) and record it as a new row. */
 	duplicateSeparationFileForStyle(params: DuplicateSepFileParams): Promise<any> {
 		this.log('duplicateSeparationFileForStyle called: ' + params.newStyle + ' -> ' + params.fileName);
-		return this.ensureSession().then(() => duplicateSepFileForStyle(params));
+		return this.ensureSession().then(async () => {
+			/* Standalone / NN Pro: the new style's CAD is found next to the job's artwork (a LEAP copy's in the host). */
+			if (params.target.kind === 'standalone' && params.cadPngPath === undefined) {
+				const docPath = params.target.recordDocPath || (await this.getActiveDocumentPath());
+				const cad = findDuplicateCadPng(docPath, params.target.job, params.newStyle);
+				params = { ...params, cadPngPath: cad.path, cadMissReason: cad.why };
+			}
+			return duplicateSepFileForStyle(params);
+		});
+	}
+
+	/* Plates tab: the Separations-tab row (LEAP or standalone / NN Pro) a SEP file belongs to. */
+	findSeparationRowForSepFile(sepPath: string): Promise<any> {
+		this.log('findSeparationRowForSepFile called: ' + sepPath);
+		return this.ensureSession().then(() => findRowForSepFile(sepPath));
 	}
 
 	/* After a standalone Prepare: remember the SEP file on the job's row so the Separations tab links it. */
@@ -3569,9 +3585,32 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
 	 * "Place missing CAD" button for the banner shown when Prepare placed no garment silhouette (CAD).
 	 * The user picks a PNG; it is placed into the CADS layer of the SEP document (sepDocPath, else the
 	 * active document) with the same placeCadPngInDocument used by Prepare (fit + centre in each "CAD"
-	 * bound, overprint, embedded), and the document is saved. On success the banner entry is cleared;
+	 * bound, overprint, embedded), and the document is saved. The SEP file's XMP records it as a MANUAL
+ * placement ("LEAPCadPlacement": mode "manual", path, manualFolder, manualFileName) so Duplicate can look
+ * in that folder for the new style's CAD. On success the banner entry is cleared;
 	 * on failure it stays and shows why. Cancel in the file picker changes nothing.
 	 */
+	/*
+	 * After a Duplicate: the copy's old CAD was removed, and no CAD was found for the new style — say so,
+	 * with the same "Place missing CAD" button (it places into the copy). Clears the banner otherwise.
+	 */
+	reportDuplicateCadMiss(res: any, newStyle: string): void {
+		const issueId = 'separation-duplicate-cad';
+		if (!res?.success || res.cadPlaced) {
+			this.dataIssues.clear(issueId);
+			return;
+		}
+		const copyPath = String(res.separatedDocumentPath || '');
+		const message = 'No CAD (garment silhouette) for ' + newStyle + ' in ' + (copyPath.split(/[\\/]/).pop() || 'the copy') + '.';
+		this.dataIssues.report(
+			issueId,
+			message,
+			String(res.cadMissReason || ''),
+			copyPath || undefined,
+			this.buildPlaceMissingCadAction(issueId, message, copyPath || undefined)
+		);
+	}
+
 	buildPlaceMissingCadAction(issueId: string, message: string, sepDocPath?: string): DataIssueAction {
 		return {
 			label: 'Place missing CAD',
@@ -3643,6 +3682,21 @@ function resolveExportFilePath(settingsKey, defaultFile, doc, extension) {
     if (!dbg || dbg.placed !== true) {
       return JSON.stringify({ success: false, error: (dbg && dbg.message) || "CAD was not placed", debug: dbg });
     }
+    /* Remember that this CAD was placed BY HAND and from where — Duplicate searches that folder too. */
+    try {
+      var cadFile = new File(${pngLiteral});
+      var cadXmp = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", doc);
+      if (cadXmp.isXmpCreated) {
+        cadXmp.setStructField("LEAPCadPlacement", {
+          mode: "manual",
+          path: cadFile.fsName,
+          source: "Place missing CAD",
+          manualFolder: cadFile.parent ? cadFile.parent.fsName : "",
+          manualFileName: decodeURI(cadFile.name),
+          placedAt: new Date().toString()
+        }, true, true);
+      }
+    } catch (eRec) { }
     try { doc.save(); } catch (eSave) { }
     return JSON.stringify({ success: true, cadPngPath: ${pngLiteral}, doc: doc.name });
   } catch (e) {

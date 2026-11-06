@@ -13,6 +13,7 @@ import {
 import { checkForJSXUpdates } from '../../../libs/helper';
 import { ConfirmDialogCheckboxOption } from '../../components/confirm-dialog/confirm-dialog.component';
 import { ExportResultFile } from '../../components/export-results-modal/export-results-modal.component';
+import { SeparationProfileActionDialogResult } from '../../components/separation-profile-action-dialog/separation-profile-action-dialog.component';
 import { ControllerService } from '../../services/controller.service';
 import { DataIssuesService } from '../../services/data-issues.service';
 import { LeapSepsLogService } from '../../services/leap-seps-log.service';
@@ -2092,6 +2093,98 @@ export class SeparationColorsComponent implements OnInit, OnChanges, AfterViewIn
 				this.leapSepsLog.logError('SeparationColors', err);
 				this.dataIssues.report('plates-delete', 'Delete plates failed: ' + (err?.message || String(err)));
 			});
+	}
+
+	/* ---- Duplicate (same as the Separations tab row menu, for the SEP file open here) ---- */
+
+	duplicateDialogOpen = false;
+	duplicateExistingName = '';
+	duplicateExistingStyles: string[] = [];
+	duplicateProfileName = '';
+	isDuplicating = false;
+	/* The Separations-tab row this SEP file belongs to (dsfFindRowForSepFile). */
+	private duplicateRow: any = null;
+	private duplicateSourcePath = '';
+
+	async handleDuplicateSeparation(): Promise<void> {
+		this.leapSepsLog.logClick('Plates: Duplicate', { file: this.loadedDocPath });
+		if (this.isDuplicating || this.isRunningInBrowser) return;
+		const sepPath = this.loadedDocPath;
+		if (!sepPath) {
+			this.dataIssues.report('plates-duplicate', 'Could not duplicate: save the separation file first.');
+			return;
+		}
+		this.isDuplicating = true;
+		this.cdr.detectChanges();
+		try {
+			const res = await this.controller.findSeparationRowForSepFile(sepPath);
+			if (!res?.success || !res.row) {
+				this.dataIssues.report('plates-duplicate', 'Could not duplicate: ' + (res?.error || 'Unknown error'));
+				return;
+			}
+			this.dataIssues.clear('plates-duplicate');
+			const row = res.row;
+			this.duplicateRow = row;
+			this.duplicateSourcePath = sepPath;
+			this.duplicateExistingName = sepPath.split(/[\\/]/).pop() || '';
+			this.duplicateExistingStyles = (Array.isArray(row.styleCodes) ? row.styleCodes : [])
+				.map((c: any) => String(c || '').trim())
+				.filter(Boolean);
+			this.duplicateProfileName = String(row.kind === 'leap' ? row.profileName : row.job?.profileName || '');
+			this.duplicateDialogOpen = true;
+		} catch (err: any) {
+			this.dataIssues.report('plates-duplicate', 'Could not duplicate: ' + (err?.message || String(err)));
+		} finally {
+			this.isDuplicating = false;
+			this.cdr.detectChanges();
+		}
+	}
+
+	cancelDuplicateDialog(): void {
+		this.duplicateDialogOpen = false;
+		this.duplicateRow = null;
+		this.cdr.detectChanges();
+	}
+
+	/* Copy the SEP file for the new style, record its row, then open the copy. */
+	async confirmDuplicateDialog(result: SeparationProfileActionDialogResult): Promise<void> {
+		const row = this.duplicateRow;
+		const sourcePath = this.duplicateSourcePath;
+		this.duplicateDialogOpen = false;
+		this.duplicateRow = null;
+		const newStyle = String(result.styleNumber || '').trim();
+		const fileName = String(result.fileName || '').trim();
+		if (!row || !newStyle || !fileName || this.isDuplicating) {
+			this.cdr.detectChanges();
+			return;
+		}
+		this.isDuplicating = true;
+		this.cdr.detectChanges();
+		this.leapSepsLog.logClick('Plates: duplicate separation file for style ' + newStyle, { fileName, scalePercent: result.scalePercent });
+		try {
+			const res = await this.controller.duplicateSeparationFileForStyle({
+				sourcePath,
+				fileName,
+				newStyle,
+				scalePercent: result.scalePercent,
+				target: row.kind === 'leap'
+					? { kind: 'leap', graphicName: row.graphicName, profileName: row.profileName, groupId: row.groupId, recordDocPath: row.recordDocPath }
+					: { kind: 'standalone', job: row.job, recordDocPath: row.recordDocPath }
+			});
+			if (!res?.success) {
+				this.dataIssues.report('plates-duplicate', 'Could not duplicate the separation file: ' + (res?.error || 'Unknown error'));
+				return;
+			}
+			this.dataIssues.clear('plates-duplicate');
+			this.leapSepsLog.logInfo('SeparationColors', 'Duplicated separation file for ' + newStyle + ': ' + res.separatedDocumentPath);
+			this.controller.reportDuplicateCadMiss(res, newStyle);
+			await this.controller.openSeparationDocument(res.separatedDocumentPath);
+		} catch (err: any) {
+			this.dataIssues.report('plates-duplicate', 'Could not duplicate the separation file: ' + (err?.message || String(err)));
+		} finally {
+			this.isDuplicating = false;
+			this.cdr.detectChanges();
+		}
 	}
 
 	handleAddSelectionToSeparation(): void {
