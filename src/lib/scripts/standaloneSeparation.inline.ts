@@ -61,6 +61,11 @@ function standaloneSeparationRun(params) {
 
 	if (!graphicName) return stdSepErr("Graphic name (position) is required");
 
+	/* The document the panel records this job on (LEAPStandaloneJobs) — stamped on the SEP file so
+	   Duplicate on the Plates tab can find the row when that document is closed. */
+	var jobDocPath = "";
+	try { if (app.documents.length) jobDocPath = app.activeDocument.fullName.fsName; } catch (eJobDoc) { jobDocPath = ""; }
+
 	var rootFolder = null;
 	var docName = "";
 	var selectionItems = null;
@@ -388,6 +393,7 @@ function standaloneSeparationRun(params) {
 					graphicName: graphicName,
 					styleCodes: styleCodes,
 					standalone: true,
+					sourceDocumentPath: jobDocPath,
 					fromSelection: fromSelection,
 					exportedFilePath: exportedFilePath,
 					separationVersion: profileMetadata.separationVersion || 1

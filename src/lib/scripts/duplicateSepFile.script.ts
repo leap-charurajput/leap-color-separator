@@ -412,10 +412,58 @@ function dsfReplaceCad(doc, pngPath) {
 }
 
 /*
- * Plates tab: which row does this SEP file belong to? Looks in every open document — LEAP rows on a
- * version document, standalone / NN Pro jobs on their source document — for the entry whose
- * separatedDocumentPath is sepPath. A LEAP SEP file names its version document, which is opened when it
- * is not open yet; the SEP file is made active again afterwards. params: { sepPath }.
+ * A closed .ai file that records sepPath as one of its rows (LEAPStandaloneJobs or
+ * LEAPSeparationProfileData), looked up in the SEP file's folder and up to two folders above. Only the
+ * XMP packet is read (XMPFile), so nothing opens in Illustrator. SEP files themselves are skipped.
+ * Returns the path, or "".
+ */
+function dsfFindRecordFileOnDisk(sepPath, wanted) {
+	var ns = "http://my.LEAPColorSeparator";
+	try {
+		if (ExternalObject.AdobeXMPScript == undefined) ExternalObject.AdobeXMPScript = new ExternalObject("lib:AdobeXMPScript");
+		XMPMeta.registerNamespace(ns, "ColorSeparator");
+	} catch (eLib) { return ""; }
+	function records(path) {
+		var xf = null;
+		try {
+			xf = new XMPFile(path, XMPConst.FILE_UNKNOWN, XMPConst.OPEN_FOR_READ);
+			var xmp = xf.getXMP();
+			if (!xmp) return false;
+			var fields = ["LEAPStandaloneJobs", "LEAPSeparationProfileData"];
+			for (var f = 0; f < fields.length; f++) {
+				if (!xmp.doesStructFieldExist(ns, "ColorSeparator", ns, fields[f])) continue;
+				var rows = JSON.parse(xmp.getStructField(ns, "ColorSeparator", ns, fields[f]).value);
+				if (!(rows instanceof Array)) continue;
+				for (var r = 0; r < rows.length; r++) {
+					if (rows[r] && dsfNormPath(rows[r].separatedDocumentPath) === wanted) return true;
+				}
+			}
+		} catch (eRead) {
+		} finally {
+			try { if (xf) xf.closeFile(XMPConst.CLOSE_UPDATE_SAFELY); } catch (eClose) { }
+		}
+		return false;
+	}
+	var folder = new File(sepPath).parent;
+	for (var level = 0; level < 3 && folder; level++) {
+		var files = [];
+		try { files = folder.getFiles("*.ai"); } catch (eList) { files = []; }
+		for (var i = 0; i < files.length; i++) {
+			if (!(files[i] instanceof File)) continue;
+			if (/-SEP-/i.test(decodeURI(files[i].name))) continue;
+			if (dsfNormPath(files[i].fsName) === wanted) continue;
+			if (records(files[i].fsName)) return files[i].fsName;
+		}
+		folder = folder.parent;
+	}
+	return "";
+}
+
+/*
+ * Plates tab: which row does this SEP file belong to? The row lives on ONE document — LEAP rows on the
+ * version document, standalone / NN Pro jobs on the artwork — and the SEP file's LEAPPreparedContext names
+ * it (sourceDocumentPath). Only that document is read for the entry whose separatedDocumentPath is sepPath;
+ * it is opened when it is not open yet. params: { sepPath }.
  */
 function dsfFindRowForSepFile(params) {
 	try {
@@ -458,33 +506,42 @@ function dsfFindRowForSepFile(params) {
 			return null;
 		}
 
-		for (var d = 0; d < app.documents.length; d++) {
-			if (sepDoc && app.documents[d] === sepDoc) continue;
-			var hit = scan(app.documents[d]);
-			if (hit) return JSON.stringify({ success: true, row: hit });
-		}
-
-		/* Not open: a LEAP SEP file knows its version document. */
+		/*
+		 * The SEP file names the document that holds its row: LEAPPreparedContext.sourceDocumentPath —
+		 * the version document (LEAP) or the artwork (standalone / NN Pro, Prepare from 2026-11-05).
+		 * Only that one document is read: the open copy if it is open, else it is opened and the SEP file
+		 * made active again. Older standalone SEP files have no path; for those the .ai files near the
+		 * SEP file are checked on disk (XMP only) for the one that records it.
+		 */
 		var versionPath = "";
+		var isStandalone = false;
 		if (sepDoc) {
 			try {
 				var sx = new xmpModifier.GetXMP("http://my.LEAPColorSeparator", "ColorSeparator", sepDoc);
 				if (sx.isXmpCreated && sx.doesStructFieldExist("LEAPPreparedContext")) {
 					var ctx = sx.getStructField("LEAPPreparedContext", true) || {};
-					if (!ctx.standalone && ctx.sourceDocumentPath) versionPath = String(ctx.sourceDocumentPath);
+					isStandalone = !!ctx.standalone;
+					if (ctx.sourceDocumentPath) versionPath = String(ctx.sourceDocumentPath);
 				}
 			} catch (eC) { }
 		}
-		if (versionPath && new File(versionPath).exists) {
-			dsfLog("opening the version document " + versionPath);
-			var opened = app.open(new File(versionPath));
-			try { if (sepDoc) sepDoc.activate(); } catch (eAct) { }
-			var hit2 = opened ? scan(opened) : null;
-			if (hit2) return JSON.stringify({ success: true, row: hit2 });
+		if (!versionPath && isStandalone) {
+			versionPath = dsfFindRecordFileOnDisk(sepPath, wanted);
+			if (versionPath) dsfLog("old SEP file without a source path - found its artwork on disk: " + versionPath);
+		}
+		if (versionPath) {
+			var recordDoc = dsfOpenDocFor(versionPath);
+			if (!recordDoc && new File(versionPath).exists) {
+				dsfLog("opening " + (isStandalone ? "the artwork document " : "the version document ") + versionPath);
+				recordDoc = app.open(new File(versionPath));
+				try { if (sepDoc) sepDoc.activate(); } catch (eAct) { }
+			}
+			var hit = recordDoc ? scan(recordDoc) : null;
+			if (hit) return JSON.stringify({ success: true, row: hit });
 		}
 		return dsfErr(
 			"Could not find the row for this separation file. Open the " +
-			(versionPath ? "version document" : "artwork document") +
+			(isStandalone || !versionPath ? "artwork document" : "version document") +
 			" it was made from, then try again."
 		);
 	} catch (e) {
